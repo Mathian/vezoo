@@ -34,7 +34,8 @@ window.addEventListener('DOMContentLoaded', async () => {
 function saveState() { try { localStorage.setItem('vez_sa_state', JSON.stringify({ uid: STATE.uid, user: STATE.user })); } catch {} }
 
 function toggleAgreeCheck() {
-  _agreedCheck = !_agreedCheck;
+  const cb = document.getElementById('agree-cb');
+  _agreedCheck = cb ? cb.checked : !_agreedCheck;
   document.getElementById('agree-box').textContent = _agreedCheck ? '✓' : '';
   document.getElementById('agree-check-row').classList.toggle('checked', _agreedCheck);
   document.getElementById('agree-btn').disabled = !_agreedCheck;
