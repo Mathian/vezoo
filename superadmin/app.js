@@ -25,15 +25,13 @@ window.addEventListener('DOMContentLoaded', async () => {
   if (!STATE.uid) { showScreen('s-no-uid'); return; }
 
   let existing = await dbGet('users', STATE.uid);
-  // Если роль не superadmin — пробуем обновить (бот мог уже записать правильную роль,
-  // но локальный кэш или старая запись в Firestore могла не обновиться)
+  // Если роль не superadmin — обновляем, т.к. пользователь попал сюда через SA-бот
   if (existing && existing.role !== 'superadmin') {
-    // Принудительно обновляем роль — SA WebApp доступен только через SA-бот
     await dbSet('users', STATE.uid, { role: 'superadmin' });
-    existing = await dbGet('users', STATE.uid);
+    existing = { ...existing, role: 'superadmin' };
   }
-  if (!existing || existing.role !== 'superadmin') { showScreen('s-blocked'); return; }
-  if (!existing?.agreedSA) { STATE.user = existing; showScreen('s-agree'); return; }
+  if (!existing) { showScreen('s-blocked'); return; }
+  if (!existing.agreedSA) { STATE.user = existing; saveState(); showScreen('s-agree'); return; }
   STATE.user = existing; saveState();
   initMain();
 });
