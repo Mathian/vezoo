@@ -20,6 +20,8 @@ let _intercomChecked = false;
 let _favFilter      = false;
 let _currentReviewVenueId = null;
 let _agreedCheck = false;
+// Откуда открыли s-cart: 'venue' | 'overview'
+let _cartOpenedFrom = 'venue';
 
 // ══════════════════════════════════════════════════════════
 //  BOOT
@@ -169,12 +171,17 @@ function renderVenues(catId) {
     const cover = v.coverUrl
       ? `<img src="${v.coverUrl}" onerror="this.style.display='none'">`
       : `<span style="font-size:48px">${cat?.icon||'🏪'}</span>`;
+    // Показываем счётчик товаров в корзине прямо на карточке заведения
+    const venueCartCount = (CART[v.id] || []).reduce((s, c) => s + c.qty, 0);
+    const cartBadge = venueCartCount > 0
+      ? `<span style="background:var(--primary,#2563eb);color:#fff;border-radius:999px;font-size:11px;font-weight:700;padding:2px 8px;margin-left:6px">${venueCartCount} в корзине</span>`
+      : '';
     return `
       <div class="venue-card" onclick="openVenue('${v.id}')">
         <div class="venue-card-img">${cover}</div>
         <div class="venue-card-body">
           <div class="flex justify-between items-center">
-            <div class="venue-card-name">${v.name}</div>
+            <div class="venue-card-name">${v.name}${cartBadge}</div>
             <button class="venue-fav${isFav?' active':''}" onclick="event.stopPropagation();toggleFav('${v.id}',this)">${isFav?'❤️':'🤍'}</button>
           </div>
           <div class="venue-card-meta">
@@ -271,8 +278,10 @@ async function openVenue(venueId) {
 }
 
 function backToHome() {
-  showScreen('s-home'); setNav(document.getElementById('nav-home'));
-  document.getElementById('cart-fab').classList.add('hidden');
+  showScreen('s-home');
+  setNav(document.getElementById('nav-home'));
+  // FAB скрываем только если корзина пуста для этого заведения
+  updateCartFAB();
 }
 
 function toggleCurrentVenueFav() {
@@ -358,9 +367,12 @@ function changeQty(itemId, delta, variantName = null) {
   }
   cartItem.qty = Math.max(0, cartItem.qty + delta);
   if (cartItem.qty === 0) CART[venueId] = CART[venueId].filter(c => c.cartKey !== key);
+  // Удаляем пустую корзину заведения
+  if (CART[venueId] && CART[venueId].length === 0) delete CART[venueId];
   saveCart();
   updateMenuItemUI(itemId);
   updateCartFAB();
+  updateCartNavBadge();
 }
 
 function updateMenuItemUI(itemId) {
@@ -391,6 +403,19 @@ function updateMenuItemUI(itemId) {
   }
 }
 
+// Обновляет бейдж иконки корзины в навбаре
+function updateCartNavBadge() {
+  const venueCount = Object.keys(CART).filter(id => CART[id] && CART[id].length > 0).length;
+  const badge = document.getElementById('cart-nav-badge');
+  if (!badge) return;
+  if (venueCount > 0) {
+    badge.textContent = venueCount;
+    badge.classList.remove('hidden');
+  } else {
+    badge.classList.add('hidden');
+  }
+}
+
 function updateCartFAB() {
   const fab    = document.getElementById('cart-fab');
   const venueId = CURRENT_VENUE?.id;
@@ -402,20 +427,122 @@ function updateCartFAB() {
     fab.classList.remove('hidden');
     document.getElementById('cart-fab-count').textContent = `${count} поз.`;
     document.getElementById('cart-fab-total').textContent = fmtPrice(total);
-  } else { fab.classList.add('hidden'); }
+  } else {
+    fab.classList.add('hidden');
+  }
 }
 
 function venueCartTotal(venueId) {
   return (CART[venueId]||[]).reduce((s,c) => s+c.price*c.qty, 0);
 }
 
+// ══════════════════════════════════════════════════════════
+//  CART OVERVIEW — список всех корзин
+// ══════════════════════════════════════════════════════════
+function navToCart() {
+  showScreen('s-cart-overview');
+  renderCartOverview();
+}
+
+function renderCartOverview() {
+  const container = document.getElementById('cart-overview-content');
+  const venueIds  = Object.keys(CART).filter(id => CART[id] && CART[id].length > 0);
+
+  if (!venueIds.length) {
+    container.innerHTML = `
+      <div class="empty" style="padding-top:40px">
+        <div class="empty-icon">🛒</div>
+        <div class="empty-text">Корзина пуста</div>
+        <button class="btn btn-primary" style="margin-top:20px" onclick="navTo('s-home');setNav(document.getElementById('nav-home'))">🏪 К заведениям</button>
+      </div>`;
+    return;
+  }
+
+  container.innerHTML = venueIds.map(venueId => {
+    const venue = VENUES.find(v => v.id === venueId);
+    const venueName = venue?.name || venueId;
+    const items = CART[venueId];
+    const totalQty   = items.reduce((s, c) => s + c.qty, 0);
+    const totalPrice = items.reduce((s, c) => s + c.price * c.qty, 0);
+    const cat  = venue ? CATEGORIES.find(c => c.id === venue.categoryId) : null;
+    const icon = cat?.icon || '🏪';
+    const open = venue ? isVenueOpen(venue) : true;
+
+    const itemsPreview = items.slice(0, 3).map(c =>
+      `<div class="flex justify-between" style="font-size:13px">
+        <span>${c.emoji} ${c.name}</span>
+        <span style="color:var(--text-dim)">${c.qty} × ${fmtPrice(c.price)}</span>
+      </div>`
+    ).join('');
+    const moreCount = items.length - 3;
+
+    return `
+      <div class="card card-body" style="gap:12px">
+        <div class="flex justify-between items-center">
+          <div style="display:flex;align-items:center;gap:8px">
+            <span style="font-size:22px">${icon}</span>
+            <div>
+              <div class="font-bold" style="font-size:15px">${venueName}</div>
+              <div style="font-size:12px;color:var(--text-dim)">${totalQty} позиц. · ${fmtPrice(totalPrice)}</div>
+            </div>
+          </div>
+          <span class="${open ? 'venue-open' : 'venue-closed'}" style="font-size:12px">${open ? '● Открыто' : '● Закрыто'}</span>
+        </div>
+        <div style="display:flex;flex-direction:column;gap:4px">
+          ${itemsPreview}
+          ${moreCount > 0 ? `<div style="font-size:12px;color:var(--text-dim);margin-top:2px">и ещё ${moreCount} позиц.</div>` : ''}
+        </div>
+        <div class="divider" style="margin:0"></div>
+        <div class="btn-row">
+          <button class="btn btn-secondary btn-sm" onclick="openVenueFromCart('${venueId}')">✏️ Изменить</button>
+          <button class="btn btn-primary btn-sm" onclick="openCartFromOverview('${venueId}')">Оформить →</button>
+        </div>
+      </div>`;
+  }).join('');
+}
+
+// Открыть страницу заведения, чтобы отредактировать состав корзины
+async function openVenueFromCart(venueId) {
+  const venue = VENUES.find(v => v.id === venueId);
+  if (!venue) { showToast('Заведение не найдено', 'warning'); return; }
+  await openVenue(venueId);
+  setNav(document.getElementById('nav-home'));
+}
+
+// Открыть оформление заказа из обзора корзин
+async function openCartFromOverview(venueId) {
+  const venue = VENUES.find(v => v.id === venueId);
+  if (!venue) { showToast('Заведение не найдено', 'warning'); return; }
+  // Устанавливаем CURRENT_VENUE и подгружаем меню (нужно для submitOrder)
+  CURRENT_VENUE = venue;
+  if (!VENUE_MENU.length || VENUE_MENU[0]?.venueId !== venueId) {
+    VENUE_MENU = (await dbQuery('menu_items', 'venueId', '==', venueId)).filter(i => i.available !== false);
+  }
+  _cartOpenedFrom = 'overview';
+  renderCartScreen();
+  showScreen('s-cart');
+  document.getElementById('cart-venue-name').textContent = venue.name;
+}
+
 // ── Cart screen ──
 function openCart() {
   if (!CURRENT_VENUE) return;
+  _cartOpenedFrom = 'venue';
   renderCartScreen();
   showScreen('s-cart');
   document.getElementById('cart-fab').classList.add('hidden');
   document.getElementById('cart-venue-name').textContent = CURRENT_VENUE.name;
+}
+
+// Кнопка «назад» в s-cart: возвращает туда, откуда открыли
+function cartGoBack() {
+  if (_cartOpenedFrom === 'overview') {
+    showScreen('s-cart-overview');
+    renderCartOverview();
+  } else {
+    showScreen('s-venue');
+    updateCartFAB();
+  }
 }
 
 function renderCartScreen() {
@@ -470,6 +597,7 @@ function changeQtyCart(key, delta) {
   if (!c) return;
   changeQty(c.id, delta, c.variantName||null);
   renderCartScreen();
+  updateCartNavBadge();
 }
 
 function toggleIntercom() {
@@ -532,7 +660,10 @@ async function submitOrder() {
 
   try {
     await dbSet('orders', orderId, order);
-    CART[venueId] = []; saveCart();
+    CART[venueId] = [];
+    delete CART[venueId];
+    saveCart();
+    updateCartNavBadge();
     tgHaptic('success');
     showToast('Заказ оформлен!', 'success');
     navTo('s-orders'); setNav(document.getElementById('nav-orders'));
@@ -885,7 +1016,10 @@ async function saveAddress() {
 // ══════════════════════════════════════════════════════════
 function navTo(screenId) {
   showScreen(screenId);
-  document.getElementById('cart-fab').classList.add('hidden');
+  // FAB скрываем только если уходим с venue-экрана
+  if (screenId !== 's-venue') {
+    document.getElementById('cart-fab').classList.add('hidden');
+  }
   if (screenId === 's-home') loadVenues();
   if (screenId === 's-orders') renderAllActiveOrders();
 }
