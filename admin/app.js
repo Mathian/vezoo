@@ -44,7 +44,15 @@ function saveState() { try { localStorage.setItem('vez_admin_state', JSON.string
 
 // ── Agreement ──
 function toggleAgreeCheck() {
-  _agreedCheck = !_agreedCheck;
+  // Читаем реальное состояние чекбокса, чтобы избежать двойного срабатывания
+  const cb = document.getElementById('agree-cb');
+  // Если вызов идёт от label — браузер уже переключил чекбокс, читаем его состояние
+  // Если чекбокса нет — используем старый toggle
+  if (cb) {
+    _agreedCheck = cb.checked;
+  } else {
+    _agreedCheck = !_agreedCheck;
+  }
   document.getElementById('agree-box').textContent = _agreedCheck ? '✓' : '';
   document.getElementById('agree-check-row').classList.toggle('checked', _agreedCheck);
   document.getElementById('agree-btn').disabled = !_agreedCheck;
