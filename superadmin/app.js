@@ -24,14 +24,16 @@ window.addEventListener('DOMContentLoaded', async () => {
   if (!STATE.uid) { const tgUid = await resolveUidByTgId(); if (tgUid) { STATE.uid = tgUid; saveState(); } }
   if (!STATE.uid) { showScreen('s-no-uid'); return; }
 
-  let existing = await dbGet('users', STATE.uid);
-  // Если роль не superadmin — обновляем, т.к. пользователь попал сюда через SA-бот
-  if (existing && existing.role !== 'superadmin') {
-    await dbSet('users', STATE.uid, { role: 'superadmin' });
-    existing = { ...existing, role: 'superadmin' };
-  }
-  if (!existing) { showScreen('s-blocked'); return; }
-  if (!existing.agreedSA) { STATE.user = existing; saveState(); showScreen('s-agree'); return; }
+  // Чистим localStorage-кэш пользователя чтобы получить свежие данные из Firestore
+  try { localStorage.removeItem('vez_users_' + STATE.uid); } catch {}
+
+  // Принудительно выставляем роль superadmin — доступ сюда только через SA-бот
+  await dbSet('users', STATE.uid, { role: 'superadmin' });
+
+  // Читаем свежие данные
+  const existing = await dbGet('users', STATE.uid);
+
+  if (!existing?.agreedSA) { STATE.user = existing || { uid: STATE.uid, role: 'superadmin' }; saveState(); showScreen('s-agree'); return; }
   STATE.user = existing; saveState();
   initMain();
 });
