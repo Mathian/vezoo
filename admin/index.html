@@ -1,0 +1,290 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1.0,maximum-scale=1.0,user-scalable=no">
+<title>Vezoo — Администратор</title>
+<script src="https://www.gstatic.com/firebasejs/9.22.0/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/9.22.0/firebase-firestore-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/9.22.0/firebase-auth-compat.js"></script>
+<script src="https://telegram.org/js/telegram-web-app.js"></script>
+<link rel="stylesheet" href="../shared/style.css">
+</head>
+<body>
+
+<!-- SPLASH -->
+<div id="s-splash" class="screen active no-nav">
+  <div class="splash">
+    <div class="splash-logo">🏪</div>
+    <div class="splash-title"><span>Vezoo</span> Admin</div>
+    <div class="splash-dots"><div class="splash-dot"></div><div class="splash-dot"></div><div class="splash-dot"></div></div>
+  </div>
+</div>
+
+<!-- BLOCKED -->
+<div id="s-blocked" class="screen no-nav">
+  <div class="splash"><div class="splash-logo">🚫</div><div class="splash-title">Доступ закрыт</div><div class="splash-sub">Аккаунт заблокирован.<br>Обратитесь в поддержку.</div></div>
+</div>
+
+<!-- NO UID -->
+<div id="s-no-uid" class="screen no-nav">
+  <div class="splash"><div class="splash-logo">🤖</div><div class="splash-title">Нужен бот</div><div class="splash-sub">Откройте через Telegram-бот<br>администратора Vezoo.</div></div>
+</div>
+
+<!-- AGREEMENT -->
+<div id="s-agree" class="screen no-nav">
+  <div class="content" style="padding-top:40px;gap:20px;max-width:480px;margin:0 auto">
+    <div class="logo" style="justify-content:center;margin-bottom:8px"><div class="logo-icon">🏪</div><div class="logo-text"><span>Vezoo</span> Admin</div></div>
+    <h2 style="text-align:center">Соглашение администратора</h2>
+    <div class="agree-doc">
+      <h4>1. Статус администратора</h4>
+      <p>Администратор — владелец или представитель заведения, которое размещает товары на платформе Vezoo.</p>
+      <h4 style="margin-top:12px">2. Создание карточки заведения</h4>
+      <p>Вы обязуетесь указывать достоверную информацию о заведении: название, адрес, часы работы, категорию и актуальное меню.</p>
+      <h4 style="margin-top:12px">3. Модерация</h4>
+      <p>Каждое новое заведение проходит проверку суперадминистратором. В случае нарушений заведение может быть отключено без предупреждения.</p>
+      <h4 style="margin-top:12px">4. Ответственность</h4>
+      <p>Администратор несёт полную ответственность за качество товаров, корректность описания и своевременную обработку заказов.</p>
+      <h4 style="margin-top:12px">5. Операторы и курьеры</h4>
+      <p>Вы самостоятельно назначаете операторов и добавляете постоянных курьеров. Их действия отражаются на репутации вашего заведения.</p>
+    </div>
+    <label class="check-row" id="agree-check-row" onclick="toggleAgreeCheck()">
+      <input type="checkbox" id="agree-cb" style="display:none">
+      <div class="check-box" id="agree-box"></div>
+      <span class="check-label">Принимаю условия соглашения</span>
+    </label>
+    <button class="btn btn-primary" id="agree-btn" onclick="submitAgree()" disabled>Продолжить →</button>
+  </div>
+</div>
+
+<!-- ONBOARDING -->
+<div id="s-onboard" class="screen no-nav">
+  <div class="content" style="padding-top:60px;gap:20px;max-width:480px;margin:0 auto">
+    <div class="logo" style="justify-content:center"><div class="logo-icon">🏪</div><div class="logo-text"><span>Vezoo</span> Admin</div></div>
+    <h2 style="text-align:center">Ваше имя</h2>
+    <div class="field"><label>Имя / Название компании</label><input class="inp" id="ob-name" placeholder="Введите имя" maxlength="50"></div>
+    <button class="btn btn-primary" id="ob-btn" onclick="onboardSubmit()">Продолжить →</button>
+  </div>
+</div>
+
+<!-- CREATE VENUE -->
+<div id="s-create-venue" class="screen no-nav">
+  <div class="page-hdr"><h2>Создать заведение</h2></div>
+  <div class="content" style="gap:14px">
+    <div class="alert-box info">Заведение пройдёт модерацию. После одобрения вы получите доступ к полному функционалу.</div>
+    <div class="section">
+      <div class="section-title">Основное</div>
+      <div class="field"><label>Название заведения *</label><input class="inp" id="cv-name" placeholder="Кафе «Уют»" maxlength="80"></div>
+      <div class="field"><label>Категория *</label><select class="inp" id="cv-cat"><option value="">Выберите категорию...</option></select></div>
+      <div class="field"><label>Описание</label><textarea class="inp" id="cv-desc" rows="3" placeholder="Расскажите о заведении..." maxlength="500"></textarea></div>
+    </div>
+    <div class="section">
+      <div class="section-title">Адрес и часы</div>
+      <div class="field"><label>Адрес заведения *</label><input class="inp" id="cv-address" placeholder="ул. Абая 10, г. Алматы" maxlength="200"></div>
+      <div class="inp-row">
+        <div class="field"><label>Открытие</label><input class="inp" id="cv-work-open" type="time" value="09:00"></div>
+        <div class="field"><label>Закрытие</label><input class="inp" id="cv-work-close" type="time" value="22:00"></div>
+      </div>
+    </div>
+    <div class="section">
+      <div class="section-title">Доставка</div>
+      <div class="inp-row">
+        <div class="field"><label>Время доставки (мин)</label><input class="inp" id="cv-delivery-time" type="number" value="30" min="5" max="300"></div>
+        <div class="field"><label>Цена доставки (₸)</label><input class="inp" id="cv-delivery-price" type="number" value="500" min="0"></div>
+      </div>
+      <div class="inp-row">
+        <div class="field"><label>Время готовки (мин)</label><input class="inp" id="cv-cooking-time" type="number" value="20" min="5" max="240"></div>
+        <div class="field"><label>Мин. сумма заказа (₸)</label><input class="inp" id="cv-min-order" type="number" value="0" min="0"></div>
+      </div>
+    </div>
+    <div class="section">
+      <div class="section-title">Обложка</div>
+      <div class="field"><label>Ссылка на фото</label><input class="inp" id="cv-cover-url" placeholder="https://..." type="url"></div>
+      <div class="img-upload" id="cv-cover-upload" onclick="document.getElementById('cv-cover-file').click()">
+        <input type="file" id="cv-cover-file" accept="image/*" onchange="previewCover(this)">
+        <span class="img-upload-txt">📷 Загрузить обложку</span>
+      </div>
+    </div>
+    <button class="btn btn-primary" id="cv-btn" onclick="submitCreateVenue()">Отправить на модерацию</button>
+  </div>
+</div>
+
+<!-- PENDING MODERATION -->
+<div id="s-pending" class="screen no-nav">
+  <div class="splash">
+    <div class="splash-logo">⏳</div>
+    <div class="splash-title">На модерации</div>
+    <div class="splash-sub">Ваше заведение проверяется.<br>Обычно это занимает до 24 часов.<br><br>По вопросам свяжитесь с поддержкой.</div>
+    <button class="btn btn-ghost btn-sm" style="margin-top:16px" onclick="checkVenueStatus()">🔄 Проверить статус</button>
+  </div>
+</div>
+
+<!-- REJECTED -->
+<div id="s-rejected" class="screen no-nav">
+  <div class="splash">
+    <div class="splash-logo">❌</div>
+    <div class="splash-title">Заявка отклонена</div>
+    <div class="splash-sub">Заведение не прошло модерацию.<br>Свяжитесь с поддержкой Vezoo для уточнения причины.</div>
+    <button class="btn btn-outline btn-sm" style="margin-top:16px" onclick="resetVenueAndCreate()">🔄 Создать заново</button>
+  </div>
+</div>
+
+<!-- MAIN — MENU TAB -->
+<div id="s-menu" class="screen">
+  <div class="page-hdr">
+    <h2>Меню</h2>
+    <div class="page-hdr-end"><button class="btn btn-primary btn-sm" onclick="openAddItem()">+ Добавить</button></div>
+  </div>
+  <div id="menu-cats-tabs" class="cat-tabs" style="padding-top:8px"></div>
+  <div id="menu-items-list" style="display:flex;flex-direction:column;gap:8px;padding:0 20px 16px"></div>
+</div>
+
+<!-- MAIN — ORDERS TAB -->
+<div id="s-orders" class="screen">
+  <div class="page-hdr"><h2>Заказы</h2></div>
+  <div class="cat-tabs" style="padding-top:8px">
+    <button class="cat-tab active" onclick="loadOrders('active',this)">Активные</button>
+    <button class="cat-tab" onclick="loadOrders('pending',this)">Ожидают</button>
+    <button class="cat-tab" onclick="loadOrders('history',this)">История</button>
+  </div>
+  <div id="admin-orders-list" style="display:flex;flex-direction:column;gap:10px;padding:0 20px 16px"></div>
+</div>
+
+<!-- MAIN — STATS TAB -->
+<div id="s-stats" class="screen">
+  <div class="page-hdr"><h2>Статистика</h2></div>
+  <div class="content" style="gap:12px">
+    <div class="stats-grid" id="stats-grid"></div>
+    <div id="stats-top-items"></div>
+    <div id="stats-operators"></div>
+    <div id="stats-couriers-stat"></div>
+  </div>
+</div>
+
+<!-- MAIN — SETTINGS TAB -->
+<div id="s-settings" class="screen">
+  <div class="page-hdr"><h2>Настройки</h2></div>
+  <div class="content" style="gap:14px">
+    <div class="section">
+      <div class="section-title">Заведение</div>
+      <div class="field"><label>Название</label><input class="inp" id="set-name" placeholder="Название"></div>
+      <div class="field"><label>Адрес</label><input class="inp" id="set-address" placeholder="Адрес"></div>
+      <div class="field"><label>Описание</label><textarea class="inp" id="set-desc" rows="3"></textarea></div>
+      <div class="field"><label>Ссылка на обложку</label><input class="inp" id="set-cover" placeholder="https://..."></div>
+      <button class="btn btn-secondary btn-sm" onclick="saveVenueInfo()">💾 Сохранить</button>
+    </div>
+    <div class="section">
+      <div class="section-title">Часы работы</div>
+      <div class="inp-row">
+        <div class="field"><label>Открытие</label><input class="inp" id="set-open" type="time"></div>
+        <div class="field"><label>Закрытие</label><input class="inp" id="set-close" type="time"></div>
+      </div>
+      <button class="btn btn-secondary btn-sm" onclick="saveWorkHours()">💾 Сохранить часы</button>
+    </div>
+    <div class="section">
+      <div class="section-title">Доставка</div>
+      <div class="inp-row">
+        <div class="field"><label>Время доставки (мин)</label><input class="inp" id="set-delivery-time" type="number" min="5"></div>
+        <div class="field"><label>Цена доставки (₸)</label><input class="inp" id="set-delivery-price" type="number" min="0"></div>
+      </div>
+      <div class="inp-row">
+        <div class="field"><label>Время готовки (мин)</label><input class="inp" id="set-cooking-time" type="number" min="5"></div>
+        <div class="field"><label>Мин. сумма (₸)</label><input class="inp" id="set-min-order" type="number" min="0"></div>
+      </div>
+      <button class="btn btn-secondary btn-sm" onclick="saveDeliverySettings()">💾 Сохранить</button>
+    </div>
+    <div class="section">
+      <div class="section-title">Оператор</div>
+      <div id="current-operator-info" class="alert-box info" style="margin-bottom:8px">Оператор не назначен</div>
+      <div class="inp-row">
+        <div class="field"><label>Телефон оператора</label><input class="inp" id="op-phone" placeholder="+7..."></div>
+        <button class="btn btn-secondary btn-sm" style="margin-top:22px;flex-shrink:0" onclick="assignOperator()">Назначить</button>
+      </div>
+      <button class="btn btn-ghost btn-sm" onclick="removeOperator()" id="remove-op-btn" style="display:none">Снять оператора</button>
+    </div>
+    <div class="section">
+      <div class="section-title">Постоянные курьеры</div>
+      <div id="perm-couriers-list" style="display:flex;flex-direction:column;gap:6px;margin-bottom:8px"></div>
+      <div class="inp-row">
+        <div class="field"><label>Телефон курьера</label><input class="inp" id="courier-phone" placeholder="+7..."></div>
+        <button class="btn btn-secondary btn-sm" style="margin-top:22px;flex-shrink:0" onclick="addPermCourier()">Добавить</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- BOTTOM NAV -->
+<div class="bottom-nav" id="main-nav" style="display:none">
+  <div class="nav-item active" id="nav-menu" onclick="adminNavTo('s-menu');setNav(this);loadMenuItems()">
+    <div class="nav-icon">🍽️</div><div class="nav-label">Меню</div>
+  </div>
+  <div class="nav-item" id="nav-orders" onclick="adminNavTo('s-orders');setNav(this);loadOrders('active')">
+    <div class="nav-icon">📋</div><div class="nav-label">Заказы</div>
+    <div class="nav-badge hidden" id="orders-badge">0</div>
+  </div>
+  <div class="nav-item" id="nav-stats" onclick="adminNavTo('s-stats');setNav(this);loadStats()">
+    <div class="nav-icon">📊</div><div class="nav-label">Статистика</div>
+  </div>
+  <div class="nav-item" id="nav-settings" onclick="adminNavTo('s-settings');setNav(this);loadSettingsScreen()">
+    <div class="nav-icon">⚙️</div><div class="nav-label">Настройки</div>
+  </div>
+</div>
+
+<!-- ITEM SHEET -->
+<div class="overlay" id="item-overlay" onclick="closeItemSheet(event)">
+  <div class="sheet" id="item-sheet">
+    <div class="sheet-handle"></div>
+    <div class="sheet-title" id="item-sheet-title">Добавить позицию</div>
+    <div style="display:flex;flex-direction:column;gap:12px">
+      <div class="field"><label>Название *</label><input class="inp" id="it-name" placeholder="Название блюда" maxlength="100"></div>
+      <div class="inp-row">
+        <div class="field"><label>Категория меню</label><input class="inp" id="it-cat" placeholder="Горячее" list="menu-cats-dl"><datalist id="menu-cats-dl"></datalist></div>
+        <div class="field"><label>Эмодзи</label><input class="inp" id="it-emoji" placeholder="🍕" maxlength="4" style="text-align:center;font-size:22px"></div>
+      </div>
+      <div class="field"><label>Описание</label><textarea class="inp" id="it-desc" rows="2" placeholder="Краткое описание..." maxlength="300"></textarea></div>
+      <div class="field"><label>Ссылка на фото</label><input class="inp" id="it-img-url" placeholder="https://..." type="url"></div>
+      <div class="img-upload" id="it-img-upload" onclick="document.getElementById('it-img-file').click()">
+        <input type="file" id="it-img-file" accept="image/*" onchange="previewItemImg(this)">
+        <span class="img-upload-txt">📷 Загрузить фото</span>
+      </div>
+      <!-- Price or Variants -->
+      <div>
+        <div class="flex items-center justify-between" style="margin-bottom:8px">
+          <span class="section-title">Цена</span>
+          <label class="check-row" id="variants-toggle-row" onclick="toggleVariants()">
+            <div class="check-box" id="variants-check-box" style="width:18px;height:18px;font-size:11px"></div>
+            <span class="check-label text-sm">С вариантами (размеры)</span>
+          </label>
+        </div>
+        <div id="simple-price-wrap">
+          <div class="field"><label>Цена (₸)</label><input class="inp" id="it-price" type="number" placeholder="1500" min="0"></div>
+        </div>
+        <div id="variants-wrap" style="display:none">
+          <div id="variants-list" style="display:flex;flex-direction:column;gap:6px;margin-bottom:8px"></div>
+          <button class="btn btn-ghost btn-sm" onclick="addVariant()">+ Добавить вариант</button>
+        </div>
+      </div>
+      <label class="toggle-row">
+        <span>Доступен для заказа</span>
+        <label class="toggle"><input type="checkbox" id="it-available" checked><span class="toggle-sl"></span></label>
+      </label>
+      <div class="btn-row">
+        <button class="btn btn-ghost" onclick="closeItemSheet()">Отмена</button>
+        <button class="btn btn-primary" id="save-item-btn" onclick="saveItem()">Сохранить</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ORDER DETAIL SHEET -->
+<div class="overlay" id="order-overlay" onclick="closeOrderSheet(event)">
+  <div class="sheet">
+    <div class="sheet-handle"></div>
+    <div id="order-detail-content"></div>
+  </div>
+</div>
+
+<script src="../shared/firebase.js"></script>
+<script src="app.js"></script>
+</body>
+</html>

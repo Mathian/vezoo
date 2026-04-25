@@ -1,0 +1,153 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1.0,maximum-scale=1.0,user-scalable=no">
+<title>Vezoo — Суперадмин</title>
+<script src="https://www.gstatic.com/firebasejs/9.22.0/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/9.22.0/firebase-firestore-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/9.22.0/firebase-auth-compat.js"></script>
+<script src="https://telegram.org/js/telegram-web-app.js"></script>
+<link rel="stylesheet" href="../shared/style.css">
+</head>
+<body>
+
+<!-- SPLASH -->
+<div id="s-splash" class="screen active no-nav">
+  <div class="splash">
+    <div class="splash-logo">👑</div>
+    <div class="splash-title"><span>Vezoo</span> SA</div>
+    <div class="splash-dots"><div class="splash-dot"></div><div class="splash-dot"></div><div class="splash-dot"></div></div>
+  </div>
+</div>
+
+<div id="s-no-uid"  class="screen no-nav"><div class="splash"><div class="splash-logo">🤖</div><div class="splash-title">Нужен бот</div><div class="splash-sub">Откройте через Telegram-бот<br>суперадмина Vezoo.</div></div></div>
+<div id="s-blocked" class="screen no-nav"><div class="splash"><div class="splash-logo">🚫</div><div class="splash-title">Нет доступа</div><div class="splash-sub">Вы не являетесь суперадминистратором.</div></div></div>
+
+<!-- AGREEMENT -->
+<div id="s-agree" class="screen no-nav">
+  <div class="content" style="padding-top:40px;gap:20px;max-width:480px;margin:0 auto">
+    <div class="logo" style="justify-content:center"><div class="logo-icon">👑</div><div class="logo-text"><span>Vezoo</span> SuperAdmin</div></div>
+    <h2 style="text-align:center">Панель суперадмина</h2>
+    <div class="agree-doc">
+      <h4>Доступ к панели суперадминистратора</h4>
+      <p>Вы получаете полный контроль над платформой Vezoo: управление заведениями, курьерами, категориями и глобальными настройками.</p>
+      <h4 style="margin-top:12px">Ответственность</h4>
+      <p>Все действия в панели суперадмина логируются. Несанкционированное использование влечёт немедленную блокировку доступа.</p>
+    </div>
+    <label class="check-row" id="agree-check-row" onclick="toggleAgreeCheck()">
+      <div class="check-box" id="agree-box"></div>
+      <span class="check-label">Подтверждаю свои полномочия</span>
+    </label>
+    <button class="btn btn-primary" id="agree-btn" onclick="submitAgree()" disabled>Войти →</button>
+  </div>
+</div>
+
+<!-- CATEGORIES -->
+<div id="s-categories" class="screen">
+  <div class="page-hdr">
+    <h2>Категории</h2>
+    <div class="page-hdr-end"><button class="btn btn-primary btn-sm" onclick="openAddCategory()">+ Добавить</button></div>
+  </div>
+  <div id="categories-list" style="display:flex;flex-direction:column;gap:8px;padding:12px 20px 16px"></div>
+</div>
+
+<!-- VENUES MODERATION -->
+<div id="s-venues" class="screen">
+  <div class="page-hdr"><h2>Заведения</h2></div>
+  <div class="cat-tabs" style="padding-top:8px">
+    <button class="cat-tab active" onclick="loadVenuesByStatus('pending',this)">⏳ На модерации</button>
+    <button class="cat-tab" onclick="loadVenuesByStatus('approved',this)">✅ Активные</button>
+    <button class="cat-tab" onclick="loadVenuesByStatus('rejected',this)">❌ Отклонённые</button>
+  </div>
+  <div id="sa-venues-list" style="display:flex;flex-direction:column;gap:10px;padding:12px 20px 16px"></div>
+</div>
+
+<!-- COURIERS MODERATION -->
+<div id="s-couriers" class="screen">
+  <div class="page-hdr"><h2>Курьеры</h2></div>
+  <div class="cat-tabs" style="padding-top:8px">
+    <button class="cat-tab active" onclick="loadCouriersByStatus('pending',this)">⏳ На проверке</button>
+    <button class="cat-tab" onclick="loadCouriersByStatus('active',this)">✅ Активные</button>
+    <button class="cat-tab" onclick="loadCouriersByStatus('blocked',this)">🚫 Заблокированные</button>
+  </div>
+  <div id="sa-couriers-list" style="display:flex;flex-direction:column;gap:10px;padding:12px 20px 16px"></div>
+</div>
+
+<!-- USERS -->
+<div id="s-users" class="screen">
+  <div class="page-hdr"><h2>Пользователи</h2></div>
+  <div class="cat-tabs" style="padding-top:8px">
+    <button class="cat-tab active" onclick="loadUsersByRole('client',this)">👤 Клиенты</button>
+    <button class="cat-tab" onclick="loadUsersByRole('admin',this)">🏪 Админы</button>
+    <button class="cat-tab" onclick="loadUsersByRole('operator',this)">🎧 Операторы</button>
+  </div>
+  <div id="sa-users-list" style="display:flex;flex-direction:column;gap:8px;padding:12px 20px 16px"></div>
+</div>
+
+<!-- STATS -->
+<div id="s-sa-stats" class="screen">
+  <div class="page-hdr"><h2>Статистика</h2></div>
+  <div class="content" style="gap:12px">
+    <div class="stats-grid" id="sa-stats-grid"></div>
+    <div id="sa-stats-venues"></div>
+  </div>
+</div>
+
+<!-- BOTTOM NAV -->
+<div class="bottom-nav" id="main-nav" style="display:none">
+  <div class="nav-item active" id="nav-cats"    onclick="showScreen('s-categories');setNav(this);loadCategories()">
+    <div class="nav-icon">📂</div><div class="nav-label">Категории</div>
+  </div>
+  <div class="nav-item" id="nav-venues" onclick="showScreen('s-venues');setNav(this);loadVenuesByStatus('pending')">
+    <div class="nav-icon">🏪</div><div class="nav-label">Заведения</div>
+    <div class="nav-badge hidden" id="venues-badge">0</div>
+  </div>
+  <div class="nav-item" id="nav-couriers" onclick="showScreen('s-couriers');setNav(this);loadCouriersByStatus('pending')">
+    <div class="nav-icon">🚴</div><div class="nav-label">Курьеры</div>
+    <div class="nav-badge hidden" id="couriers-badge">0</div>
+  </div>
+  <div class="nav-item" id="nav-users" onclick="showScreen('s-users');setNav(this);loadUsersByRole('client')">
+    <div class="nav-icon">👥</div><div class="nav-label">Пользователи</div>
+  </div>
+  <div class="nav-item" id="nav-sastats" onclick="showScreen('s-sa-stats');setNav(this);loadSaStats()">
+    <div class="nav-icon">📊</div><div class="nav-label">Статистика</div>
+  </div>
+</div>
+
+<!-- CATEGORY SHEET -->
+<div class="overlay" id="cat-overlay" onclick="closeCatSheet(event)">
+  <div class="sheet">
+    <div class="sheet-handle"></div>
+    <div class="sheet-title" id="cat-sheet-title">Новая категория</div>
+    <div style="display:flex;flex-direction:column;gap:12px">
+      <div class="field"><label>Название *</label><input class="inp" id="cat-name" placeholder="Еда" maxlength="40"></div>
+      <div class="field"><label>Иконка (эмодзи)</label><input class="inp" id="cat-icon" placeholder="🍕" maxlength="4" style="font-size:24px;text-align:center"></div>
+      <div class="field"><label>Порядок сортировки</label><input class="inp" id="cat-order" type="number" value="10" min="1"></div>
+      <div class="btn-row">
+        <button class="btn btn-ghost" onclick="closeCatSheet()">Отмена</button>
+        <button class="btn btn-primary" onclick="saveCategory()">Сохранить</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- VENUE DETAIL SHEET -->
+<div class="overlay" id="venue-overlay" onclick="closeVenueSheet(event)">
+  <div class="sheet"><div class="sheet-handle"></div><div id="sa-venue-detail"></div></div>
+</div>
+
+<!-- COURIER DETAIL SHEET -->
+<div class="overlay" id="courier-detail-overlay" onclick="closeCourierDetailSheet(event)">
+  <div class="sheet"><div class="sheet-handle"></div><div id="sa-courier-detail"></div></div>
+</div>
+
+<!-- USER DETAIL SHEET -->
+<div class="overlay" id="user-overlay" onclick="closeUserSheet(event)">
+  <div class="sheet"><div class="sheet-handle"></div><div id="sa-user-detail"></div></div>
+</div>
+
+<script src="../shared/firebase.js"></script>
+<script src="app.js"></script>
+</body>
+</html>

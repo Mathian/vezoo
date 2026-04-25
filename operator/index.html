@@ -1,0 +1,158 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1.0,maximum-scale=1.0,user-scalable=no">
+<title>Vezoo — Оператор</title>
+<script src="https://www.gstatic.com/firebasejs/9.22.0/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/9.22.0/firebase-firestore-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/9.22.0/firebase-auth-compat.js"></script>
+<script src="https://telegram.org/js/telegram-web-app.js"></script>
+<link rel="stylesheet" href="../shared/style.css">
+</head>
+<body>
+
+<!-- SPLASH -->
+<div id="s-splash" class="screen active no-nav">
+  <div class="splash">
+    <div class="splash-logo">🎧</div>
+    <div class="splash-title"><span>Vezoo</span> Оператор</div>
+    <div class="splash-dots"><div class="splash-dot"></div><div class="splash-dot"></div><div class="splash-dot"></div></div>
+  </div>
+</div>
+
+<!-- BLOCKED / NO UID -->
+<div id="s-blocked" class="screen no-nav"><div class="splash"><div class="splash-logo">🚫</div><div class="splash-title">Доступ закрыт</div><div class="splash-sub">Аккаунт заблокирован.<br>Обратитесь в поддержку.</div></div></div>
+<div id="s-no-uid" class="screen no-nav"><div class="splash"><div class="splash-logo">🤖</div><div class="splash-title">Нужен бот</div><div class="splash-sub">Откройте через Telegram-бот<br>оператора Vezoo.</div></div></div>
+
+<!-- AGREEMENT -->
+<div id="s-agree" class="screen no-nav">
+  <div class="content" style="padding-top:40px;gap:20px;max-width:480px;margin:0 auto">
+    <div class="logo" style="justify-content:center"><div class="logo-icon">🎧</div><div class="logo-text"><span>Vezoo</span> Оператор</div></div>
+    <h2 style="text-align:center">Соглашение оператора</h2>
+    <div class="agree-doc">
+      <h4>1. Роль оператора</h4>
+      <p>Оператор осуществляет приём и обработку заказов для одного заведения-партнёра Vezoo. Доступ предоставляется администратором заведения.</p>
+      <h4 style="margin-top:12px">2. Обязанности</h4>
+      <p>Оператор обязан своевременно принимать входящие заказы, корректно передавать их на кухню и организовывать доставку через курьеров.</p>
+      <h4 style="margin-top:12px">3. Один оператор — одно заведение</h4>
+      <p>Оператор может работать только с одним заведением одновременно. При добавлении к новому заведению требуется отвязаться от текущего.</p>
+      <h4 style="margin-top:12px">4. Конфиденциальность</h4>
+      <p>Данные клиентов (ФИО, телефон, адрес) используются только для обработки и доставки заказов. Передача третьим лицам запрещена.</p>
+    </div>
+    <label class="check-row" id="agree-check-row" onclick="toggleAgreeCheck()">
+      <div class="check-box" id="agree-box"></div>
+      <span class="check-label">Принимаю условия соглашения</span>
+    </label>
+    <button class="btn btn-primary" id="agree-btn" onclick="submitAgree()" disabled>Продолжить →</button>
+  </div>
+</div>
+
+<!-- ONBOARDING -->
+<div id="s-onboard" class="screen no-nav">
+  <div class="content" style="padding-top:60px;gap:20px;max-width:480px;margin:0 auto">
+    <div class="logo" style="justify-content:center"><div class="logo-icon">🎧</div><div class="logo-text"><span>Vezoo</span> Оператор</div></div>
+    <h2 style="text-align:center">Как вас зовут?</h2>
+    <div class="field"><label>Ваше имя</label><input class="inp" id="ob-name" placeholder="Введите имя" maxlength="50"></div>
+    <button class="btn btn-primary" id="ob-btn" onclick="onboardSubmit()">Продолжить →</button>
+  </div>
+</div>
+
+<!-- NO VENUE ASSIGNED -->
+<div id="s-no-venue" class="screen no-nav">
+  <div class="splash">
+    <div class="splash-logo">🏪</div>
+    <div class="splash-title">Ожидание</div>
+    <div class="splash-sub">Вас ещё не добавили<br>к заведению.<br><br>Сообщите администратору<br>ваш номер телефона.</div>
+    <button class="btn btn-ghost btn-sm" style="margin-top:16px" onclick="checkVenueAssignment()">🔄 Проверить</button>
+  </div>
+</div>
+
+<!-- CONFIRM VENUE -->
+<div id="s-confirm-venue" class="screen no-nav">
+  <div class="content" style="padding-top:60px;gap:20px;max-width:480px;margin:0 auto">
+    <div style="text-align:center;font-size:56px;margin-bottom:8px">🏪</div>
+    <h2 style="text-align:center">Приглашение</h2>
+    <div class="card card-body" id="invite-venue-card">
+      <div class="font-bold" id="invite-venue-name">Заведение</div>
+      <div class="text-dim text-sm mt-1" id="invite-venue-addr">Адрес</div>
+    </div>
+    <p class="text-dim" style="text-align:center;font-size:14px">Вас приглашают работать оператором в этом заведении.</p>
+    <div class="btn-row">
+      <button class="btn btn-ghost" onclick="declineVenueInvite()">Отклонить</button>
+      <button class="btn btn-primary" onclick="acceptVenueInvite()">Принять ✓</button>
+    </div>
+  </div>
+</div>
+
+<!-- MAIN — NEW ORDERS -->
+<div id="s-new-orders" class="screen">
+  <div class="page-hdr">
+    <div class="logo"><div class="logo-icon">🎧</div><div class="logo-text" id="op-venue-name-hdr" style="font-size:15px">Заведение</div></div>
+    <div class="page-hdr-end"><span class="badge badge-num hidden" id="new-orders-badge">0</span></div>
+  </div>
+  <div id="new-orders-alert" class="hidden" style="padding:12px 20px 0">
+    <div class="alert-banner">
+      <span style="font-size:20px">🔔</span>
+      <div><div style="font-weight:700;font-size:14px">Новые заказы!</div><div style="font-size:12px;color:var(--text-dim)">Нажмите на заказ для обработки</div></div>
+    </div>
+  </div>
+  <div id="new-orders-list" style="display:flex;flex-direction:column;gap:10px;padding:12px 20px 16px"></div>
+</div>
+
+<!-- MAIN — ACTIVE ORDERS -->
+<div id="s-active-orders" class="screen">
+  <div class="page-hdr"><h2>Активные</h2></div>
+  <div id="active-orders-list" style="display:flex;flex-direction:column;gap:10px;padding:12px 20px 16px"></div>
+</div>
+
+<!-- MAIN — HISTORY -->
+<div id="s-op-history" class="screen">
+  <div class="page-hdr">
+    <h2>История</h2>
+    <div class="page-hdr-end"><input class="inp" id="hist-date" type="date" style="width:140px;padding:8px 10px;font-size:13px" onchange="loadOpHistory()"></div>
+  </div>
+  <div id="op-history-list" style="display:flex;flex-direction:column;gap:10px;padding:12px 20px 16px"></div>
+</div>
+
+<!-- BOTTOM NAV -->
+<div class="bottom-nav" id="main-nav" style="display:none">
+  <div class="nav-item active" id="nav-new" onclick="showScreen('s-new-orders');setNav(this)">
+    <div class="nav-icon">🔔</div><div class="nav-label">Новые</div>
+    <div class="nav-badge hidden" id="new-badge">0</div>
+  </div>
+  <div class="nav-item" id="nav-active" onclick="showScreen('s-active-orders');setNav(this)">
+    <div class="nav-icon">⚡</div><div class="nav-label">Активные</div>
+  </div>
+  <div class="nav-item" id="nav-hist" onclick="showScreen('s-op-history');setNav(this);loadOpHistory()">
+    <div class="nav-icon">📋</div><div class="nav-label">История</div>
+  </div>
+</div>
+
+<!-- ORDER DETAIL SHEET -->
+<div class="overlay" id="order-overlay" onclick="closeOrderSheet(event)">
+  <div class="sheet"><div class="sheet-handle"></div><div id="op-order-detail"></div></div>
+</div>
+
+<!-- COURIER SELECT SHEET -->
+<div class="overlay" id="courier-overlay" onclick="closeCourierSheet(event)">
+  <div class="sheet">
+    <div class="sheet-handle"></div>
+    <div class="sheet-title">Выбрать курьера</div>
+    <div id="courier-select-list" style="display:flex;flex-direction:column;gap:8px"></div>
+    <button class="btn btn-ghost" style="margin-top:12px" onclick="closeCourierSheet()">Закрыть</button>
+  </div>
+</div>
+
+<!-- FULL-SCREEN NOTIFICATIONS -->
+<div class="fs-notif" id="notif-delivered-op">
+  <div class="fs-notif-icon success">✅</div>
+  <div class="fs-notif-title">Доставлено!</div>
+  <div class="fs-notif-text" id="notif-delivered-op-text">Заказ доставлен клиенту.</div>
+  <button class="btn btn-primary" onclick="document.getElementById('notif-delivered-op').classList.remove('open')">Принято</button>
+</div>
+
+<script src="../shared/firebase.js"></script>
+<script src="app.js"></script>
+</body>
+</html>
