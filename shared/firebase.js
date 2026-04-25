@@ -275,8 +275,20 @@ async function resolveUidByTgId() {
 
 // ─────────────────────── State helpers ───────────────────────
 function readUidFromUrl() {
+  // 1. Telegram WebApp start_param (передаётся через ?startapp= или бот /start uid_xxx)
+  const startParam = tg?.initDataUnsafe?.start_param || '';
+  if (startParam && startParam.startsWith('u_') && startParam.length > 5) {
+    return startParam;
+  }
+  // 2. Telegram WebApp передаёт параметры через tgWebAppStartParam в hash
+  try {
+    const hash = new URLSearchParams(location.hash.replace('#', ''));
+    const hashUid = hash.get('tgWebAppStartParam') || hash.get('uid');
+    if (hashUid && hashUid.length > 5) return hashUid;
+  } catch {}
+  // 3. Прямой ?uid= в URL (fallback для тестирования в браузере)
   const p = new URLSearchParams(location.search);
-  const uid = p.get('uid');
+  const uid = p.get('uid') || p.get('tgWebAppStartParam');
   if (uid && uid.length > 5) {
     history.replaceState(null, '', location.pathname);
     return uid;
