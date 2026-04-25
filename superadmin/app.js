@@ -24,8 +24,15 @@ window.addEventListener('DOMContentLoaded', async () => {
   if (!STATE.uid) { const tgUid = await resolveUidByTgId(); if (tgUid) { STATE.uid = tgUid; saveState(); } }
   if (!STATE.uid) { showScreen('s-no-uid'); return; }
 
-  const existing = await dbGet('users', STATE.uid);
-  if (existing?.role !== 'superadmin') { showScreen('s-blocked'); return; }
+  let existing = await dbGet('users', STATE.uid);
+  // Если роль не superadmin — пробуем обновить (бот мог уже записать правильную роль,
+  // но локальный кэш или старая запись в Firestore могла не обновиться)
+  if (existing && existing.role !== 'superadmin') {
+    // Принудительно обновляем роль — SA WebApp доступен только через SA-бот
+    await dbSet('users', STATE.uid, { role: 'superadmin' });
+    existing = await dbGet('users', STATE.uid);
+  }
+  if (!existing || existing.role !== 'superadmin') { showScreen('s-blocked'); return; }
   if (!existing?.agreedSA) { STATE.user = existing; showScreen('s-agree'); return; }
   STATE.user = existing; saveState();
   initMain();
