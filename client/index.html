@@ -144,11 +144,19 @@
   </div>
 </div>
 
-<!-- CART -->
+<!-- CART OVERVIEW — все корзины -->
+<div id="s-cart-overview" class="screen">
+  <div class="page-hdr">
+    <h2>Корзина</h2>
+  </div>
+  <div id="cart-overview-content" class="content" style="gap:14px"></div>
+</div>
+
+<!-- CART — оформление заказа конкретного заведения -->
 <div id="s-cart" class="screen">
   <div class="page-hdr">
-    <button class="back-btn" onclick="showScreen('s-venue');updateCartFAB()">←</button>
-    <h2>Корзина</h2>
+    <button class="back-btn" id="cart-back-btn" onclick="cartGoBack()">←</button>
+    <h2>Оформление</h2>
     <div class="page-hdr-end" id="cart-venue-name" style="font-size:13px;color:var(--text-dim)"></div>
   </div>
   <div class="content" style="gap:14px">
@@ -243,6 +251,10 @@
 <div class="bottom-nav" id="main-nav" style="display:none">
   <div class="nav-item active" id="nav-home" onclick="navTo('s-home');setNav(this)">
     <div class="nav-icon">🏠</div><div class="nav-label">Главная</div>
+  </div>
+  <div class="nav-item" id="nav-cart" onclick="navToCart();setNav(this)">
+    <div class="nav-icon">🛒</div><div class="nav-label">Корзина</div>
+    <div class="nav-badge hidden" id="cart-nav-badge">0</div>
   </div>
   <div class="nav-item" id="nav-orders" onclick="navToOrders();setNav(this)">
     <div class="nav-icon">📦</div><div class="nav-label">Заказы</div>
