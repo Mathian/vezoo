@@ -260,8 +260,16 @@ async function resolveUidByTgId() {
   try {
     const tgUser = tg?.initDataUnsafe?.user;
     if (!tgUser?.id) return null;
-    const idx = await dbGet('uid_index', String(tgUser.id));
-    return idx?.uid || null;
+    const tgIdStr = String(tgUser.id);
+    // Bot saves uid_index/{tgId} after phone share
+    const idx = await dbGet('uid_index', tgIdStr);
+    if (idx?.uid) return idx.uid;
+    // Fallback: scan users collection by tgId field
+    if (_fbR) {
+      const snap = await db.collection('users').where('tgId', '==', tgIdStr).limit(1).get();
+      if (!snap.empty) return snap.docs[0].data().uid || snap.docs[0].id;
+    }
+    return null;
   } catch { return null; }
 }
 
@@ -269,7 +277,7 @@ async function resolveUidByTgId() {
 function readUidFromUrl() {
   const p = new URLSearchParams(location.search);
   const uid = p.get('uid');
-  if (uid && uid.length === 64) {
+  if (uid && uid.length > 5) {
     history.replaceState(null, '', location.pathname);
     return uid;
   }
