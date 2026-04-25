@@ -328,3 +328,18 @@ function showToast(msg, type = 'info', dur = 3000) {
 const _ts = document.createElement('style');
 _ts.textContent = '@keyframes toastIn{from{opacity:0;transform:translateY(-10px)}to{opacity:1;transform:translateY(0)}}';
 document.head.appendChild(_ts);
+
+// ─────────────────────── Agreement checkbox ───────────────────────
+// Универсальная функция для всех ролей — живёт в shared/firebase.js
+function toggleAgreeCheck() {
+  const cb  = document.getElementById('agree-cb');
+  const box = document.getElementById('agree-box');
+  const row = document.getElementById('agree-check-row');
+  const btn = document.getElementById('agree-btn');
+  // Читаем реальное состояние: если есть скрытый <input type="checkbox">,
+  // браузер уже переключил его когда пользователь кликнул на <label>
+  const checked = cb ? cb.checked : (box?.textContent !== '✓');
+  if (box) box.textContent = checked ? '✓' : '';
+  if (row) row.classList.toggle('checked', checked);
+  if (btn) btn.disabled = !checked;
+}
