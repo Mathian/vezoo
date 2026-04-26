@@ -13,7 +13,6 @@ let _shownAssigned  = new Set();
 let _agreedCheck    = false;
 let _venueInvite    = null;
 let _acceptOrderId  = null;
-let _raisedHands    = new Set(); // orderIds I've raised hand for
 
 // ══════════════════════════════════════════════════════════
 //  BOOT
@@ -148,10 +147,6 @@ async function toggleShift(input) {
 //  AVAILABLE ORDERS
 // ══════════════════════════════════════════════════════════
 async function watchAvailableOrders() {
-  // Pre-load already raised hands from this session
-  const myReqs = await dbQuery('order_requests', 'courierUid', '==', STATE.uid);
-  _raisedHands = new Set(myReqs.map(r => r.orderId));
-
   if (_availUnsub) { _availUnsub(); _availUnsub = null; }
   _availUnsub = onQuerySnap('orders', 'status', '==', 'searching_courier', orders => {
     _availOrders = orders.filter(o => !o.courierUid);
@@ -171,10 +166,8 @@ function renderAvailableOrders() {
   // Sort: primary venue orders first
   const myVenue = COURIER_DATA?.primaryVenueId;
   const sorted = [..._availOrders].sort((a,_) => a.venueId === myVenue ? -1 : 1);
-  list.innerHTML = sorted.map(o => {
-    const raised = _raisedHands.has(o.id);
-    return `
-    <div class="delivery-card" style="cursor:pointer">
+  list.innerHTML = sorted.map(o => `
+    <div class="delivery-card" onclick="openAcceptSheet('${o.id}')" style="cursor:pointer">
       <div class="delivery-card-hdr">
         <div><div class="font-bold" style="font-size:14px">🏪 ${o.venueName||'Заведение'}</div><div class="text-xs text-dim">${fmtDate(o.createdAt)}</div></div>
         <div class="text-primary font-bold">${fmtPrice(o.deliveryPrice||0)}</div>
@@ -184,14 +177,8 @@ function renderAvailableOrders() {
         <div class="flex items-center gap-2"><span>💰</span><span>${fmtPrice(o.total+(o.deliveryPrice||0))}</span><span class="text-dim">· ${o.payment==='cash'?'Наличные':'Карта'}</span></div>
         ${o.venueId===myVenue?'<div class="pill" style="margin-top:4px;font-size:10px;width:fit-content">⭐ Ваше кафе</div>':''}
       </div>
-      <div class="delivery-card-foot">
-        ${raised
-          ? `<div class="pill" style="font-size:12px;padding:6px 14px;background:var(--success)">✋ Вы откликнулись — ждите назначения</div>`
-          : `<button class="btn btn-primary btn-sm" onclick="openAcceptSheet('${o.id}')">✋ Откликнуться</button>`
-        }
-      </div>
-    </div>`;
-  }).join('');
+      <div class="delivery-card-foot"><button class="btn btn-primary btn-sm" onclick="event.stopPropagation();openAcceptSheet('${o.id}')">✅ Принять заказ →</button></div>
+    </div>`).join('');
 }
 
 async function openAcceptSheet(orderId) {
@@ -215,26 +202,25 @@ async function openAcceptSheet(orderId) {
     </div>
     <div class="btn-row">
       <button class="btn btn-ghost" onclick="closeAcceptSheet()">Отмена</button>
-      <button class="btn btn-primary" onclick="raiseHand('${order.id}')">✋ Откликнуться</button>
+      <button class="btn btn-primary" onclick="acceptOrder('${order.id}')">✅ Принять заказ</button>
     </div>`;
   document.getElementById('accept-overlay').classList.add('open'); tg?.BackButton?.show();
 }
 
-async function raiseHand(orderId) {
-  // Record courier's interest — operator will assign from list
-  const reqId = orderId + '_' + STATE.uid;
-  await dbSet('order_requests', reqId, {
-    orderId,
-    courierUid:   STATE.uid,
-    courierName:  COURIER_DATA?.name || 'Курьер',
-    courierPhone: COURIER_DATA?.phone || '',
-    requestedAt:  new Date().toISOString()
+async function acceptOrder(orderId) {
+  // Курьер принимает заказ — автоматически назначается ему
+  await dbSet('orders', orderId, {
+    status: 'delivering',
+    courierUid: STATE.uid,
+    courierName: COURIER_DATA?.name || 'Курьер',
+    assignedAt: new Date().toISOString(),
+    clientNotification: { type: 'delivering', seen: false, message: `Курьер везёт ваш заказ!` }
   });
-  _raisedHands.add(orderId);
   closeAcceptSheet();
   tgHaptic('success');
-  showToast('Вы откликнулись! Ожидайте назначения оператором.', 'success');
-  renderAvailableOrders(); // refresh to show "raised" state
+  showToast('Заказ принят! Везёте вы.', 'success');
+  showScreen('s-my-orders');
+  setNav(document.getElementById('nav-my'));
 }
 
 function closeAcceptSheet(e) {
@@ -352,9 +338,6 @@ async function courierDeliver(orderId) {
 async function courierReturn(orderId) {
   const doReturn = async () => {
     await dbSet('orders', orderId, { status: 'searching_courier', courierUid: null, courierName: null, returnAt: new Date().toISOString() });
-    // Remove my raise-hand request too
-    await dbDelete('order_requests', orderId + '_' + STATE.uid);
-    _raisedHands.delete(orderId);
     closeMyOrderSheet(); tgHaptic('light'); showToast('Возврат оформлен', 'info');
   };
   if (tg?.showConfirm) tg.showConfirm('Вернуть заказ оператору?', ok => { if (ok) doReturn(); });

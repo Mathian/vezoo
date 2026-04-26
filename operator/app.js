@@ -265,7 +265,7 @@ async function openOrderDetail(orderId) {
   const addr = order.address;
   let actionBtns = '';
 
-  const cancelBtn = `<button class="btn btn-danger btn-sm" onclick="opCancelOrder('${orderId}')">❌ Отменить</button>`;
+  const cancelBtn = `<button class="btn btn-danger btn-sm" onclick="opCancelOrder('${orderId}')">❌ Отменить заказ</button>`;
 
   if (order.status === 'pending') {
     actionBtns = `
@@ -274,23 +274,33 @@ async function openOrderDetail(orderId) {
         <button class="btn btn-primary btn-sm" onclick="opAcceptOrder('${orderId}')">✅ Принять</button>
       </div>`;
   } else if (order.status === 'accepted' || order.status === 'cooking') {
+    // Два варианта: искать (курьер сам примет) или назначить напрямую (постоянный курьер)
     actionBtns = `
-      <div class="btn-row">
+      <div style="display:flex;flex-direction:column;gap:8px">
+        <div class="btn-row">
+          <button class="btn btn-secondary btn-sm" onclick="opSearchCourier('${orderId}')">🔍 Искать курьера</button>
+          <button class="btn btn-primary btn-sm" onclick="opOpenAssignCourier('${orderId}')">👤 Назначить напрямую</button>
+        </div>
         ${cancelBtn}
-        <button class="btn btn-secondary btn-sm" onclick="opSearchCourier('${orderId}')">🔍 Ищем курьера</button>
       </div>`;
   } else if (order.status === 'searching_courier') {
+    // Заявка размещена — ждём курьера, но можно назначить напрямую
     actionBtns = `
-      <div class="btn-row">
+      <div class="alert-box info" style="margin-bottom:8px;font-size:13px">⏳ Заявка размещена — ждём, когда курьер примет заказ</div>
+      <div style="display:flex;flex-direction:column;gap:8px">
+        <button class="btn btn-primary btn-sm" onclick="opOpenAssignCourier('${orderId}')">👤 Назначить напрямую</button>
         ${cancelBtn}
-        <button class="btn btn-primary btn-sm" onclick="opOpenAssignCourier('${orderId}')">🚴 Назначить курьера</button>
       </div>`;
   } else if (order.status === 'delivering') {
+    // Курьер везёт — можно снять его и заново найти/назначить
     actionBtns = `
-      <div class="alert-box primary" style="text-align:center;margin-bottom:8px">🚴 Курьер: <strong>${order.courierName || '—'}</strong></div>
-      <div class="btn-row">
+      <div class="alert-box success" style="text-align:center;margin-bottom:8px">🚴 Курьер: <strong>${order.courierName || '—'}</strong></div>
+      <div style="display:flex;flex-direction:column;gap:8px">
+        <div class="btn-row">
+          <button class="btn btn-ghost btn-sm" onclick="opSearchCourier('${orderId}')">🔍 Найти нового</button>
+          <button class="btn btn-ghost btn-sm" onclick="opOpenAssignCourier('${orderId}')">👤 Назначить другого</button>
+        </div>
         ${cancelBtn}
-        <button class="btn btn-ghost btn-sm" onclick="opUnassignCourier('${orderId}')">🔄 Переназначить</button>
       </div>`;
   } else if (order.status === 'delivered' || order.status === 'cancelled') {
     actionBtns = '';
@@ -382,10 +392,16 @@ async function opUnassignCourier(orderId) {
 }
 
 async function opSearchCourier(orderId) {
-  await dbSet('orders', orderId, { status: 'searching_courier', updatedAt: new Date().toISOString() });
+  // При вызове из статуса delivering — снимаем текущего курьера
+  await dbSet('orders', orderId, {
+    status: 'searching_courier',
+    courierUid: null,
+    courierName: null,
+    updatedAt: new Date().toISOString()
+  });
   closeOrderSheet();
   tgHaptic('light');
-  showToast('Ищем курьера...', 'info');
+  showToast('Заявка размещена — ждём курьера', 'info');
 }
 
 async function opOpenAssignCourier(orderId) {
@@ -396,38 +412,22 @@ async function opOpenAssignCourier(orderId) {
   document.getElementById('order-overlay').classList.remove('open');
   _openSheet('courier-overlay');
 
-  // 1. Couriers who raised their hand for this specific order
-  const requests   = await dbQuery('order_requests', 'orderId', '==', orderId);
-
-  // 2. Permanent on-shift couriers for this venue
-  const permLinks  = await dbQuery('courier_venue_links', 'venueId', '==', VENUE.id);
-  const permUids   = permLinks.filter(l => l.status === 'confirmed').map(l => l.uid);
+  // Постоянные курьеры этого заведения, которые сейчас на смене
+  const permLinks   = await dbQuery('courier_venue_links', 'venueId', '==', VENUE.id);
+  const permUids    = permLinks.filter(l => l.status === 'confirmed').map(l => l.uid);
   const allCouriers = await dbQuery('couriers', 'onShift', '==', true);
-  const onShift     = allCouriers.filter(c => c.status === 'active');
-  const permOnShift = onShift.filter(c => permUids.includes(c.uid));
+  const available   = allCouriers.filter(c => c.status === 'active' && permUids.includes(c.uid));
 
-  // Combine: raised hand first, then perm on-shift (deduplicated)
-  const requestUids = requests.map(r => r.courierUid);
-  const requestCouriers = requests.map(r => ({
-    uid: r.courierUid, name: r.courierName, phone: r.courierPhone || '', _raised: true
-  }));
-  const permExtra = permOnShift.filter(c => !requestUids.includes(c.uid));
-
-  const combined = [...requestCouriers, ...permExtra.map(c => ({ ...c, _perm: true }))];
-
-  if (!combined.length) {
-    listEl.innerHTML = `<div class="empty" style="padding:24px"><div class="empty-icon">🚴</div><div class="empty-text">Нет доступных курьеров.<br>Ни один не откликнулся на заказ.</div></div>`;
+  if (!available.length) {
+    listEl.innerHTML = `<div class="empty" style="padding:24px"><div class="empty-icon">🚴</div><div class="empty-text">Нет постоянных курьеров на смене.<br>Сначала добавьте их в настройках заведения.</div></div>`;
     return;
   }
 
-  listEl.innerHTML = combined.map(c => `
+  listEl.innerHTML = available.map(c => `
     <div class="list-item" onclick="opAssignCourier('${c.uid}','${(c.name||'Курьер').replace(/'/g,'')}')">
       <div class="li-icon yellow">🚴</div>
       <div class="li-body">
-        <div class="li-title">${c.name||'—'}
-          ${c._raised ? ' <span class="pill" style="font-size:10px;background:var(--success)">✋ Откликнулся</span>' : ''}
-          ${c._perm   ? ' <span class="pill" style="font-size:10px">Постоянный</span>' : ''}
-        </div>
+        <div class="li-title">${c.name||'—'} <span class="pill" style="font-size:10px">Постоянный</span></div>
         <div class="li-sub">${c.phone||''}</div>
       </div>
       <div class="chevron">›</div>
@@ -443,9 +443,6 @@ async function opAssignCourier(courierUid, courierName) {
     assignedAt: new Date().toISOString(),
     clientNotification: { type: 'delivering', seen: false, message: `Курьер ${courierName} везёт ваш заказ!` }
   });
-  // Clean up all requests for this order
-  const reqs = await dbQuery('order_requests', 'orderId', '==', _assignOrderId);
-  for (const r of reqs) await dbDelete('order_requests', r.id);
   closeCourierSheet();
   tgHaptic('success');
   showToast(`Назначен курьер: ${courierName}`, 'success');

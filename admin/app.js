@@ -463,26 +463,33 @@ function renderAdminOrderActions(order) {
   const blBtn = order.clientUid
     ? `<button class="btn btn-ghost btn-sm" style="margin-top:8px;color:var(--danger)" onclick="adminBlacklistClient('${order.clientUid}','${(order.clientPhone||'').replace(/'/g,'')}')">🚫 В чёрный список</button>`
     : '';
+  const cancelBtn = `<button class="btn btn-danger btn-sm" onclick="adminCancelOrder('${order.id}')">❌ Отменить</button>`;
   if (order.status === 'pending') return `
-    <div class="btn-row">
-      <button class="btn btn-danger btn-sm" onclick="adminCancelOrder('${order.id}')">❌ Отменить</button>
+    <div class="btn-row">${cancelBtn}
       <button class="btn btn-success btn-sm" onclick="adminAcceptOrder('${order.id}')">✅ Принять</button>
     </div>${blBtn}`;
   if (order.status === 'accepted' || order.status === 'cooking') return `
-    <div class="btn-row">
-      <button class="btn btn-danger btn-sm" onclick="adminCancelOrder('${order.id}')">❌ Отменить</button>
-      <button class="btn btn-primary btn-sm" onclick="adminSearchCourier('${order.id}')">🔍 Искать курьера</button>
+    <div style="display:flex;flex-direction:column;gap:8px">
+      <div class="btn-row">
+        <button class="btn btn-secondary btn-sm" onclick="adminSearchCourier('${order.id}')">🔍 Искать курьера</button>
+        <button class="btn btn-primary btn-sm" onclick="openAssignCourier('${order.id}')">👤 Назначить напрямую</button>
+      </div>
+      ${cancelBtn}
     </div>${blBtn}`;
   if (order.status === 'searching_courier') return `
-    <div class="btn-row">
-      <button class="btn btn-danger btn-sm" onclick="adminCancelOrder('${order.id}')">❌ Отменить</button>
-      <button class="btn btn-secondary btn-sm" onclick="openAssignCourier('${order.id}')">👤 Назначить курьера</button>
+    <div style="display:flex;flex-direction:column;gap:8px">
+      <div class="alert-box info" style="font-size:13px">⏳ Ждём курьера…</div>
+      <button class="btn btn-primary btn-sm" onclick="openAssignCourier('${order.id}')">👤 Назначить напрямую</button>
+      ${cancelBtn}
     </div>${blBtn}`;
   if (order.status === 'delivering') return `
-    <div class="alert-box success">🚴 Заказ передан курьеру ${order.courierName||''}</div>
-    <div class="btn-row" style="margin-top:8px">
-      <button class="btn btn-ghost btn-sm" onclick="adminCancelOrder('${order.id}')">❌ Отменить</button>
-      <button class="btn btn-ghost btn-sm" onclick="adminRetransferOrder('${order.id}')">🔄 Переназначить</button>
+    <div style="display:flex;flex-direction:column;gap:8px">
+      <div class="alert-box success">🚴 Курьер: <strong>${order.courierName||''}</strong></div>
+      <div class="btn-row">
+        <button class="btn btn-ghost btn-sm" onclick="adminSearchCourier('${order.id}')">🔍 Найти нового</button>
+        <button class="btn btn-ghost btn-sm" onclick="openAssignCourier('${order.id}')">👤 Назначить другого</button>
+      </div>
+      ${cancelBtn}
     </div>${blBtn}`;
   return blBtn;
 }
@@ -523,28 +530,18 @@ async function openAssignCourier(orderId) {
   document.getElementById('order-overlay').classList.remove('open');
   _openSheet('courier-overlay');
 
-  // Couriers who raised hand
-  const requests    = await dbQuery('order_requests', 'orderId', '==', orderId);
-  const requestUids = requests.map(r => r.courierUid);
-
-  // Permanent on-shift couriers
+  // Only permanent on-shift couriers
   const onShiftCouriers = (await dbQuery('couriers','onShift','==',true)).filter(c => c.status === 'active');
   const permLinks  = await dbQuery('courier_venue_links','venueId','==',VENUE.id);
   const permUids   = permLinks.filter(l => l.status === 'confirmed').map(l => l.uid);
-  const permOnShift = onShiftCouriers.filter(c => permUids.includes(c.uid) && !requestUids.includes(c.uid));
+  const permOnShift = onShiftCouriers.filter(c => permUids.includes(c.uid));
 
-  const raisedRows = requests.map(r => ({ uid: r.courierUid, name: r.courierName, phone: r.courierPhone||'', _raised: true }));
-  const combined   = [...raisedRows, ...permOnShift.map(c => ({ ...c, _perm: true }))];
-
-  if (!combined.length) { listEl.innerHTML = '<div class="empty"><div class="empty-text">Нет доступных курьеров. Ни один не откликнулся.</div></div>'; return; }
-  listEl.innerHTML = combined.map(c => `
+  if (!permOnShift.length) { listEl.innerHTML = '<div class="empty"><div class="empty-text">Нет постоянных курьеров на смене</div></div>'; return; }
+  listEl.innerHTML = permOnShift.map(c => `
     <div class="list-item" onclick="assignCourier('${c.uid}','${(c.name||'Курьер').replace(/'/g,'')}')">
       <div class="li-icon yellow">🚴</div>
       <div class="li-body">
-        <div class="li-title">${c.name||'—'}
-          ${c._raised?' <span class="pill" style="font-size:10px;background:var(--success)">✋ Откликнулся</span>':''}
-          ${c._perm  ?' <span class="pill" style="font-size:10px">Постоянный</span>':''}
-        </div>
+        <div class="li-title">${c.name||'—'} <span class="pill" style="font-size:10px">Постоянный</span></div>
         <div class="li-sub">${c.phone||''}</div>
       </div>
       <div class="chevron">›</div>
@@ -554,8 +551,6 @@ async function openAssignCourier(orderId) {
 async function assignCourier(courierUid, courierName) {
   if (!_assignOrderId) return;
   await dbSet('orders', _assignOrderId, { status: 'delivering', courierUid, courierName, assignedAt: new Date().toISOString(), clientNotification: { type: 'delivering', seen: false, message: `Курьер ${courierName} везёт ваш заказ!` } });
-  const reqs = await dbQuery('order_requests', 'orderId', '==', _assignOrderId);
-  for (const r of reqs) await dbDelete('order_requests', r.id);
   closeCourierSheet(); tgHaptic('success'); showToast(`Заказ назначен курьеру ${courierName}`, 'success');
   await loadOrders(_ordersTab);
 }
