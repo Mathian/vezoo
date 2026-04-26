@@ -48,11 +48,21 @@ window.addEventListener('DOMContentLoaded', async () => {
   if (!existing) { showScreen('s-no-uid'); return; }
   if (existing.blocked) { showScreen('s-blocked'); return; }
   if (!existing.agreedOperator) { STATE.user = existing; saveState(); showScreen('s-agree'); return; }
-  if (!existing.name) { STATE.user = existing; saveState(); showScreen('s-onboard'); return; }
-
+  // Auto-set name from Telegram if missing (no onboard screen)
+  if (!existing.name) {
+    const autoName = _getTgName() || existing.firstName || 'Пользователь';
+    await dbSet('users', STATE.uid, { name: autoName });
+    existing.name = autoName;
+  }
   STATE.user = existing; saveState();
   await checkVenueAssignment();
 });
+
+function _getTgName() {
+  const u = tg?.initDataUnsafe?.user;
+  if (!u) return null;
+  return (u.first_name + (u.last_name ? ' ' + u.last_name : '')).trim() || null;
+}
 
 function saveState() {
   const tgUserId = tg?.initDataUnsafe?.user?.id ? String(tg.initDataUnsafe.user.id) : null;
@@ -68,28 +78,26 @@ function toggleAgreeCheck() {
 }
 
 async function submitAgree() {
-  await dbSet('users', STATE.uid, { agreedOperator: true });
-  STATE.user = { ...(STATE.user || {}), agreedOperator: true }; saveState();
-  if (!STATE.user?.name) { showScreen('s-onboard'); return; }
-  await checkVenueAssignment();
-}
-
-// ── Onboarding ──
-async function onboardSubmit() {
-  const name = document.getElementById('ob-name').value.trim();
-  if (!name) { showToast('Введите ваше имя', 'warning'); return; }
-  const btn = document.getElementById('ob-btn');
-  btn.disabled = true;
+  const btn = document.getElementById('agree-btn');
+  if (btn) btn.disabled = true;
   const linkData = await dbGet('user_links', STATE.uid);
+  const autoName = _getTgName() || linkData?.firstName || 'Пользователь';
   STATE.user = {
     ...(STATE.user || {}),
-    name, phone: linkData?.phone || '',
-    role: 'operator', agreedOperator: true,
+    name: autoName,
+    phone: linkData?.phone || '',
+    role: 'operator',
+    agreedOperator: true,
     createdAt: new Date().toISOString()
   };
   await dbSet('users', STATE.uid, STATE.user);
   saveState();
-  btn.disabled = false;
+  if (btn) btn.disabled = false;
+  await checkVenueAssignment();
+}
+
+// ── Onboarding (не используется — имя берётся из Telegram) ──
+async function onboardSubmit() {
   await checkVenueAssignment();
 }
 

@@ -40,9 +40,21 @@ window.addEventListener('DOMContentLoaded', async () => {
   const existing = await dbGet('users', STATE.uid);
   if (existing?.blocked) { showScreen('s-blocked'); return; }
   if (!existing?.agreedAdmin) { showScreen('s-agree'); return; }
+  // Auto-set name from Telegram if missing (no onboard screen)
+  if (existing && !existing.name) {
+    const autoName = _getTgName() || existing.firstName || 'Администратор';
+    await dbSet('users', STATE.uid, { name: autoName });
+    existing.name = autoName;
+  }
   STATE.user = existing; saveState();
   await checkVenueAndInit();
 });
+
+function _getTgName() {
+  const u = tg?.initDataUnsafe?.user;
+  if (!u) return null;
+  return (u.first_name + (u.last_name ? ' ' + u.last_name : '')).trim() || null;
+}
 
 function saveState() {
   const tgUserId = tg?.initDataUnsafe?.user?.id ? String(tg.initDataUnsafe.user.id) : null;
@@ -64,19 +76,27 @@ function toggleAgreeCheck() {
   document.getElementById('agree-check-row').classList.toggle('checked', _agreedCheck);
   document.getElementById('agree-btn').disabled = !_agreedCheck;
 }
-async function submitAgree() { showScreen('s-onboard'); }
-
-// ── Onboarding ──
-async function onboardSubmit() {
-  const name = document.getElementById('ob-name').value.trim();
-  if (!name) { showToast('Введите имя', 'warning'); return; }
-  const btn = document.getElementById('ob-btn');
-  btn.disabled = true; btn.classList.add('btn-loading');
+async function submitAgree() {
+  const btn = document.getElementById('agree-btn');
+  if (btn) { btn.disabled = true; btn.classList.add('btn-loading'); }
   const linkData = await dbGet('user_links', STATE.uid);
-  STATE.user = { name, phone: linkData?.phone||'', tgId: linkData?.tgId||'', role: 'admin', agreedAdmin: true, createdAt: new Date().toISOString() };
+  const autoName = _getTgName() || linkData?.firstName || 'Администратор';
+  STATE.user = {
+    name: autoName,
+    phone: linkData?.phone || '',
+    tgId: linkData?.tgId || '',
+    role: 'admin',
+    agreedAdmin: true,
+    createdAt: new Date().toISOString()
+  };
   await dbSet('users', STATE.uid, STATE.user);
   saveState();
-  btn.disabled = false; btn.classList.remove('btn-loading');
+  if (btn) { btn.disabled = false; btn.classList.remove('btn-loading'); }
+  await checkVenueAndInit();
+}
+
+// ── Onboarding (не используется — имя берётся из Telegram) ──
+async function onboardSubmit() {
   await checkVenueAndInit();
 }
 

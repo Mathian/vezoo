@@ -58,20 +58,16 @@ window.addEventListener('DOMContentLoaded', async () => {
   if (!STATE.uid) { showScreen('s-no-uid'); return; }
 
   const existing = await dbGet('users', STATE.uid);
-  if (existing) {
-    if (existing.blocked) { showScreen('s-blocked'); return; }
-    if (!existing.agreedClient) { showScreen('s-agree'); return; }
-    STATE.user = existing; saveClientState();
-    initMain();
-  } else {
-    const linkData = await dbGet('user_links', STATE.uid);
-    const tgUser   = tg?.initDataUnsafe?.user;
-    let name = tgUser ? (tgUser.first_name + (tgUser.last_name ? ' ' + tgUser.last_name : '')) : '';
-    if (!name && linkData?.firstName) name = linkData.firstName;
-    const inp = document.getElementById('ob-name');
-    if (inp && name) inp.value = name;
-    showScreen('s-agree');
+  if (existing?.blocked) { showScreen('s-blocked'); return; }
+  if (!existing?.agreedClient) { showScreen('s-agree'); return; }
+  // Auto-set name from Telegram if missing (no onboard screen)
+  if (!existing.name) {
+    const autoName = _getTgName() || existing.firstName || 'Пользователь';
+    await dbSet('users', STATE.uid, { name: autoName });
+    existing.name = autoName;
   }
+  STATE.user = existing; saveClientState();
+  initMain();
 });
 
 function saveClientState() {
@@ -94,24 +90,30 @@ function toggleAgreeCheck() {
   document.getElementById('agree-btn').disabled = !_agreedCheck;
 }
 async function submitAgree() {
-  showScreen('s-onboard');
+  const btn = document.getElementById('agree-btn');
+  if (btn) { btn.disabled = true; btn.classList.add('btn-loading'); }
   const linkData = await dbGet('user_links', STATE.uid);
-  const tgUser   = tg?.initDataUnsafe?.user;
-  let name = tgUser ? (tgUser.first_name + (tgUser.last_name ? ' ' + tgUser.last_name : '')) : '';
-  if (!name && linkData?.firstName) name = linkData.firstName;
-  const inp = document.getElementById('ob-name');
-  if (inp && name) inp.value = name;
+  const autoName = _getTgName() || linkData?.firstName || 'Пользователь';
+  STATE.user = {
+    name: autoName,
+    phone: linkData?.phone || '',
+    tgId: linkData?.tgId || '',
+    role: 'client',
+    agreedClient: true,
+    createdAt: new Date().toISOString()
+  };
+  await dbSet('users', STATE.uid, STATE.user);
+  saveClientState();
+  if (btn) { btn.disabled = false; btn.classList.remove('btn-loading'); }
+  initMain();
 }
 
-// ── Onboarding ──
+// ── Onboarding (не используется — имя берётся из Telegram) ──
 async function onboardSubmit() {
-  const name = document.getElementById('ob-name').value.trim();
-  if (!name) { showToast('Введите ваше имя', 'warning'); return; }
-  const btn = document.getElementById('ob-btn');
-  btn.disabled = true; btn.classList.add('btn-loading');
   const linkData = await dbGet('user_links', STATE.uid);
   STATE.user = {
-    name, phone: linkData?.phone || '', tgId: linkData?.tgId || '',
+    ...(STATE.user || {}),
+    phone: linkData?.phone || '', tgId: linkData?.tgId || '',
     role: 'client', agreedClient: true, createdAt: new Date().toISOString()
   };
   await dbSet('users', STATE.uid, STATE.user);
@@ -1076,6 +1078,15 @@ async function saveAddress() {
   saveClientState();
   await dbSet('users', STATE.uid, { savedAddress });
   tgHaptic('success'); showToast('Адрес сохранён', 'success');
+}
+
+// ══════════════════════════════════════════════════════════
+//  HELPERS
+// ══════════════════════════════════════════════════════════
+function _getTgName() {
+  const u = tg?.initDataUnsafe?.user;
+  if (!u) return null;
+  return (u.first_name + (u.last_name ? ' ' + u.last_name : '')).trim() || null;
 }
 
 // ══════════════════════════════════════════════════════════
