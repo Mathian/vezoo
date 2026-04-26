@@ -23,10 +23,11 @@ let _invitePending = null; // pending operator invite data
 window.addEventListener('DOMContentLoaded', async () => {
   if (new URLSearchParams(location.search).get('reset') === '1') { localStorage.clear(); location.replace(location.pathname); return; }
   tgReady();
+  _initAdminBackButton();
   const _tgUserId = tg?.initDataUnsafe?.user?.id ? String(tg.initDataUnsafe.user.id) : null;
   try {
     const s = JSON.parse(localStorage.getItem('vez_admin_state') || '{}');
-    if (!_tgUserId || !s.tgId || s.tgId === _tgUserId) {
+    if (!_tgUserId || s.tgId === _tgUserId) {
       STATE.uid = s.uid || null; STATE.user = s.user || null;
     }
   } catch {}
@@ -124,6 +125,7 @@ async function submitCreateVenue() {
   const cookT   = parseInt(document.getElementById('cv-cooking-time').value) || 20;
   const minOrd  = parseInt(document.getElementById('cv-min-order').value) || 0;
   const coverUrl = document.getElementById('cv-cover-url').value.trim() || _coverDataUrl || '';
+  const phone    = document.getElementById('cv-phone').value.trim();
 
   if (!name || !catId || !address) { showToast('Заполните обязательные поля', 'warning'); return; }
 
@@ -132,7 +134,7 @@ async function submitCreateVenue() {
 
   const venueId = genId();
   const venue = {
-    id: venueId, name, categoryId: catId, description: desc, address,
+    id: venueId, name, categoryId: catId, description: desc, address, phone,
     workOpen: open, workClose: close, deliveryTime: delTime, deliveryPrice: delPr,
     cookingTime: cookT, minOrder: minOrd, coverUrl,
     ownerId: STATE.uid, ownerName: STATE.user?.name||'',
@@ -224,7 +226,7 @@ function renderMenuItems(cat) {
   }
   list.innerHTML = items.map(item => {
     const priceStr = item.variants?.length
-      ? item.variants.map(v=>`${v.name}: ${fmtPrice(v.price)}`).join(', ')
+      ? item.variants.map(v=>`${v.name}: ${fmtPrice(v.price)}`).join('<br>')
       : fmtPrice(item.price);
     const imgEl = item.imageUrl
       ? `<div class="admin-item-img"><img src="${item.imageUrl}" onerror="this.parentElement.innerHTML='<span style=font-size:26px>${item.emoji||'🍽️'}</span>'"></div>`
@@ -264,7 +266,7 @@ function openAddItem() {
   document.getElementById('simple-price-wrap').style.display = '';
   document.getElementById('variants-wrap').style.display = 'none';
   document.getElementById('variants-list').innerHTML = '';
-  document.getElementById('item-overlay').classList.add('open');
+  _openSheet('item-overlay');
 }
 
 async function openEditItem(itemId) {
@@ -290,7 +292,7 @@ async function openEditItem(itemId) {
     document.getElementById('variants-wrap').style.display = '';
     renderVariants();
   }
-  document.getElementById('item-overlay').classList.add('open');
+  _openSheet('item-overlay');
 }
 
 function closeItemSheet(e) {
@@ -454,23 +456,35 @@ async function openOrderDetail(orderId) {
       <div class="flex justify-between"><span class="font-bold">Итого</span><span class="font-bold text-primary">${fmtPrice(order.total + (order.deliveryPrice||0))}</span></div>
     </div>
     ${renderAdminOrderActions(order)}`;
-  document.getElementById('order-overlay').classList.add('open');
+  _openSheet('order-overlay');
 }
 
 function renderAdminOrderActions(order) {
+  const blBtn = order.clientUid
+    ? `<button class="btn btn-ghost btn-sm" style="margin-top:8px;color:var(--danger)" onclick="adminBlacklistClient('${order.clientUid}','${(order.clientPhone||'').replace(/'/g,'')}')">🚫 В чёрный список</button>`
+    : '';
   if (order.status === 'pending') return `
     <div class="btn-row">
       <button class="btn btn-danger btn-sm" onclick="adminCancelOrder('${order.id}')">❌ Отменить</button>
       <button class="btn btn-success btn-sm" onclick="adminAcceptOrder('${order.id}')">✅ Принять</button>
-    </div>`;
+    </div>${blBtn}`;
   if (order.status === 'accepted' || order.status === 'cooking') return `
-    <button class="btn btn-primary btn-sm" onclick="adminSearchCourier('${order.id}')">🔍 Искать курьера</button>`;
+    <div class="btn-row">
+      <button class="btn btn-danger btn-sm" onclick="adminCancelOrder('${order.id}')">❌ Отменить</button>
+      <button class="btn btn-primary btn-sm" onclick="adminSearchCourier('${order.id}')">🔍 Искать курьера</button>
+    </div>${blBtn}`;
   if (order.status === 'searching_courier') return `
-    <button class="btn btn-secondary btn-sm" onclick="openAssignCourier('${order.id}')">👤 Назначить курьера</button>`;
+    <div class="btn-row">
+      <button class="btn btn-danger btn-sm" onclick="adminCancelOrder('${order.id}')">❌ Отменить</button>
+      <button class="btn btn-secondary btn-sm" onclick="openAssignCourier('${order.id}')">👤 Назначить курьера</button>
+    </div>${blBtn}`;
   if (order.status === 'delivering') return `
     <div class="alert-box success">🚴 Заказ передан курьеру ${order.courierName||''}</div>
-    <button class="btn btn-ghost btn-sm" style="margin-top:8px" onclick="adminRetransferOrder('${order.id}')">🔄 Переназначить курьера</button>`;
-  return '';
+    <div class="btn-row" style="margin-top:8px">
+      <button class="btn btn-ghost btn-sm" onclick="adminCancelOrder('${order.id}')">❌ Отменить</button>
+      <button class="btn btn-ghost btn-sm" onclick="adminRetransferOrder('${order.id}')">🔄 Переназначить</button>
+    </div>${blBtn}`;
+  return blBtn;
 }
 
 async function adminAcceptOrder(orderId) {
@@ -486,10 +500,13 @@ async function adminAcceptOrder(orderId) {
 }
 
 async function adminCancelOrder(orderId) {
-  if (!confirm('Отменить заказ? Клиент получит уведомление.')) return;
-  await dbSet('orders', orderId, { status: 'cancelled', cancelledAt: new Date().toISOString(), clientNotification: { type: 'cancelled', seen: false } });
-  tgHaptic('light'); closeOrderSheet(); showToast('Заказ отменён', 'info');
-  await loadOrders(_ordersTab);
+  const doCancel = async () => {
+    await dbSet('orders', orderId, { status: 'cancelled', cancelledAt: new Date().toISOString(), clientNotification: { type: 'cancelled', seen: false } });
+    tgHaptic('light'); closeOrderSheet(); showToast('Заказ отменён', 'info');
+    await loadOrders(_ordersTab);
+  };
+  if (tg?.showConfirm) tg.showConfirm('Отменить заказ? Клиент получит уведомление.', ok => { if (ok) doCancel(); });
+  else if (confirm('Отменить заказ?')) await doCancel();
 }
 
 async function adminSearchCourier(orderId) {
@@ -504,19 +521,30 @@ async function openAssignCourier(orderId) {
   const listEl = document.getElementById('courier-select-list');
   listEl.innerHTML = '<div class="loader"><div class="spinner"></div></div>';
   document.getElementById('order-overlay').classList.remove('open');
-  document.getElementById('courier-overlay').classList.add('open');
+  _openSheet('courier-overlay');
 
+  // Couriers who raised hand
+  const requests    = await dbQuery('order_requests', 'orderId', '==', orderId);
+  const requestUids = requests.map(r => r.courierUid);
+
+  // Permanent on-shift couriers
   const onShiftCouriers = (await dbQuery('couriers','onShift','==',true)).filter(c => c.status === 'active');
-  const permLinks = await dbQuery('courier_venue_links','venueId','==',VENUE.id);
-  const permUids  = permLinks.filter(l => l.status === 'confirmed').map(l => l.uid);
+  const permLinks  = await dbQuery('courier_venue_links','venueId','==',VENUE.id);
+  const permUids   = permLinks.filter(l => l.status === 'confirmed').map(l => l.uid);
+  const permOnShift = onShiftCouriers.filter(c => permUids.includes(c.uid) && !requestUids.includes(c.uid));
 
-  const sorted = [...onShiftCouriers].sort((a,_) => permUids.includes(a.uid) ? -1 : 1);
-  if (!sorted.length) { listEl.innerHTML = '<div class="empty"><div class="empty-text">Нет курьеров на смене</div></div>'; return; }
-  listEl.innerHTML = sorted.map(c => `
-    <div class="list-item" onclick="assignCourier('${c.uid}','${c.name}')">
+  const raisedRows = requests.map(r => ({ uid: r.courierUid, name: r.courierName, phone: r.courierPhone||'', _raised: true }));
+  const combined   = [...raisedRows, ...permOnShift.map(c => ({ ...c, _perm: true }))];
+
+  if (!combined.length) { listEl.innerHTML = '<div class="empty"><div class="empty-text">Нет доступных курьеров. Ни один не откликнулся.</div></div>'; return; }
+  listEl.innerHTML = combined.map(c => `
+    <div class="list-item" onclick="assignCourier('${c.uid}','${(c.name||'Курьер').replace(/'/g,'')}')">
       <div class="li-icon yellow">🚴</div>
       <div class="li-body">
-        <div class="li-title">${c.name}${permUids.includes(c.uid)?' <span class="pill" style="font-size:10px">Постоянный</span>':''}</div>
+        <div class="li-title">${c.name||'—'}
+          ${c._raised?' <span class="pill" style="font-size:10px;background:var(--success)">✋ Откликнулся</span>':''}
+          ${c._perm  ?' <span class="pill" style="font-size:10px">Постоянный</span>':''}
+        </div>
         <div class="li-sub">${c.phone||''}</div>
       </div>
       <div class="chevron">›</div>
@@ -526,6 +554,8 @@ async function openAssignCourier(orderId) {
 async function assignCourier(courierUid, courierName) {
   if (!_assignOrderId) return;
   await dbSet('orders', _assignOrderId, { status: 'delivering', courierUid, courierName, assignedAt: new Date().toISOString(), clientNotification: { type: 'delivering', seen: false, message: `Курьер ${courierName} везёт ваш заказ!` } });
+  const reqs = await dbQuery('order_requests', 'orderId', '==', _assignOrderId);
+  for (const r of reqs) await dbDelete('order_requests', r.id);
   closeCourierSheet(); tgHaptic('success'); showToast(`Заказ назначен курьеру ${courierName}`, 'success');
   await loadOrders(_ordersTab);
 }
@@ -577,6 +607,7 @@ async function loadSettingsScreen() {
   if (!VENUE) return;
   document.getElementById('set-name').value     = VENUE.name||'';
   document.getElementById('set-address').value  = VENUE.address||'';
+  document.getElementById('set-phone').value    = VENUE.phone||'';
   document.getElementById('set-desc').value     = VENUE.description||'';
   document.getElementById('set-cover').value    = VENUE.coverUrl||'';
   document.getElementById('set-open').value     = VENUE.workOpen||'09:00';
@@ -602,16 +633,19 @@ async function loadSettingsScreen() {
 
   // Permanent couriers
   await loadPermCouriers();
+  // Blacklist
+  await loadBlacklist();
 }
 
 async function saveVenueInfo() {
   const name    = document.getElementById('set-name').value.trim();
   const address = document.getElementById('set-address').value.trim();
+  const phone   = document.getElementById('set-phone').value.trim();
   const desc    = document.getElementById('set-desc').value.trim();
   const cover   = document.getElementById('set-cover').value.trim();
   if (!name || !address) { showToast('Введите название и адрес', 'warning'); return; }
-  await dbSet('venues', VENUE.id, { name, address, description: desc, coverUrl: cover });
-  VENUE = { ...VENUE, name, address, description: desc, coverUrl: cover };
+  await dbSet('venues', VENUE.id, { name, address, phone, description: desc, coverUrl: cover });
+  VENUE = { ...VENUE, name, address, phone, description: desc, coverUrl: cover };
   tgHaptic('success'); showToast('Сохранено', 'success');
 }
 
@@ -699,7 +733,78 @@ async function removePermCourier(uid) {
   await loadPermCouriers();
 }
 
-// ── Navigation ──
+// ══════════════════════════════════════════════════════════
+//  BLACKLIST
+// ══════════════════════════════════════════════════════════
+async function adminBlacklistClient(clientUid, clientPhone) {
+  if (!confirm(`Добавить клиента (${clientPhone || clientUid}) в чёрный список? Он не сможет заказывать в вашем заведении.`)) return;
+  const blId = VENUE.id + '_' + clientUid;
+  await dbSet('venue_blacklist', blId, {
+    venueId: VENUE.id, clientUid, clientPhone,
+    addedAt: new Date().toISOString(), adminUid: STATE.uid
+  });
+  tgHaptic('success'); showToast('Клиент добавлен в ЧС', 'success');
+  closeOrderSheet();
+}
+
+async function addToBlacklistByPhone() {
+  const phone = document.getElementById('bl-phone').value.trim();
+  if (!phone) { showToast('Введите телефон', 'warning'); return; }
+  const links = await dbGetAll('user_links');
+  const link  = links.find(l => l.phone === phone || l.phone === phone.replace(/^\+/,'') || ('+'+l.phone) === phone);
+  if (!link) { showToast('Пользователь с таким номером не найден', 'error'); return; }
+  const blId = VENUE.id + '_' + link.uid;
+  await dbSet('venue_blacklist', blId, {
+    venueId: VENUE.id, clientUid: link.uid, clientPhone: link.phone,
+    addedAt: new Date().toISOString(), adminUid: STATE.uid
+  });
+  document.getElementById('bl-phone').value = '';
+  tgHaptic('success'); showToast('Клиент добавлен в ЧС', 'success');
+  await loadBlacklist();
+}
+
+async function loadBlacklist() {
+  const items = await dbQuery('venue_blacklist', 'venueId', '==', VENUE.id);
+  const listEl = document.getElementById('blacklist-items');
+  if (!listEl) return;
+  if (!items.length) {
+    listEl.innerHTML = '<div class="text-dim text-sm">Чёрный список пуст</div>';
+    return;
+  }
+  listEl.innerHTML = items.map(b => `
+    <div class="flex items-center gap-2">
+      <div class="li-icon" style="width:34px;height:34px;font-size:16px;background:var(--danger-bg,rgba(239,68,68,.15))">🚫</div>
+      <div style="flex:1"><div class="font-bold text-sm">${b.clientPhone||b.clientUid}</div><div class="text-xs text-dim">${fmtDate(b.addedAt)}</div></div>
+      <button class="btn-xs btn-danger" onclick="removeFromBlacklist('${b.venueId}_${b.clientUid}')">×</button>
+    </div>`).join('');
+}
+
+async function removeFromBlacklist(blId) {
+  await dbDelete('venue_blacklist', blId);
+  showToast('Клиент удалён из ЧС', 'info');
+  await loadBlacklist();
+}
+
+// ══════════════════════════════════════════════════════════
+//  NAVIGATION + TELEGRAM BACK BUTTON
+// ══════════════════════════════════════════════════════════
+function _initAdminBackButton() {
+  if (!tg?.BackButton) return;
+  tg.BackButton.onClick(() => {
+    const open = document.querySelector('.overlay.open');
+    if (open) {
+      open.classList.remove('open');
+      if (!document.querySelector('.overlay.open')) tg.BackButton.hide();
+      return;
+    }
+    tg.BackButton.hide();
+  });
+}
+function _openSheet(id) {
+  document.getElementById(id)?.classList.add('open');
+  tg?.BackButton?.show();
+}
+
 function adminNavTo(screenId) {
   showScreen(screenId);
 }

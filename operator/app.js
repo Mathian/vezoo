@@ -20,12 +20,13 @@ window.addEventListener('DOMContentLoaded', async () => {
     localStorage.clear(); location.replace(location.pathname); return;
   }
   tgReady();
+  _initOpBackButton();
 
   // Multi-account guard
   const tgUserId = tg?.initDataUnsafe?.user?.id ? String(tg.initDataUnsafe.user.id) : null;
   try {
     const s = JSON.parse(localStorage.getItem('vez_op_state') || '{}');
-    if (!tgUserId || !s.tgId || s.tgId === tgUserId) {
+    if (!tgUserId || s.tgId === tgUserId) {
       STATE.uid  = s.uid  || null;
       STATE.user = s.user || null;
     }
@@ -264,21 +265,33 @@ async function openOrderDetail(orderId) {
   const addr = order.address;
   let actionBtns = '';
 
+  const cancelBtn = `<button class="btn btn-danger btn-sm" onclick="opCancelOrder('${orderId}')">❌ Отменить</button>`;
+
   if (order.status === 'pending') {
     actionBtns = `
       <div class="btn-row">
-        <button class="btn btn-danger btn-sm" onclick="opCancelOrder('${orderId}')">❌ Отменить</button>
+        ${cancelBtn}
         <button class="btn btn-primary btn-sm" onclick="opAcceptOrder('${orderId}')">✅ Принять</button>
       </div>`;
   } else if (order.status === 'accepted' || order.status === 'cooking') {
     actionBtns = `
-      <button class="btn btn-secondary btn-sm" onclick="opSearchCourier('${orderId}')">🔍 Ищем курьера</button>`;
+      <div class="btn-row">
+        ${cancelBtn}
+        <button class="btn btn-secondary btn-sm" onclick="opSearchCourier('${orderId}')">🔍 Ищем курьера</button>
+      </div>`;
   } else if (order.status === 'searching_courier') {
     actionBtns = `
-      <button class="btn btn-primary btn-sm" onclick="opOpenAssignCourier('${orderId}')">🚴 Назначить курьера</button>`;
+      <div class="btn-row">
+        ${cancelBtn}
+        <button class="btn btn-primary btn-sm" onclick="opOpenAssignCourier('${orderId}')">🚴 Назначить курьера</button>
+      </div>`;
   } else if (order.status === 'delivering') {
     actionBtns = `
-      <div class="alert-box primary" style="text-align:center">🚴 Курьер: <strong>${order.courierName || '—'}</strong></div>`;
+      <div class="alert-box primary" style="text-align:center;margin-bottom:8px">🚴 Курьер: <strong>${order.courierName || '—'}</strong></div>
+      <div class="btn-row">
+        ${cancelBtn}
+        <button class="btn btn-ghost btn-sm" onclick="opUnassignCourier('${orderId}')">🔄 Переназначить</button>
+      </div>`;
   } else if (order.status === 'delivered' || order.status === 'cancelled') {
     actionBtns = '';
   }
@@ -311,7 +324,7 @@ async function openOrderDetail(orderId) {
     </div>
     <div style="display:flex;flex-direction:column;gap:8px">${actionBtns}</div>`;
 
-  document.getElementById('order-overlay').classList.add('open');
+  _openSheet('order-overlay');
 }
 
 async function opAcceptOrder(orderId) {
@@ -332,15 +345,40 @@ async function opAcceptOrder(orderId) {
 }
 
 async function opCancelOrder(orderId) {
-  if (!confirm('Отменить этот заказ?')) return;
-  await dbSet('orders', orderId, {
-    status: 'cancelled',
-    cancelledAt: new Date().toISOString(),
-    clientNotification: { type: 'cancelled', seen: false, message: 'Ваш заказ был отменён. Обратитесь в поддержку.' }
-  });
-  closeOrderSheet();
-  tgHaptic('light');
-  showToast('Заказ отменён', 'info');
+  // Use tg.showConfirm if available (native Telegram confirm), otherwise fallback
+  const doCancel = async () => {
+    await dbSet('orders', orderId, {
+      status: 'cancelled',
+      cancelledAt: new Date().toISOString(),
+      clientNotification: { type: 'cancelled', seen: false, message: 'Ваш заказ отменён оператором.' }
+    });
+    closeOrderSheet();
+    tgHaptic('light');
+    showToast('Заказ отменён', 'info');
+  };
+  if (tg?.showConfirm) {
+    tg.showConfirm('Отменить этот заказ? Клиент получит уведомление.', ok => { if (ok) doCancel(); });
+  } else if (confirm('Отменить этот заказ?')) {
+    await doCancel();
+  }
+}
+
+async function opUnassignCourier(orderId) {
+  const doUnassign = async () => {
+    await dbSet('orders', orderId, {
+      status: 'searching_courier',
+      courierUid: null, courierName: null,
+      unassignedAt: new Date().toISOString()
+    });
+    closeOrderSheet();
+    await opOpenAssignCourier(orderId);
+    showToast('Курьер снят, выберите нового', 'info');
+  };
+  if (tg?.showConfirm) {
+    tg.showConfirm('Снять текущего курьера и назначить нового?', ok => { if (ok) doUnassign(); });
+  } else if (confirm('Снять текущего курьера?')) {
+    await doUnassign();
+  }
 }
 
 async function opSearchCourier(orderId) {
@@ -356,29 +394,41 @@ async function opOpenAssignCourier(orderId) {
   listEl.innerHTML = '<div class="loader"><div class="spinner"></div></div>';
 
   document.getElementById('order-overlay').classList.remove('open');
-  document.getElementById('courier-overlay').classList.add('open');
+  _openSheet('courier-overlay');
 
-  const allCouriers  = await dbQuery('couriers', 'onShift', '==', true);
-  const onShift      = allCouriers.filter(c => c.status === 'active');
-  const permUids     = VENUE?.permanentCourierIds || [];
+  // 1. Couriers who raised their hand for this specific order
+  const requests   = await dbQuery('order_requests', 'orderId', '==', orderId);
 
-  if (!onShift.length) {
-    listEl.innerHTML = `<div class="empty" style="padding:24px"><div class="empty-icon">🚴</div><div class="empty-text">Нет курьеров на смене</div></div>`;
+  // 2. Permanent on-shift couriers for this venue
+  const permLinks  = await dbQuery('courier_venue_links', 'venueId', '==', VENUE.id);
+  const permUids   = permLinks.filter(l => l.status === 'confirmed').map(l => l.uid);
+  const allCouriers = await dbQuery('couriers', 'onShift', '==', true);
+  const onShift     = allCouriers.filter(c => c.status === 'active');
+  const permOnShift = onShift.filter(c => permUids.includes(c.uid));
+
+  // Combine: raised hand first, then perm on-shift (deduplicated)
+  const requestUids = requests.map(r => r.courierUid);
+  const requestCouriers = requests.map(r => ({
+    uid: r.courierUid, name: r.courierName, phone: r.courierPhone || '', _raised: true
+  }));
+  const permExtra = permOnShift.filter(c => !requestUids.includes(c.uid));
+
+  const combined = [...requestCouriers, ...permExtra.map(c => ({ ...c, _perm: true }))];
+
+  if (!combined.length) {
+    listEl.innerHTML = `<div class="empty" style="padding:24px"><div class="empty-icon">🚴</div><div class="empty-text">Нет доступных курьеров.<br>Ни один не откликнулся на заказ.</div></div>`;
     return;
   }
 
-  const sorted = [...onShift].sort((a, b) => {
-    const aP = permUids.includes(a.uid) ? 0 : 1;
-    const bP = permUids.includes(b.uid) ? 0 : 1;
-    return aP - bP;
-  });
-
-  listEl.innerHTML = sorted.map(c => `
-    <div class="list-item" onclick="opAssignCourier('${c.uid}','${c.name || 'Курьер'}')">
+  listEl.innerHTML = combined.map(c => `
+    <div class="list-item" onclick="opAssignCourier('${c.uid}','${(c.name||'Курьер').replace(/'/g,'')}')">
       <div class="li-icon yellow">🚴</div>
       <div class="li-body">
-        <div class="li-title">${c.name || '—'}${permUids.includes(c.uid) ? ' <span class="pill" style="font-size:10px">Постоянный</span>' : ''}</div>
-        <div class="li-sub">${c.phone || ''}</div>
+        <div class="li-title">${c.name||'—'}
+          ${c._raised ? ' <span class="pill" style="font-size:10px;background:var(--success)">✋ Откликнулся</span>' : ''}
+          ${c._perm   ? ' <span class="pill" style="font-size:10px">Постоянный</span>' : ''}
+        </div>
+        <div class="li-sub">${c.phone||''}</div>
       </div>
       <div class="chevron">›</div>
     </div>`).join('');
@@ -393,6 +443,9 @@ async function opAssignCourier(courierUid, courierName) {
     assignedAt: new Date().toISOString(),
     clientNotification: { type: 'delivering', seen: false, message: `Курьер ${courierName} везёт ваш заказ!` }
   });
+  // Clean up all requests for this order
+  const reqs = await dbQuery('order_requests', 'orderId', '==', _assignOrderId);
+  for (const r of reqs) await dbDelete('order_requests', r.id);
   closeCourierSheet();
   tgHaptic('success');
   showToast(`Назначен курьер: ${courierName}`, 'success');
@@ -436,4 +489,21 @@ function closeCourierSheet(e) {
 function setNav(el) {
   document.querySelectorAll('.nav-item').forEach(n => n.classList.remove('active'));
   if (el) el.classList.add('active');
+}
+
+function _initOpBackButton() {
+  if (!tg?.BackButton) return;
+  tg.BackButton.onClick(() => {
+    const open = document.querySelector('.overlay.open');
+    if (open) {
+      open.classList.remove('open');
+      if (!document.querySelector('.overlay.open')) tg.BackButton.hide();
+      return;
+    }
+    tg.BackButton.hide();
+  });
+}
+function _openSheet(id) {
+  document.getElementById(id)?.classList.add('open');
+  tg?.BackButton?.show();
 }

@@ -31,12 +31,13 @@ window.addEventListener('DOMContentLoaded', async () => {
     localStorage.clear(); location.replace(location.pathname); return;
   }
   tgReady();
+  _initBackButton();
 
   // Multi-account guard: clear cached state if different TG user on same device
   const _tgUserId = tg?.initDataUnsafe?.user?.id ? String(tg.initDataUnsafe.user.id) : null;
   try {
     const s = JSON.parse(localStorage.getItem('vez_client_state') || '{}');
-    if (!_tgUserId || !s.tgId || s.tgId === _tgUserId) {
+    if (!_tgUserId || s.tgId === _tgUserId) {
       STATE.uid  = s.uid  || null;
       STATE.user = s.user || null;
     }
@@ -271,6 +272,18 @@ async function openVenue(venueId) {
   document.getElementById('venue-stars-el').innerHTML = renderStars(venue.rating||0);
   document.getElementById('venue-rating-val').textContent  = (venue.rating||0).toFixed(1);
   document.getElementById('venue-rating-cnt').textContent  = `(${venue.reviewCount||0} отзывов)`;
+
+  // Show venue phone if available
+  let venuePhoneEl = document.getElementById('venue-phone-el');
+  if (!venuePhoneEl) {
+    venuePhoneEl = document.createElement('div');
+    venuePhoneEl.id = 'venue-phone-el';
+    venuePhoneEl.className = 'text-sm text-dim';
+    venuePhoneEl.style.cssText = 'margin:4px 20px 0;';
+    document.getElementById('venue-stars-el').parentElement.after(venuePhoneEl);
+  }
+  venuePhoneEl.textContent = venue.phone ? '📞 ' + venue.phone : '';
+  venuePhoneEl.style.display = venue.phone ? '' : 'none';
 
   const isFav = FAVORITES.includes(venueId);
   const favBtn = document.getElementById('venue-fav-btn');
@@ -647,6 +660,13 @@ async function submitOrder() {
   const code     = _intercomChecked ? document.getElementById('intercom-code').value.trim() : '';
   if (!isPickup && (!street || !house)) { showToast('Укажите улицу и дом', 'warning'); return; }
 
+  // Blacklist check
+  const blEntry = await dbGet('venue_blacklist', venueId + '_' + STATE.uid);
+  if (blEntry) {
+    showToast('Вы не можете оформить заказ в этом заведении', 'error');
+    return;
+  }
+
   const btn = document.getElementById('order-btn');
   btn.disabled = true; btn.textContent = 'Оформляем...';
 
@@ -796,10 +816,14 @@ function renderHistoryCard(o) {
 
 function renderOrderCard(o) {
   const isPickup = o.deliveryType === 'pickup';
+  // Simplified 4-step track
   const steps = isPickup
-    ? [{key:'pending',icon:'🕐',label:'Принят'},{key:'cooking',icon:'👨‍🍳',label:'Готовится'},{key:'delivered',icon:'✅',label:'Готов'}]
-    : [{key:'pending',icon:'🕐',label:'Принят'},{key:'cooking',icon:'👨‍🍳',label:'Готовится'},{key:'searching_courier',icon:'🔍',label:'Курьер'},{key:'delivering',icon:'🚴',label:'В пути'},{key:'delivered',icon:'✅',label:'Доставлен'}];
-  const si = steps.findIndex(s => s.key === o.status);
+    ? [{icon:'📋',label:'Создан'},{icon:'👨‍🍳',label:'Готовится'},{icon:'✅',label:'Готов'}]
+    : [{icon:'📋',label:'Создан'},{icon:'👨‍🍳',label:'Готовится'},{icon:'🚴',label:'В пути'},{icon:'✅',label:'Доставлен'}];
+  const stepIdx = isPickup
+    ? { pending:0, accepted:0, cooking:1, delivered:2, cancelled:0 }
+    : { pending:0, accepted:0, cooking:1, searching_courier:2, delivering:2, delivered:3, cancelled:0 };
+  const si = stepIdx[o.status] ?? 0;
   const track = o.status==='cancelled'
     ? '<div style="color:var(--danger);font-weight:600;font-size:14px;text-align:center">❌ Заказ отменён</div>'
     : steps.map((s,i) => {
@@ -864,12 +888,18 @@ function _startCountdown(o) {
 async function openReviews() {
   if (!CURRENT_VENUE) return;
   _currentReviewVenueId = CURRENT_VENUE.id;
-  showScreen('s-reviews');
+  navTo('s-reviews');
   await renderReviews();
 }
 
 function closeReviews() {
-  showScreen('s-venue');
+  if (_navHistory.length > 0) {
+    const prev = _navHistory.pop();
+    _rawShowScreen(prev);
+    if (_navHistory.length === 0) tg?.BackButton?.hide();
+  } else {
+    showScreen('s-venue');
+  }
 }
 
 async function renderReviews() {
@@ -1049,9 +1079,40 @@ async function saveAddress() {
 }
 
 // ══════════════════════════════════════════════════════════
-//  NAVIGATION
+//  NAVIGATION + TELEGRAM BACK BUTTON
 // ══════════════════════════════════════════════════════════
+const _navHistory = [];
+const _NO_HISTORY_SCREENS = ['s-splash','s-blocked','s-no-uid','s-agree','s-onboard'];
+
+function _initBackButton() {
+  if (!tg?.BackButton) return;
+  tg.BackButton.onClick(() => {
+    // 1. Close any open overlay/sheet first
+    const open = document.querySelector('.overlay.open, .notif-card.open');
+    if (open) {
+      open.classList.remove('open');
+      if (!_navHistory.length) tg.BackButton.hide();
+      return;
+    }
+    // 2. Go back in history
+    if (_navHistory.length > 0) {
+      const prev = _navHistory.pop();
+      _rawShowScreen(prev);
+      if (_navHistory.length === 0) tg.BackButton.hide();
+      return;
+    }
+    tg.BackButton.hide();
+  });
+}
+
+const _rawShowScreen = showScreen; // reference to shared showScreen
+
 function navTo(screenId) {
+  const cur = document.querySelector('.screen.active')?.id;
+  if (cur && cur !== screenId && !_NO_HISTORY_SCREENS.includes(cur)) {
+    _navHistory.push(cur);
+    tg?.BackButton?.show();
+  }
   showScreen(screenId);
   if (screenId !== 's-venue') {
     document.getElementById('cart-fab').classList.add('hidden');
@@ -1067,6 +1128,9 @@ function navToAllOrders() {
 }
 
 function setNav(el) {
+  // When using bottom nav, clear history (no back needed)
+  _navHistory.length = 0;
+  tg?.BackButton?.hide();
   document.querySelectorAll('.nav-item').forEach(n => n.classList.remove('active'));
   if (el) el.classList.add('active');
 }

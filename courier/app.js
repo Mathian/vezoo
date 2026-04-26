@@ -13,6 +13,7 @@ let _shownAssigned  = new Set();
 let _agreedCheck    = false;
 let _venueInvite    = null;
 let _acceptOrderId  = null;
+let _raisedHands    = new Set(); // orderIds I've raised hand for
 
 // ══════════════════════════════════════════════════════════
 //  BOOT
@@ -20,10 +21,11 @@ let _acceptOrderId  = null;
 window.addEventListener('DOMContentLoaded', async () => {
   if (new URLSearchParams(location.search).get('reset') === '1') { localStorage.clear(); location.replace(location.pathname); return; }
   tgReady();
+  _initCourierBackButton();
   const _tgUserId = tg?.initDataUnsafe?.user?.id ? String(tg.initDataUnsafe.user.id) : null;
   try {
     const s = JSON.parse(localStorage.getItem('vez_courier_state') || '{}');
-    if (!_tgUserId || !s.tgId || s.tgId === _tgUserId) {
+    if (!_tgUserId || s.tgId === _tgUserId) {
       STATE.uid = s.uid||null; STATE.user = s.user||null;
     }
   } catch {}
@@ -145,7 +147,11 @@ async function toggleShift(input) {
 // ══════════════════════════════════════════════════════════
 //  AVAILABLE ORDERS
 // ══════════════════════════════════════════════════════════
-function watchAvailableOrders() {
+async function watchAvailableOrders() {
+  // Pre-load already raised hands from this session
+  const myReqs = await dbQuery('order_requests', 'courierUid', '==', STATE.uid);
+  _raisedHands = new Set(myReqs.map(r => r.orderId));
+
   if (_availUnsub) { _availUnsub(); _availUnsub = null; }
   _availUnsub = onQuerySnap('orders', 'status', '==', 'searching_courier', orders => {
     _availOrders = orders.filter(o => !o.courierUid);
@@ -165,8 +171,10 @@ function renderAvailableOrders() {
   // Sort: primary venue orders first
   const myVenue = COURIER_DATA?.primaryVenueId;
   const sorted = [..._availOrders].sort((a,_) => a.venueId === myVenue ? -1 : 1);
-  list.innerHTML = sorted.map(o => `
-    <div class="delivery-card" onclick="openAcceptSheet('${o.id}')" style="cursor:pointer">
+  list.innerHTML = sorted.map(o => {
+    const raised = _raisedHands.has(o.id);
+    return `
+    <div class="delivery-card" style="cursor:pointer">
       <div class="delivery-card-hdr">
         <div><div class="font-bold" style="font-size:14px">🏪 ${o.venueName||'Заведение'}</div><div class="text-xs text-dim">${fmtDate(o.createdAt)}</div></div>
         <div class="text-primary font-bold">${fmtPrice(o.deliveryPrice||0)}</div>
@@ -176,8 +184,14 @@ function renderAvailableOrders() {
         <div class="flex items-center gap-2"><span>💰</span><span>${fmtPrice(o.total+(o.deliveryPrice||0))}</span><span class="text-dim">· ${o.payment==='cash'?'Наличные':'Карта'}</span></div>
         ${o.venueId===myVenue?'<div class="pill" style="margin-top:4px;font-size:10px;width:fit-content">⭐ Ваше кафе</div>':''}
       </div>
-      <div class="delivery-card-foot"><button class="btn btn-primary btn-sm" onclick="event.stopPropagation();openAcceptSheet('${o.id}')">Принять заказ →</button></div>
-    </div>`).join('');
+      <div class="delivery-card-foot">
+        ${raised
+          ? `<div class="pill" style="font-size:12px;padding:6px 14px;background:var(--success)">✋ Вы откликнулись — ждите назначения</div>`
+          : `<button class="btn btn-primary btn-sm" onclick="openAcceptSheet('${o.id}')">✋ Откликнуться</button>`
+        }
+      </div>
+    </div>`;
+  }).join('');
 }
 
 async function openAcceptSheet(orderId) {
@@ -201,19 +215,26 @@ async function openAcceptSheet(orderId) {
     </div>
     <div class="btn-row">
       <button class="btn btn-ghost" onclick="closeAcceptSheet()">Отмена</button>
-      <button class="btn btn-primary" onclick="acceptOrder('${order.id}')">✅ Принять</button>
+      <button class="btn btn-primary" onclick="raiseHand('${order.id}')">✋ Откликнуться</button>
     </div>`;
-  document.getElementById('accept-overlay').classList.add('open');
+  document.getElementById('accept-overlay').classList.add('open'); tg?.BackButton?.show();
 }
 
-async function acceptOrder(orderId) {
-  await dbSet('orders', orderId, {
-    status: 'delivering', courierUid: STATE.uid, courierName: COURIER_DATA?.name||'Курьер',
-    assignedAt: new Date().toISOString(),
-    clientNotification: { type: 'delivering', seen: false, message: `Курьер везёт ваш заказ!` }
+async function raiseHand(orderId) {
+  // Record courier's interest — operator will assign from list
+  const reqId = orderId + '_' + STATE.uid;
+  await dbSet('order_requests', reqId, {
+    orderId,
+    courierUid:   STATE.uid,
+    courierName:  COURIER_DATA?.name || 'Курьер',
+    courierPhone: COURIER_DATA?.phone || '',
+    requestedAt:  new Date().toISOString()
   });
-  closeAcceptSheet(); tgHaptic('success'); showToast('Заказ принят!', 'success');
-  showScreen('s-my-orders'); setNav(document.getElementById('nav-my'));
+  _raisedHands.add(orderId);
+  closeAcceptSheet();
+  tgHaptic('success');
+  showToast('Вы откликнулись! Ожидайте назначения оператором.', 'success');
+  renderAvailableOrders(); // refresh to show "raised" state
 }
 
 function closeAcceptSheet(e) {
@@ -313,23 +334,31 @@ async function openMyOrder(orderId) {
       <button class="btn btn-ghost btn-sm" onclick="courierReturn('${order.id}')">↩ Возврат</button>
       <button class="btn btn-success" onclick="courierDeliver('${order.id}')">✅ Доставил</button>
     </div>`;
-  document.getElementById('my-order-overlay').classList.add('open');
+  document.getElementById('my-order-overlay').classList.add('open'); tg?.BackButton?.show();
 }
 
 async function courierDeliver(orderId) {
-  if (!confirm('Подтвердить доставку заказа?')) return;
-  await dbSet('orders', orderId, {
-    status: 'delivered', deliveredAt: new Date().toISOString(),
-    clientNotification: { type: 'delivered', seen: false }
-  });
-  closeMyOrderSheet(); tgHaptic('success'); showToast('Заказ доставлен!', 'success');
+  const doDeliver = async () => {
+    await dbSet('orders', orderId, {
+      status: 'delivered', deliveredAt: new Date().toISOString(),
+      clientNotification: { type: 'delivered', seen: false }
+    });
+    closeMyOrderSheet(); tgHaptic('success'); showToast('Заказ доставлен!', 'success');
+  };
+  if (tg?.showConfirm) tg.showConfirm('Подтвердить доставку?', ok => { if (ok) doDeliver(); });
+  else if (confirm('Подтвердить доставку?')) await doDeliver();
 }
 
 async function courierReturn(orderId) {
-  if (!confirm('Оформить возврат заказа? Статус изменится на "Ищем курьера".\nОба подтверждения обязательны.')) return;
-  if (!confirm('Вы уверены, что хотите вернуть заказ?')) return;
-  await dbSet('orders', orderId, { status: 'searching_courier', courierUid: null, courierName: null, returnAt: new Date().toISOString() });
-  closeMyOrderSheet(); tgHaptic('light'); showToast('Возврат оформлен', 'info');
+  const doReturn = async () => {
+    await dbSet('orders', orderId, { status: 'searching_courier', courierUid: null, courierName: null, returnAt: new Date().toISOString() });
+    // Remove my raise-hand request too
+    await dbDelete('order_requests', orderId + '_' + STATE.uid);
+    _raisedHands.delete(orderId);
+    closeMyOrderSheet(); tgHaptic('light'); showToast('Возврат оформлен', 'info');
+  };
+  if (tg?.showConfirm) tg.showConfirm('Вернуть заказ оператору?', ok => { if (ok) doReturn(); });
+  else if (confirm('Вернуть заказ?')) await doReturn();
 }
 
 function closeMyOrderSheet(e) {
@@ -360,4 +389,20 @@ async function loadCourierHistory() {
 function setNav(el) {
   document.querySelectorAll('.nav-item').forEach(n => n.classList.remove('active'));
   if (el) el.classList.add('active');
+}
+
+function _initCourierBackButton() {
+  if (!tg?.BackButton) return;
+  tg.BackButton.onClick(() => {
+    const open = document.querySelector('.overlay.open');
+    if (open) { open.classList.remove('open'); return; }
+    const cur = document.querySelector('.screen.active')?.id;
+    if (cur === 's-my-orders' || cur === 's-history') {
+      showScreen('s-available');
+      setNav(document.getElementById('nav-avail'));
+      tg.BackButton.hide();
+      return;
+    }
+    tg.BackButton.hide();
+  });
 }

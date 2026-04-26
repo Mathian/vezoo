@@ -119,15 +119,15 @@
 
 <!-- BOTTOM NAV -->
 <div class="bottom-nav" id="main-nav" style="display:none">
-  <div class="nav-item active" id="nav-avail" onclick="showScreen('s-available');setNav(this)">
+  <div class="nav-item active" id="nav-avail" onclick="showScreen('s-available');setNav(this);tg?.BackButton?.hide()">
     <div class="nav-icon">🔍</div><div class="nav-label">Заказы</div>
     <div class="nav-badge hidden" id="avail-badge">0</div>
   </div>
-  <div class="nav-item" id="nav-my" onclick="showScreen('s-my-orders');setNav(this)">
+  <div class="nav-item" id="nav-my" onclick="showScreen('s-my-orders');setNav(this);tg?.BackButton?.show()">
     <div class="nav-icon">📦</div><div class="nav-label">Мои</div>
     <div class="nav-badge hidden" id="my-badge">0</div>
   </div>
-  <div class="nav-item" id="nav-chist" onclick="showScreen('s-courier-history');setNav(this);loadCourierHistory()">
+  <div class="nav-item" id="nav-chist" onclick="showScreen('s-courier-history');setNav(this);loadCourierHistory();tg?.BackButton?.show()">
     <div class="nav-icon">📋</div><div class="nav-label">История</div>
   </div>
 </div>

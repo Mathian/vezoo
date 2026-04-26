@@ -14,10 +14,16 @@ let _agreedCheck = false;
 window.addEventListener('DOMContentLoaded', async () => {
   if (new URLSearchParams(location.search).get('reset') === '1') { localStorage.clear(); location.replace(location.pathname); return; }
   tgReady();
+  // Back button: close overlay or hide
+  if (tg?.BackButton) tg.BackButton.onClick(() => {
+    const open = document.querySelector('.overlay.open');
+    if (open) { open.classList.remove('open'); return; }
+    tg.BackButton.hide();
+  });
   const _tgUserId = tg?.initDataUnsafe?.user?.id ? String(tg.initDataUnsafe.user.id) : null;
   try {
     const s = JSON.parse(localStorage.getItem('vez_sa_state') || '{}');
-    if (!_tgUserId || !s.tgId || s.tgId === _tgUserId) {
+    if (!_tgUserId || s.tgId === _tgUserId) {
       STATE.uid = s.uid||null; STATE.user = s.user||null;
     }
   } catch {}
