@@ -32,10 +32,14 @@ window.addEventListener('DOMContentLoaded', async () => {
   }
   tgReady();
 
+  // Multi-account guard: clear cached state if different TG user on same device
+  const _tgUserId = tg?.initDataUnsafe?.user?.id ? String(tg.initDataUnsafe.user.id) : null;
   try {
     const s = JSON.parse(localStorage.getItem('vez_client_state') || '{}');
-    STATE.uid  = s.uid  || null;
-    STATE.user = s.user || null;
+    if (!_tgUserId || !s.tgId || s.tgId === _tgUserId) {
+      STATE.uid  = s.uid  || null;
+      STATE.user = s.user || null;
+    }
     CART       = JSON.parse(localStorage.getItem('vez_cart') || '{}');
     FAVORITES  = JSON.parse(localStorage.getItem('vez_favorites') || '[]');
   } catch {}
@@ -70,7 +74,8 @@ window.addEventListener('DOMContentLoaded', async () => {
 });
 
 function saveClientState() {
-  try { localStorage.setItem('vez_client_state', JSON.stringify({ uid: STATE.uid, user: STATE.user })); } catch {}
+  const tgUserId = tg?.initDataUnsafe?.user?.id ? String(tg.initDataUnsafe.user.id) : null;
+  try { localStorage.setItem('vez_client_state', JSON.stringify({ uid: STATE.uid, user: STATE.user, tgId: tgUserId })); } catch {}
 }
 function saveCart() {
   try { localStorage.setItem('vez_cart', JSON.stringify(CART)); } catch {}
@@ -666,7 +671,7 @@ async function submitOrder() {
     updateCartNavBadge();
     tgHaptic('success');
     showToast('Заказ оформлен!', 'success');
-    navTo('s-orders'); setNav(document.getElementById('nav-orders'));
+    navToAllOrders();
   } catch(e) {
     showToast('Ошибка при оформлении', 'error');
   }
@@ -674,11 +679,14 @@ async function submitOrder() {
 }
 
 // ══════════════════════════════════════════════════════════
-//  ACTIVE ORDERS
+//  ORDERS (active + history combined)
 // ══════════════════════════════════════════════════════════
+let _allClientOrders = [];
+
 function watchActiveOrders() {
   if (_ordersUnsub) { _ordersUnsub(); _ordersUnsub = null; }
   _ordersUnsub = onQuerySnap('orders', 'clientUid', '==', STATE.uid, orders => {
+    _allClientOrders = orders;
     ACTIVE_ORDERS = orders.filter(o => !['delivered','cancelled'].includes(o.status))
       .sort((a,b) => (b.createdAt||'').localeCompare(a.createdAt||''));
 
@@ -695,7 +703,7 @@ function watchActiveOrders() {
       }
     });
 
-    if (document.getElementById('s-orders').classList.contains('active')) renderAllActiveOrders();
+    if (document.getElementById('s-orders').classList.contains('active')) renderAllOrders();
   });
 }
 
@@ -730,14 +738,60 @@ function closeNotif(id) {
   tgHaptic('light');
 }
 
-function renderAllActiveOrders() {
+function renderAllOrders() {
   const container = document.getElementById('orders-content');
-  if (!ACTIVE_ORDERS.length) {
-    container.innerHTML = `<div class="empty" style="padding-top:40px"><div class="empty-icon">📦</div><div class="empty-text">Нет активных заказов</div><button class="btn btn-primary" style="margin-top:20px" onclick="navTo('s-home');setNav(document.getElementById('nav-home'))">🏪 К заведениям</button></div>`;
+  const active  = (_allClientOrders.length ? _allClientOrders : ACTIVE_ORDERS)
+    .filter(o => !['delivered','cancelled'].includes(o.status))
+    .sort((a,b) => (b.createdAt||'').localeCompare(a.createdAt||''));
+  const history = (_allClientOrders)
+    .filter(o => ['delivered','cancelled'].includes(o.status))
+    .sort((a,b) => (b.createdAt||'').localeCompare(a.createdAt||''))
+    .slice(0, 60);
+
+  if (!active.length && !history.length) {
+    container.innerHTML = `
+      <div class="empty" style="padding-top:40px">
+        <div class="empty-icon">📦</div>
+        <div class="empty-text">Заказов пока нет</div>
+        <button class="btn btn-primary" style="margin-top:20px" onclick="navTo('s-home');setNav(document.getElementById('nav-home'))">🏪 К заведениям</button>
+      </div>`;
     return;
   }
-  container.innerHTML = ACTIVE_ORDERS.map(renderOrderCard).join('');
+
+  let html = '';
+
+  if (active.length) {
+    html += `<div class="section-title" style="padding:0 4px;margin-bottom:4px">Активные (${active.length})</div>`;
+    html += active.map(renderOrderCard).join('');
+  }
+
+  if (history.length) {
+    html += `<div class="section-title" style="padding:0 4px;margin:12px 0 4px">История</div>`;
+    html += history.map(renderHistoryCard).join('');
+  }
+
+  container.innerHTML = html;
   startAllCountdowns();
+}
+
+// Compact history card (no status track)
+function renderHistoryCard(o) {
+  return `
+    <div class="order-card" style="border-left:3px solid ${o.status==='delivered'?'var(--success)':'var(--danger)'}">
+      <div class="order-card-hdr">
+        <div>
+          <div class="font-bold" style="font-size:13px">📍 ${o.venueName||'Заведение'}</div>
+          <div class="order-id">${fmtDate(o.createdAt)} · #${(o.id||'').slice(-6)}</div>
+        </div>
+        <div style="text-align:right">
+          <span class="${statusBadgeClass(o.status)}">${statusLabel(o.status)}</span>
+          <div class="order-total" style="font-size:15px;margin-top:3px">${fmtPrice(o.total)}</div>
+        </div>
+      </div>
+      <div class="order-card-body">
+        <div class="text-sm text-dim">${(o.items||[]).map(i=>`${i.emoji||'🍽️'} ${i.name} ×${i.qty}`).join(', ')}</div>
+      </div>
+    </div>`;
 }
 
 function renderOrderCard(o) {
@@ -802,24 +856,7 @@ function _startCountdown(o) {
   tick(); _cdIntervals[o.id] = setInterval(tick, 1000);
 }
 
-// ── History ──
-async function loadHistory() {
-  const container = document.getElementById('history-list');
-  container.innerHTML = '<div class="loader"><div class="spinner"></div></div>';
-  const orders = (await dbQuery('orders','clientUid','==',STATE.uid))
-    .sort((a,b)=>(b.createdAt||'').localeCompare(a.createdAt||'')).slice(0,60);
-  if (!orders.length) { container.innerHTML='<div class="empty"><div class="empty-icon">📋</div><div class="empty-text">Заказов ещё нет</div></div>'; return; }
-  container.innerHTML = orders.map(o => `
-    <div class="order-card">
-      <div class="order-card-hdr">
-        <div><div class="font-bold" style="font-size:13px">${o.venueName||'Заведение'}</div><div class="order-id">${fmtDate(o.createdAt)} · #${(o.id||'').slice(-6)}</div></div>
-        <div style="text-align:right"><span class="${statusBadgeClass(o.status)}">${statusLabel(o.status)}</span><div class="order-total" style="font-size:16px;margin-top:3px">${fmtPrice(o.total)}</div></div>
-      </div>
-      <div class="order-card-body">
-        <div class="text-sm text-dim">${(o.items||[]).map(i=>`${i.emoji||'🍽️'} ${i.name} ×${i.qty}`).join(', ')}</div>
-      </div>
-    </div>`).join('');
-}
+// loadHistory is now merged into renderAllOrders() above
 
 // ══════════════════════════════════════════════════════════
 //  REVIEWS
@@ -1016,17 +1053,17 @@ async function saveAddress() {
 // ══════════════════════════════════════════════════════════
 function navTo(screenId) {
   showScreen(screenId);
-  // FAB скрываем только если уходим с venue-экрана
   if (screenId !== 's-venue') {
     document.getElementById('cart-fab').classList.add('hidden');
   }
   if (screenId === 's-home') loadVenues();
-  if (screenId === 's-orders') renderAllActiveOrders();
+  if (screenId === 's-orders') renderAllOrders();
 }
 
-function navToOrders() {
-  if (ACTIVE_ORDERS.length > 0) { navTo('s-orders'); }
-  else { navTo('s-history'); loadHistory(); }
+function navToAllOrders() {
+  navTo('s-orders');
+  setNav(document.getElementById('nav-orders'));
+  renderAllOrders();
 }
 
 function setNav(el) {

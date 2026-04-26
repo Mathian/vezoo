@@ -117,11 +117,11 @@
 
 <!-- BOTTOM NAV -->
 <div class="bottom-nav" id="main-nav" style="display:none">
-  <div class="nav-item active" id="nav-new" onclick="showScreen('s-new-orders');setNav(this)">
+  <div class="nav-item active" id="nav-new" onclick="navToNewOrders()">
     <div class="nav-icon">🔔</div><div class="nav-label">Новые</div>
     <div class="nav-badge hidden" id="new-badge">0</div>
   </div>
-  <div class="nav-item" id="nav-active" onclick="showScreen('s-active-orders');setNav(this)">
+  <div class="nav-item" id="nav-active" onclick="navToActiveOrders()">
     <div class="nav-icon">⚡</div><div class="nav-label">Активные</div>
   </div>
   <div class="nav-item" id="nav-hist" onclick="showScreen('s-op-history');setNav(this);loadOpHistory()">

@@ -209,16 +209,10 @@
   </div>
 </div>
 
-<!-- ACTIVE ORDERS -->
+<!-- ORDERS (active + history merged) -->
 <div id="s-orders" class="screen">
-  <div class="page-hdr"><h2>Мои заказы</h2></div>
-  <div id="orders-content" class="content" style="gap:14px"></div>
-</div>
-
-<!-- HISTORY -->
-<div id="s-history" class="screen">
-  <div class="page-hdr"><h2>История</h2></div>
-  <div id="history-list" class="content" style="gap:10px"></div>
+  <div class="page-hdr"><h2>Заказы</h2></div>
+  <div id="orders-content" class="content" style="gap:10px;padding-top:12px"></div>
 </div>
 
 <!-- SETTINGS -->
@@ -256,12 +250,9 @@
     <div class="nav-icon">🛒</div><div class="nav-label">Корзина</div>
     <div class="nav-badge hidden" id="cart-nav-badge">0</div>
   </div>
-  <div class="nav-item" id="nav-orders" onclick="navToOrders();setNav(this)">
+  <div class="nav-item" id="nav-orders" onclick="navToAllOrders();setNav(this)">
     <div class="nav-icon">📦</div><div class="nav-label">Заказы</div>
     <div class="nav-badge hidden" id="order-nav-badge">!</div>
-  </div>
-  <div class="nav-item" id="nav-history" onclick="navTo('s-history');loadHistory();setNav(this)">
-    <div class="nav-icon">📋</div><div class="nav-label">История</div>
   </div>
   <div class="nav-item" id="nav-settings" onclick="navTo('s-settings');loadSettings2();setNav(this)">
     <div class="nav-icon">👤</div><div class="nav-label">Профиль</div>

@@ -23,9 +23,12 @@ let _invitePending = null; // pending operator invite data
 window.addEventListener('DOMContentLoaded', async () => {
   if (new URLSearchParams(location.search).get('reset') === '1') { localStorage.clear(); location.replace(location.pathname); return; }
   tgReady();
+  const _tgUserId = tg?.initDataUnsafe?.user?.id ? String(tg.initDataUnsafe.user.id) : null;
   try {
     const s = JSON.parse(localStorage.getItem('vez_admin_state') || '{}');
-    STATE.uid = s.uid || null; STATE.user = s.user || null;
+    if (!_tgUserId || !s.tgId || s.tgId === _tgUserId) {
+      STATE.uid = s.uid || null; STATE.user = s.user || null;
+    }
   } catch {}
   const urlUid = readUidFromUrl();
   if (urlUid) { STATE.uid = urlUid; saveState(); }
@@ -40,7 +43,10 @@ window.addEventListener('DOMContentLoaded', async () => {
   await checkVenueAndInit();
 });
 
-function saveState() { try { localStorage.setItem('vez_admin_state', JSON.stringify({ uid: STATE.uid, user: STATE.user })); } catch {} }
+function saveState() {
+  const tgUserId = tg?.initDataUnsafe?.user?.id ? String(tg.initDataUnsafe.user.id) : null;
+  try { localStorage.setItem('vez_admin_state', JSON.stringify({ uid: STATE.uid, user: STATE.user, tgId: tgUserId })); } catch {}
+}
 
 // ── Agreement ──
 function toggleAgreeCheck() {
@@ -164,9 +170,35 @@ async function loadMenuItems() {
   MENU_CATS  = [...new Set(MENU_ITEMS.map(i => i.category).filter(Boolean))];
   renderMenuCatTabs();
   renderMenuItems(null);
-  // Update datalist
-  const dl = document.getElementById('menu-cats-dl');
-  if (dl) dl.innerHTML = MENU_CATS.map(c => `<option value="${c}">`).join('');
+  // Update category select in item sheet
+  _refreshCatSelect();
+}
+
+function _refreshCatSelect(currentVal) {
+  const sel = document.getElementById('it-cat');
+  if (!sel) return;
+  sel.innerHTML =
+    '<option value="">— без категории —</option>' +
+    MENU_CATS.map(c => `<option value="${c}"${c === currentVal ? ' selected' : ''}>${c}</option>`).join('') +
+    '<option value="__new__">✏️ Новая категория...</option>';
+  if (currentVal && !MENU_CATS.includes(currentVal)) {
+    sel.value = '__new__';
+    const custom = document.getElementById('it-cat-custom');
+    if (custom) { custom.style.display = ''; custom.value = currentVal; }
+  }
+}
+
+function handleCatChange(sel) {
+  const custom = document.getElementById('it-cat-custom');
+  if (!custom) return;
+  custom.style.display = sel.value === '__new__' ? '' : 'none';
+  if (sel.value !== '__new__') custom.value = '';
+}
+
+function _getCatValue() {
+  const sel = document.getElementById('it-cat');
+  if (sel.value === '__new__') return (document.getElementById('it-cat-custom')?.value || '').trim();
+  return sel.value;
 }
 
 function renderMenuCatTabs() {
@@ -218,11 +250,13 @@ function openAddItem() {
   _editItemId = null; _variants = []; _hasVariants = false; _itemImgDataUrl = null;
   document.getElementById('item-sheet-title').textContent = 'Добавить позицию';
   document.getElementById('it-name').value    = '';
-  document.getElementById('it-cat').value     = '';
   document.getElementById('it-emoji').value   = '';
   document.getElementById('it-desc').value    = '';
   document.getElementById('it-img-url').value = '';
   document.getElementById('it-price').value   = '';
+  _refreshCatSelect();
+  const custom = document.getElementById('it-cat-custom');
+  if (custom) custom.style.display = 'none';
   document.getElementById('it-available').checked = true;
   document.getElementById('it-img-upload').innerHTML = `<input type="file" id="it-img-file" accept="image/*" onchange="previewItemImg(this)"><span class="img-upload-txt">📷 Загрузить фото</span>`;
   document.getElementById('variants-check-box').textContent = '';
@@ -239,7 +273,7 @@ async function openEditItem(itemId) {
   _editItemId = itemId; _variants = [...(item.variants||[])]; _hasVariants = _variants.length > 0; _itemImgDataUrl = null;
   document.getElementById('item-sheet-title').textContent = 'Редактировать позицию';
   document.getElementById('it-name').value    = item.name||'';
-  document.getElementById('it-cat').value     = item.category||'';
+  _refreshCatSelect(item.category || '');
   document.getElementById('it-emoji').value   = item.emoji||'';
   document.getElementById('it-desc').value    = item.description||'';
   document.getElementById('it-img-url').value = item.imageUrl||'';
@@ -301,7 +335,7 @@ function removeVariant(i) { _variants.splice(i, 1); renderVariants(); }
 
 async function saveItem() {
   const name  = document.getElementById('it-name').value.trim();
-  const cat   = document.getElementById('it-cat').value.trim();
+  const cat   = _getCatValue();
   const emoji = document.getElementById('it-emoji').value.trim() || '🍽️';
   const desc  = document.getElementById('it-desc').value.trim();
   const imgUrl = document.getElementById('it-img-url').value.trim() || _itemImgDataUrl || '';

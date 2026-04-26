@@ -14,9 +14,12 @@ let _agreedCheck = false;
 window.addEventListener('DOMContentLoaded', async () => {
   if (new URLSearchParams(location.search).get('reset') === '1') { localStorage.clear(); location.replace(location.pathname); return; }
   tgReady();
+  const _tgUserId = tg?.initDataUnsafe?.user?.id ? String(tg.initDataUnsafe.user.id) : null;
   try {
     const s = JSON.parse(localStorage.getItem('vez_sa_state') || '{}');
-    STATE.uid = s.uid||null; STATE.user = s.user||null;
+    if (!_tgUserId || !s.tgId || s.tgId === _tgUserId) {
+      STATE.uid = s.uid||null; STATE.user = s.user||null;
+    }
   } catch {}
   const urlUid = readUidFromUrl();
   if (urlUid) { STATE.uid = urlUid; saveState(); }
@@ -38,7 +41,10 @@ window.addEventListener('DOMContentLoaded', async () => {
   initMain();
 });
 
-function saveState() { try { localStorage.setItem('vez_sa_state', JSON.stringify({ uid: STATE.uid, user: STATE.user })); } catch {} }
+function saveState() {
+  const tgUserId = tg?.initDataUnsafe?.user?.id ? String(tg.initDataUnsafe.user.id) : null;
+  try { localStorage.setItem('vez_sa_state', JSON.stringify({ uid: STATE.uid, user: STATE.user, tgId: tgUserId })); } catch {}
+}
 
 function toggleAgreeCheck() {
   const cb = document.getElementById('agree-cb');
