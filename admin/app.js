@@ -702,12 +702,19 @@ async function saveDeliverySettings() {
   tgHaptic('success'); showToast('Настройки доставки сохранены', 'success');
 }
 
+// Normalize phone to digits-only for comparison (e.g. "+7 777 123-45-67" → "77771234567")
+function _normPhone(p) { return String(p||'').replace(/\D/g,''); }
+function _findLinkByPhone(links, phone) {
+  const n = _normPhone(phone);
+  return links.find(l => _normPhone(l.phone) === n);
+}
+
 async function assignOperator() {
   const phone = document.getElementById('op-phone').value.trim();
   if (!phone) { showToast('Введите телефон', 'warning'); return; }
   // Find user by phone in user_links
   const links = await dbGetAll('user_links');
-  const link  = links.find(l => l.phone === phone || l.phone === phone.replace(/^\+/,'') || ('+'+l.phone) === phone);
+  const link  = _findLinkByPhone(links, phone);
   if (!link) { showToast('Пользователь с таким номером не найден', 'error'); return; }
   const uid = link.uid;
   // Save invite
@@ -735,7 +742,7 @@ async function addPermCourier() {
   const phone = document.getElementById('courier-phone').value.trim();
   if (!phone) { showToast('Введите телефон', 'warning'); return; }
   const links = await dbGetAll('user_links');
-  const link  = links.find(l => l.phone === phone || l.phone === phone.replace(/^\+/,'') || ('+'+l.phone) === phone);
+  const link  = _findLinkByPhone(links, phone);
   if (!link) { showToast('Курьер с таким номером не найден', 'error'); return; }
   const uid = link.uid;
   const courier = await dbGet('couriers', uid);
@@ -786,7 +793,7 @@ async function addToBlacklistByPhone() {
   const phone = document.getElementById('bl-phone').value.trim();
   if (!phone) { showToast('Введите телефон', 'warning'); return; }
   const links = await dbGetAll('user_links');
-  const link  = links.find(l => l.phone === phone || l.phone === phone.replace(/^\+/,'') || ('+'+l.phone) === phone);
+  const link  = _findLinkByPhone(links, phone);
   if (!link) { showToast('Пользователь с таким номером не найден', 'error'); return; }
   const blId = VENUE.id + '_' + link.uid;
   await dbSet('venue_blacklist', blId, {
