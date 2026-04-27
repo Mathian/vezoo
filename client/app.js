@@ -824,7 +824,7 @@ function renderOrderCard(o) {
     : [{icon:'📋',label:'Создан'},{icon:'👨‍🍳',label:'Готовится'},{icon:'🚴',label:'В пути'},{icon:'✅',label:'Доставлен'}];
   const stepIdx = isPickup
     ? { pending:0, accepted:0, cooking:1, delivered:2, cancelled:0 }
-    : { pending:0, accepted:0, cooking:1, searching_courier:2, delivering:2, delivered:3, cancelled:0 };
+    : { pending:0, accepted:0, cooking:1, searching_courier:2, courier_assigned:2, delivering:2, delivered:3, cancelled:0 };
   const si = stepIdx[o.status] ?? 0;
   const track = o.status==='cancelled'
     ? '<div style="color:var(--danger);font-weight:600;font-size:14px;text-align:center">❌ Заказ отменён</div>'

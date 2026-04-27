@@ -299,6 +299,15 @@ async function openOrderDetail(orderId) {
         <button class="btn btn-primary btn-sm" onclick="opOpenAssignCourier('${orderId}')">👤 Назначить напрямую</button>
         ${cancelBtn}
       </div>`;
+  } else if (order.status === 'courier_assigned') {
+    // Курьер принял и едет в кафе — оператор передаёт заказ физически
+    actionBtns = `
+      <div class="alert-box info" style="margin-bottom:8px;font-size:13px">🏃 <strong>${order.courierName||'Курьер'}</strong> едет в кафе</div>
+      <div style="display:flex;flex-direction:column;gap:8px">
+        <button class="btn btn-success btn-sm" onclick="opHandOverCourier('${orderId}')">📦 Передать заказ курьеру</button>
+        <button class="btn btn-ghost btn-sm" onclick="opSearchCourier('${orderId}')">🔄 Найти другого курьера</button>
+        ${cancelBtn}
+      </div>`;
   } else if (order.status === 'delivering') {
     // Курьер везёт — можно снять его и заново найти/назначить
     actionBtns = `
@@ -397,6 +406,18 @@ async function opUnassignCourier(orderId) {
   } else if (confirm('Снять текущего курьера?')) {
     await doUnassign();
   }
+}
+
+async function opHandOverCourier(orderId) {
+  // Оператор передал физический заказ курьеру → статус delivering
+  const order = _allOrders.find(o => o.id === orderId);
+  const courierName = order?.courierName || 'Курьер';
+  await dbSet('orders', orderId, {
+    status: 'delivering',
+    handedOverAt: new Date().toISOString(),
+    clientNotification: { type: 'delivering', seen: false, message: `Курьер ${courierName} везёт ваш заказ!` }
+  });
+  closeOrderSheet(); tgHaptic('success'); showToast(`Заказ передан курьеру ${courierName}`, 'success');
 }
 
 async function opSearchCourier(orderId) {

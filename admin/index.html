@@ -197,28 +197,37 @@
     </div>
     <div class="section">
       <div class="section-title">Оператор</div>
-      <div id="current-operator-info" class="alert-box info" style="margin-bottom:8px">Оператор не назначен</div>
-      <div class="inp-row">
-        <div class="field"><label>Телефон оператора</label><input class="inp" id="op-phone" placeholder="+7..."></div>
-        <button class="btn btn-secondary btn-sm" style="margin-top:22px;flex-shrink:0" onclick="assignOperator()">Назначить</button>
+      <div id="current-operator-info" class="alert-box info" style="margin-bottom:10px">Оператор не назначен</div>
+      <div class="field">
+        <label>Телефон оператора</label>
+        <div style="display:flex;gap:8px;align-items:center">
+          <input class="inp" style="flex:1;min-width:0" id="op-phone" type="tel" placeholder="+7 (777) 000-00-00">
+          <button class="btn btn-secondary btn-sm" style="white-space:nowrap" onclick="assignOperator()">Назначить</button>
+        </div>
       </div>
-      <button class="btn btn-ghost btn-sm" onclick="removeOperator()" id="remove-op-btn" style="display:none">Снять оператора</button>
+      <button class="btn btn-ghost btn-sm" onclick="removeOperator()" id="remove-op-btn" style="display:none;margin-top:6px;color:var(--danger)">✕ Снять оператора</button>
     </div>
     <div class="section">
       <div class="section-title">Постоянные курьеры</div>
-      <div id="perm-couriers-list" style="display:flex;flex-direction:column;gap:6px;margin-bottom:8px"></div>
-      <div class="inp-row">
-        <div class="field"><label>Телефон курьера</label><input class="inp" id="courier-phone" placeholder="+7..."></div>
-        <button class="btn btn-secondary btn-sm" style="margin-top:22px;flex-shrink:0" onclick="addPermCourier()">Добавить</button>
+      <div id="perm-couriers-list" style="display:flex;flex-direction:column;gap:6px;margin-bottom:10px"></div>
+      <div class="field">
+        <label>Добавить курьера по телефону</label>
+        <div style="display:flex;gap:8px;align-items:center">
+          <input class="inp" style="flex:1;min-width:0" id="courier-phone" type="tel" placeholder="+7 (777) 000-00-00">
+          <button class="btn btn-secondary btn-sm" style="white-space:nowrap" onclick="addPermCourier()">Добавить</button>
+        </div>
       </div>
     </div>
     <div class="section">
-      <div class="section-title">🚫 Чёрный список клиентов</div>
-      <div class="alert-box info" style="margin-bottom:8px;font-size:12px">Клиенты из ЧС не смогут оформить заказ в вашем заведении</div>
-      <div id="blacklist-items" style="display:flex;flex-direction:column;gap:6px;margin-bottom:8px"></div>
-      <div class="inp-row">
-        <div class="field"><label>Телефон клиента</label><input class="inp" id="bl-phone" placeholder="+7..."></div>
-        <button class="btn btn-danger btn-sm" style="margin-top:22px;flex-shrink:0" onclick="addToBlacklistByPhone()">+ В ЧС</button>
+      <div class="section-title">🚫 Чёрный список</div>
+      <div class="alert-box info" style="margin-bottom:10px;font-size:12px">Клиенты из ЧС не смогут оформить заказ в вашем заведении</div>
+      <div id="blacklist-items" style="display:flex;flex-direction:column;gap:6px;margin-bottom:10px"></div>
+      <div class="field">
+        <label>Добавить клиента по телефону</label>
+        <div style="display:flex;gap:8px;align-items:center">
+          <input class="inp" style="flex:1;min-width:0" id="bl-phone" type="tel" placeholder="+7 (777) 000-00-00">
+          <button class="btn btn-danger btn-sm" style="white-space:nowrap" onclick="addToBlacklistByPhone()">+ В ЧС</button>
+        </div>
       </div>
     </div>
   </div>

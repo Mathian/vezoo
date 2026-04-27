@@ -227,15 +227,15 @@ function fmtCountdown(ms) {
 function statusLabel(st) {
   return {
     pending:'Ожидает', accepted:'Принят', cooking:'Готовится',
-    searching_courier:'Ищем курьера', delivering:'Доставляется',
-    delivered:'Доставлен', cancelled:'Отменён'
+    searching_courier:'Ищем курьера', courier_assigned:'Курьер едет',
+    delivering:'Доставляется', delivered:'Доставлен', cancelled:'Отменён'
   }[st] || st;
 }
 function statusBadgeClass(st) {
   const map = {
     pending:'badge-pending', accepted:'badge-accepted', cooking:'badge-accepted',
-    searching_courier:'badge-searching', delivering:'badge-delivering',
-    delivered:'badge-delivered', cancelled:'badge-cancelled'
+    searching_courier:'badge-searching', courier_assigned:'badge-searching',
+    delivering:'badge-delivering', delivered:'badge-delivered', cancelled:'badge-cancelled'
   };
   return 'badge ' + (map[st] || 'badge-pending');
 }

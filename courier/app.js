@@ -235,17 +235,18 @@ async function openAcceptSheet(orderId) {
 }
 
 async function acceptOrder(orderId) {
-  // Курьер принимает заказ — автоматически назначается ему
+  // Курьер принимает заказ — статус courier_assigned (едет в кафе)
+  // Оператор потом нажимает "Передал заказ" → статус delivering
+  _shownAssigned.add(orderId); // не показывать нотификацию о назначении — курьер сам принял
   await dbSet('orders', orderId, {
-    status: 'delivering',
+    status: 'courier_assigned',
     courierUid: STATE.uid,
     courierName: COURIER_DATA?.name || 'Курьер',
-    assignedAt: new Date().toISOString(),
-    clientNotification: { type: 'delivering', seen: false, message: `Курьер везёт ваш заказ!` }
+    assignedAt: new Date().toISOString()
   });
   closeAcceptSheet();
   tgHaptic('success');
-  showToast('Заказ принят! Везёте вы.', 'success');
+  showToast('Заказ принят! Едете в кафе за заказом.', 'success');
   showScreen('s-my-orders');
   setNav(document.getElementById('nav-my'));
 }
@@ -261,12 +262,14 @@ function closeAcceptSheet(e) {
 function watchMyOrders() {
   if (_myUnsub) { _myUnsub(); _myUnsub = null; }
   _myUnsub = onQuerySnap('orders', 'courierUid', '==', STATE.uid, orders => {
-    _myOrders = orders.filter(o => o.status === 'delivering').sort((a,b)=>(a.createdAt||'').localeCompare(b.createdAt||''));
+    _myOrders = orders
+      .filter(o => o.status === 'courier_assigned' || o.status === 'delivering')
+      .sort((a,b) => (a.createdAt||'').localeCompare(b.createdAt||''));
     const cnt = _myOrders.length;
     document.getElementById('my-badge').textContent = cnt;
     document.getElementById('my-badge').classList.toggle('hidden', cnt===0);
 
-    // Check for newly assigned orders (from operator direct assign)
+    // Нотификация при назначении оператором напрямую (courier_assigned)
     _myOrders.forEach(o => {
       if (!_shownAssigned.has(o.id)) {
         _shownAssigned.add(o.id);
@@ -343,10 +346,13 @@ async function openMyOrder(orderId) {
     <div class="card card-body" style="margin-bottom:14px;gap:5px;display:flex;flex-direction:column">
       ${(order.items||[]).map(it=>`<div class="flex justify-between text-sm"><span>${it.emoji||'🍽️'} ${it.name}${it.variantName?' ('+it.variantName+')':''} ×${it.qty}</span><span>${fmtPrice(it.price*it.qty)}</span></div>`).join('')}
     </div>
-    <div class="btn-row">
-      <button class="btn btn-ghost btn-sm" onclick="courierReturn('${order.id}')">↩ Возврат</button>
-      <button class="btn btn-success" onclick="courierDeliver('${order.id}')">✅ Доставил</button>
-    </div>`;
+    ${order.status === 'courier_assigned'
+      ? `<div class="alert-box info" style="text-align:center;font-size:14px">🏃 Едете в кафе за заказом.<br><span style="font-size:12px;color:var(--text-dim)">Оператор передаст заказ и подтвердит выдачу</span></div>`
+      : `<div class="btn-row">
+           <button class="btn btn-ghost btn-sm" onclick="courierReturn('${order.id}')">↩ Возврат</button>
+           <button class="btn btn-success" onclick="courierDeliver('${order.id}')">✅ Доставил</button>
+         </div>`
+    }`;
   document.getElementById('my-order-overlay').classList.add('open'); tg?.BackButton?.show();
 }
 

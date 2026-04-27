@@ -502,6 +502,13 @@ function renderAdminOrderActions(order) {
       <button class="btn btn-primary btn-sm" onclick="openAssignCourier('${order.id}')">👤 Назначить напрямую</button>
       ${cancelBtn}
     </div>${blBtn}`;
+  if (order.status === 'courier_assigned') return `
+    <div style="display:flex;flex-direction:column;gap:8px">
+      <div class="alert-box info" style="font-size:13px">🏃 <strong>${order.courierName||'Курьер'}</strong> едет в кафе</div>
+      <button class="btn btn-success btn-sm" onclick="adminHandOverCourier('${order.id}')">📦 Передать заказ курьеру</button>
+      <button class="btn btn-ghost btn-sm" onclick="adminSearchCourier('${order.id}')">🔄 Найти другого курьера</button>
+      ${cancelBtn}
+    </div>${blBtn}`;
   if (order.status === 'delivering') return `
     <div style="display:flex;flex-direction:column;gap:8px">
       <div class="alert-box success">🚴 Курьер: <strong>${order.courierName||''}</strong></div>
@@ -537,9 +544,22 @@ async function adminCancelOrder(orderId) {
 }
 
 async function adminSearchCourier(orderId) {
-  await dbSet('orders', orderId, { status: 'searching_courier', searchStartedAt: new Date().toISOString() });
+  await dbSet('orders', orderId, { status: 'searching_courier', courierUid: null, courierName: null, searchStartedAt: new Date().toISOString() });
   tgHaptic('success'); showToast('Курьеры уведомлены', 'success');
   closeOrderSheet(); await loadOrders(_ordersTab);
+}
+
+async function adminHandOverCourier(orderId) {
+  const orders = await dbQuery('orders', 'venueId', '==', VENUE.id);
+  const order = orders.find(o => o.id === orderId);
+  const courierName = order?.courierName || 'Курьер';
+  await dbSet('orders', orderId, {
+    status: 'delivering',
+    handedOverAt: new Date().toISOString(),
+    clientNotification: { type: 'delivering', seen: false, message: `Курьер ${courierName} везёт ваш заказ!` }
+  });
+  closeOrderSheet(); tgHaptic('success'); showToast(`Заказ передан курьеру ${courierName}`, 'success');
+  await loadOrders(_ordersTab);
 }
 
 let _assignOrderId = null;
