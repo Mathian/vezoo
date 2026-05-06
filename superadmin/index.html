@@ -132,7 +132,19 @@
     <div class="stats-period-tabs">
       <button class="period-tab active" onclick="setSaPeriod(7,this)">7 дней</button>
       <button class="period-tab" onclick="setSaPeriod(30,this)">30 дней</button>
+      <button class="period-tab" onclick="setSaPeriod(90,this)">90 дней</button>
       <button class="period-tab" onclick="setSaPeriod(0,this)">Всё время</button>
+    </div>
+    <div class="card card-body" style="flex-direction:row;gap:10px;align-items:center;padding:10px 14px">
+      <div style="flex:1;display:flex;flex-direction:column;gap:4px">
+        <label style="font-size:11px;color:var(--text-dim)">Начало</label>
+        <input class="inp" type="date" id="sa-date-from" style="padding:6px 10px;font-size:13px" onchange="loadSaStatsCustom()">
+      </div>
+      <div style="color:var(--text-dim);font-size:18px;padding-top:16px">—</div>
+      <div style="flex:1;display:flex;flex-direction:column;gap:4px">
+        <label style="font-size:11px;color:var(--text-dim)">Конец</label>
+        <input class="inp" type="date" id="sa-date-to" style="padding:6px 10px;font-size:13px" onchange="loadSaStatsCustom()">
+      </div>
     </div>
     <div id="sa-stats-venues" style="display:flex;flex-direction:column;gap:8px"></div>
 

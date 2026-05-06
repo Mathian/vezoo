@@ -36,23 +36,13 @@
     <div class="logo"><div class="logo-icon">🚀</div><div class="logo-text"><span>Vezoo</span></div></div>
   </div>
   <div class="agree-screen-body">
-    <h2>Пользовательское соглашение</h2>
-    <div class="agree-doc">
-      <h4>1. Общие положения</h4>
-      <p>Настоящее Соглашение регулирует использование сервиса Vezoo — агрегатора доставки. Используя приложение, вы принимаете условия данного Соглашения.</p>
-      <h4 style="margin-top:12px">2. Регистрация и данные</h4>
-      <p>Для использования сервиса вы предоставляете номер телефона. Эти данные используются исключительно для идентификации и доставки заказов.</p>
-      <h4 style="margin-top:12px">3. Заказы и оплата</h4>
-      <p>Вы обязуетесь корректно указывать адрес доставки и выбранный способ оплаты. Отмена заказа после его принятия оператором невозможна в автоматическом режиме.</p>
-      <h4 style="margin-top:12px">4. Ответственность</h4>
-      <p>Vezoo является агрегатором и не несёт ответственности за качество товаров заведений-партнёров.</p>
-      <h4 style="margin-top:12px">5. Правила поведения</h4>
-      <p>Запрещается злоупотреблять сервисом, размещать заведомо ложные заказы, оставлять оскорбительные отзывы.</p>
-    </div>
+    <div class="logo" style="justify-content:center;margin-bottom:4px"><div class="logo-icon">🚀</div><div class="logo-text"><span>Vezoo</span></div></div>
+    <h2 style="text-align:center;font-size:17px">Пользовательское соглашение</h2>
+    <div class="agree-doc" id="agree-doc-content"></div>
     <label class="check-row" id="agree-check-row" onclick="toggleAgreeCheck()">
       <input type="checkbox" id="agree-cb" style="display:none">
       <div class="check-box" id="agree-box"></div>
-      <span class="check-label">Я прочитал(а) и согласен(а) с условиями</span>
+      <span class="check-label">Я прочитал(а) и принимаю условия Соглашения</span>
     </label>
   </div>
   <div class="agree-screen-foot">
@@ -78,9 +68,9 @@
       <div class="logo-icon">🚀</div>
       <div class="logo-text"><span>Vezoo</span></div>
     </div>
-    <div class="page-hdr-end" style="display:flex;align-items:center;gap:8px">
-      <button class="btn-icon btn-ghost" onclick="openCityChange()" id="city-btn" title="Город" style="font-size:12px;color:var(--text-dim)">📍—</button>
-      <button class="btn-icon btn-ghost" onclick="toggleFavFilter()" id="fav-filter-btn" title="Избранное">🤍</button>
+    <div class="page-hdr-end" style="display:flex;align-items:center;gap:8px;flex:1;justify-content:flex-end;min-width:0;overflow:hidden">
+      <button onclick="openCityChange()" id="city-btn" title="Город">📍—</button>
+      <button class="btn-icon btn-ghost" onclick="toggleFavFilter()" id="fav-filter-btn" title="Избранное" style="flex-shrink:0">🤍</button>
     </div>
   </div>
   <div id="home-cat-tabs" class="cat-tabs" style="padding-top:12px"></div>

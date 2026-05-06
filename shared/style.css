@@ -1107,5 +1107,7 @@ select.inp option { background:var(--card-2);color:var(--text); }
   font-size:12px;padding:5px 10px;border-radius:var(--radius-sm);
   background:var(--card-2);border:1px solid var(--border);
   color:var(--text-dim);cursor:pointer;transition:all var(--tr);
-  white-space:nowrap;max-width:130px;overflow:hidden;text-overflow:ellipsis;
+  white-space:nowrap;max-width:200px;overflow:hidden;text-overflow:ellipsis;
+  flex-shrink:1;min-width:0;
 }
+#city-btn:active { background:var(--card-3);color:var(--primary); }

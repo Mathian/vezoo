@@ -11,7 +11,7 @@ let _editCatId   = null;
 let _editCountryId = null;
 let _editCityId  = null;
 let _pinBuffer   = '';
-let _saStatsPeriod = 7;
+let _saStatsPeriod = 7; // days; 0 = all time; -1 = custom range
 
 // ══════════════════════════════════════════════════════════
 //  BOOT
@@ -567,6 +567,18 @@ function setSaPeriod(days, el) {
   document.querySelectorAll('.period-tab').forEach(b=>b.classList.remove('active'));
   el.classList.add('active');
   _saStatsPeriod = days;
+  // Clear custom date inputs when using quick tabs
+  const dfrom = document.getElementById('sa-date-from');
+  const dto   = document.getElementById('sa-date-to');
+  if (dfrom) dfrom.value = '';
+  if (dto)   dto.value   = '';
+  loadSaStats();
+}
+
+function loadSaStatsCustom() {
+  // Deactivate period tabs when using custom range
+  document.querySelectorAll('.period-tab').forEach(b=>b.classList.remove('active'));
+  _saStatsPeriod = -1; // -1 = custom range
   loadSaStats();
 }
 
@@ -577,7 +589,19 @@ async function loadSaStats() {
 
   // Filter by period
   let orders = allOrders;
-  if (_saStatsPeriod > 0) {
+  if (_saStatsPeriod === -1) {
+    // Custom date range
+    const dfrom = document.getElementById('sa-date-from')?.value;
+    const dto   = document.getElementById('sa-date-to')?.value;
+    if (dfrom || dto) {
+      orders = allOrders.filter(o => {
+        const d = (o.createdAt||'').slice(0,10);
+        if (dfrom && d < dfrom) return false;
+        if (dto   && d > dto)   return false;
+        return true;
+      });
+    }
+  } else if (_saStatsPeriod > 0) {
     const cutoff = new Date(Date.now() - _saStatsPeriod * 86400000).toISOString();
     orders = allOrders.filter(o => (o.createdAt||'') >= cutoff);
   }

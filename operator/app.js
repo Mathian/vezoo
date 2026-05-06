@@ -92,7 +92,19 @@ async function checkVenueAssignment() {
     document.getElementById('invite-venue-addr').textContent = invite.venueAddress||'';
     showScreen('s-confirm-venue'); return;
   }
+  _renderWaitingQr();
   showScreen('s-no-venue');
+}
+
+function _renderWaitingQr() {
+  const phone = STATE.user?.phone || '';
+  const qrImg = document.getElementById('op-waiting-qr');
+  const qrPhn = document.getElementById('op-waiting-phone');
+  if (qrImg && phone) {
+    qrImg.src = getQrUrl(phone, 160);
+    qrImg.onerror = () => { qrImg.style.display = 'none'; };
+  }
+  if (qrPhn) qrPhn.textContent = phone || '—';
 }
 
 async function acceptVenueInvite() {
