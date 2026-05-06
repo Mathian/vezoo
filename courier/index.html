@@ -31,23 +31,12 @@
     <div class="logo"><div class="logo-icon">🚴</div><div class="logo-text"><span>Vezoo</span> Курьер</div></div>
   </div>
   <div class="agree-screen-body">
-    <h2>Соглашение курьера</h2>
-    <div class="agree-doc">
-      <h4>1. Требования к курьеру</h4>
-      <p>Курьер обязан иметь действующий документ, удостоверяющий личность, и транспортное средство. Аккаунт проходит модерацию суперадминистратором.</p>
-      <h4 style="margin-top:12px">2. Смены и заказы</h4>
-      <p>Курьер самостоятельно управляет своими сменами. Во время смены доступны как заказы от постоянных партнёров, так и свободные заказы из общего списка.</p>
-      <h4 style="margin-top:12px">3. Качество доставки</h4>
-      <p>Курьер обязан доставлять заказы в указанное время, обращаться с товарами бережно и вести себя вежливо с клиентами.</p>
-      <h4 style="margin-top:12px">4. Оплата</h4>
-      <p>Вознаграждение за доставку оговаривается с заведением-партнёром. Vezoo выступает посредником и не является работодателем курьера.</p>
-      <h4 style="margin-top:12px">5. Ответственность</h4>
-      <p>Курьер несёт ответственность за сохранность заказа с момента получения до передачи клиенту.</p>
-    </div>
+    <h2 style="text-align:center;font-size:17px">Пользовательское соглашение</h2>
+    <div class="agree-doc" id="agree-doc-content"></div>
     <label class="check-row" id="agree-check-row" onclick="toggleAgreeCheck()">
       <input type="checkbox" id="agree-cb" style="display:none">
       <div class="check-box" id="agree-box"></div>
-      <span class="check-label">Принимаю условия соглашения</span>
+      <span class="check-label">Я прочитал(а) и принимаю условия Соглашения</span>
     </label>
   </div>
   <div class="agree-screen-foot">
@@ -201,6 +190,7 @@
 </div>
 
 <script src="../shared/firebase.js"></script>
+<script src="../shared/agreement.js"></script>
 <script src="app.js"></script>
 </body>
 </html>

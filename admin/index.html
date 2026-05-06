@@ -58,23 +58,12 @@
     <div class="logo"><div class="logo-icon">🏪</div><div class="logo-text"><span>Vezoo</span> Admin</div></div>
   </div>
   <div class="agree-screen-body">
-    <h2>Соглашение администратора</h2>
-    <div class="agree-doc">
-      <h4>1. Статус администратора</h4>
-      <p>Администратор — владелец или представитель заведения, которое размещает товары на платформе Vezoo.</p>
-      <h4 style="margin-top:12px">2. Создание карточки заведения</h4>
-      <p>Вы обязуетесь указывать достоверную информацию о заведении: название, адрес, часы работы, категорию и актуальное меню.</p>
-      <h4 style="margin-top:12px">3. Модерация</h4>
-      <p>Каждое новое заведение проходит проверку суперадминистратором. В случае нарушений заведение может быть отключено без предупреждения.</p>
-      <h4 style="margin-top:12px">4. Ответственность</h4>
-      <p>Администратор несёт полную ответственность за качество товаров и своевременную обработку заказов.</p>
-      <h4 style="margin-top:12px">5. Операторы и курьеры</h4>
-      <p>Вы самостоятельно назначаете операторов и добавляете постоянных курьеров.</p>
-    </div>
+    <h2 style="text-align:center;font-size:17px">Пользовательское соглашение</h2>
+    <div class="agree-doc" id="agree-doc-content"></div>
     <label class="check-row" id="agree-check-row" onclick="toggleAgreeCheck()">
       <input type="checkbox" id="agree-cb" style="display:none">
       <div class="check-box" id="agree-box"></div>
-      <span class="check-label">Принимаю условия соглашения</span>
+      <span class="check-label">Я прочитал(а) и принимаю условия Соглашения</span>
     </label>
   </div>
   <div class="agree-screen-foot">
@@ -431,6 +420,7 @@
 </div>
 
 <script src="../shared/firebase.js"></script>
+<script src="../shared/agreement.js"></script>
 <script src="app.js"></script>
 </body>
 </html>

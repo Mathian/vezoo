@@ -58,19 +58,12 @@
     <div class="logo"><div class="logo-icon">👑</div><div class="logo-text"><span>Vezoo</span> SuperAdmin</div></div>
   </div>
   <div class="agree-screen-body">
-    <h2>Панель суперадмина</h2>
-    <div class="agree-doc">
-      <h4>Доступ к панели суперадминистратора</h4>
-      <p>Вы получаете полный контроль над платформой Vezoo: управление заведениями, курьерами, категориями, географией и глобальными настройками.</p>
-      <h4 style="margin-top:12px">Ответственность</h4>
-      <p>Все действия в панели суперадмина логируются. Несанкционированное использование влечёт немедленную блокировку доступа.</p>
-      <h4 style="margin-top:12px">Конфиденциальность</h4>
-      <p>Данные платформы являются конфиденциальными и не подлежат разглашению третьим лицам.</p>
-    </div>
+    <h2 style="text-align:center;font-size:17px">Пользовательское соглашение</h2>
+    <div class="agree-doc" id="agree-doc-content"></div>
     <label class="check-row" id="agree-check-row" onclick="toggleAgreeCheck()">
       <input type="checkbox" id="agree-cb" style="display:none">
       <div class="check-box" id="agree-box"></div>
-      <span class="check-label">Подтверждаю свои полномочия и принимаю условия</span>
+      <span class="check-label">Я прочитал(а) и принимаю условия Соглашения</span>
     </label>
   </div>
   <div class="agree-screen-foot">
@@ -268,6 +261,7 @@
 </div>
 
 <script src="../shared/firebase.js"></script>
+<script src="../shared/agreement.js"></script>
 <script src="app.js"></script>
 </body>
 </html>

@@ -31,19 +31,12 @@
     <div class="logo"><div class="logo-icon">🎧</div><div class="logo-text"><span>Vezoo</span> Оператор</div></div>
   </div>
   <div class="agree-screen-body">
-    <h2>Соглашение оператора</h2>
-    <div class="agree-doc">
-      <h4>1. Роль оператора</h4>
-      <p>Оператор осуществляет приём и обработку заказов для одного заведения-партнёра Vezoo.</p>
-      <h4 style="margin-top:12px">2. Обязанности</h4>
-      <p>Оператор обязан своевременно принимать входящие заказы и организовывать доставку через курьеров.</p>
-      <h4 style="margin-top:12px">3. Конфиденциальность</h4>
-      <p>Данные клиентов используются только для обработки заказов. Передача третьим лицам запрещена.</p>
-    </div>
+    <h2 style="text-align:center;font-size:17px">Пользовательское соглашение</h2>
+    <div class="agree-doc" id="agree-doc-content"></div>
     <label class="check-row" id="agree-check-row" onclick="toggleAgreeCheck()">
       <input type="checkbox" id="agree-cb" style="display:none">
       <div class="check-box" id="agree-box"></div>
-      <span class="check-label">Принимаю условия соглашения</span>
+      <span class="check-label">Я прочитал(а) и принимаю условия Соглашения</span>
     </label>
   </div>
   <div class="agree-screen-foot">
@@ -232,6 +225,7 @@
 </div>
 
 <script src="../shared/firebase.js"></script>
+<script src="../shared/agreement.js"></script>
 <script src="app.js"></script>
 </body>
 </html>
