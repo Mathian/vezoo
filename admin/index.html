@@ -21,44 +21,50 @@
   </div>
 </div>
 
-<!-- ERROR SCREENS -->
-<div id="s-blocked" class="screen no-nav"><div class="splash"><div class="splash-logo">🚫</div><div class="splash-title">Доступ закрыт</div><div class="splash-sub">Аккаунт заблокирован.</div></div></div>
-<div id="s-no-uid" class="screen no-nav"><div class="splash"><div class="splash-logo">🤖</div><div class="splash-title">Нужен бот</div><div class="splash-sub">Откройте через Telegram-бот администратора Vezoo.</div></div></div>
+<!-- BLOCKED -->
+<div id="s-blocked" class="screen no-nav">
+  <div class="splash"><div class="splash-logo">🚫</div><div class="splash-title">Доступ закрыт</div><div class="splash-sub">Аккаунт заблокирован.<br>Обратитесь в поддержку.</div></div>
+</div>
+
+<!-- NO UID -->
+<div id="s-no-uid" class="screen no-nav">
+  <div class="splash"><div class="splash-logo">🤖</div><div class="splash-title">Нужен бот</div><div class="splash-sub">Откройте через Telegram-бот<br>администратора Vezoo.</div></div>
+</div>
 
 <!-- PIN SCREEN -->
-<div id="s-pin" class="pin-screen" style="display:none">
-  <div class="pin-logo">🏪</div>
-  <div class="pin-title">Vezoo Admin</div>
-  <div class="pin-sub" id="pin-sub-text">Введите PIN-код</div>
-  <div class="pin-dots">
-    <div class="pin-dot" id="pd0"></div>
-    <div class="pin-dot" id="pd1"></div>
-    <div class="pin-dot" id="pd2"></div>
-    <div class="pin-dot" id="pd3"></div>
-  </div>
-  <div class="pin-pad">
-    <button class="pin-btn" onclick="pinInput('1')">1</button>
-    <button class="pin-btn" onclick="pinInput('2')">2</button>
-    <button class="pin-btn" onclick="pinInput('3')">3</button>
-    <button class="pin-btn" onclick="pinInput('4')">4</button>
-    <button class="pin-btn" onclick="pinInput('5')">5</button>
-    <button class="pin-btn" onclick="pinInput('6')">6</button>
-    <button class="pin-btn" onclick="pinInput('7')">7</button>
-    <button class="pin-btn" onclick="pinInput('8')">8</button>
-    <button class="pin-btn" onclick="pinInput('9')">9</button>
-    <button class="pin-btn empty"></button>
-    <button class="pin-btn" onclick="pinInput('0')">0</button>
-    <button class="pin-btn del" onclick="pinDelete()">⌫</button>
+<div id="s-pin" class="screen no-nav" style="display:none">
+  <div class="splash" style="gap:28px">
+    <div class="splash-logo">🏪</div>
+    <div class="splash-title" style="font-size:20px">Vezoo Admin</div>
+    <div class="pin-sub" id="pin-sub-text" style="color:var(--text-muted);font-size:14px;margin-top:-12px">Введите PIN-код</div>
+    <div class="pin-dots" style="display:flex;gap:14px;justify-content:center">
+      <div class="pin-dot" id="pd0" style="width:14px;height:14px;border-radius:50%;border:2px solid var(--text-muted);transition:all .15s"></div>
+      <div class="pin-dot" id="pd1" style="width:14px;height:14px;border-radius:50%;border:2px solid var(--text-muted);transition:all .15s"></div>
+      <div class="pin-dot" id="pd2" style="width:14px;height:14px;border-radius:50%;border:2px solid var(--text-muted);transition:all .15s"></div>
+      <div class="pin-dot" id="pd3" style="width:14px;height:14px;border-radius:50%;border:2px solid var(--text-muted);transition:all .15s"></div>
+    </div>
+    <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:12px;max-width:240px;margin:0 auto">
+      <button class="btn btn-secondary" onclick="pinInput('1')" style="font-size:20px;padding:14px">1</button>
+      <button class="btn btn-secondary" onclick="pinInput('2')" style="font-size:20px;padding:14px">2</button>
+      <button class="btn btn-secondary" onclick="pinInput('3')" style="font-size:20px;padding:14px">3</button>
+      <button class="btn btn-secondary" onclick="pinInput('4')" style="font-size:20px;padding:14px">4</button>
+      <button class="btn btn-secondary" onclick="pinInput('5')" style="font-size:20px;padding:14px">5</button>
+      <button class="btn btn-secondary" onclick="pinInput('6')" style="font-size:20px;padding:14px">6</button>
+      <button class="btn btn-secondary" onclick="pinInput('7')" style="font-size:20px;padding:14px">7</button>
+      <button class="btn btn-secondary" onclick="pinInput('8')" style="font-size:20px;padding:14px">8</button>
+      <button class="btn btn-secondary" onclick="pinInput('9')" style="font-size:20px;padding:14px">9</button>
+      <div></div>
+      <button class="btn btn-secondary" onclick="pinInput('0')" style="font-size:20px;padding:14px">0</button>
+      <button class="btn btn-secondary" onclick="pinDelete()" style="font-size:18px;padding:14px">⌫</button>
+    </div>
   </div>
 </div>
 
 <!-- AGREEMENT -->
-<div id="s-agree" class="agree-screen" style="display:none">
-  <div class="page-hdr" style="position:static">
-    <div class="logo"><div class="logo-icon">🏪</div><div class="logo-text"><span>Vezoo</span> Admin</div></div>
-  </div>
-  <div class="agree-screen-body">
-    <h2>Соглашение администратора</h2>
+<div id="s-agree" class="screen no-nav" style="display:none">
+  <div class="content" style="padding-top:40px;gap:20px;max-width:480px;margin:0 auto">
+    <div class="logo" style="justify-content:center;margin-bottom:8px"><div class="logo-icon">🏪</div><div class="logo-text"><span>Vezoo</span> Admin</div></div>
+    <h2 style="text-align:center">Соглашение администратора</h2>
     <div class="agree-doc">
       <h4>1. Статус администратора</h4>
       <p>Администратор — владелец или представитель заведения, которое размещает товары на платформе Vezoo.</p>
@@ -67,17 +73,15 @@
       <h4 style="margin-top:12px">3. Модерация</h4>
       <p>Каждое новое заведение проходит проверку суперадминистратором. В случае нарушений заведение может быть отключено без предупреждения.</p>
       <h4 style="margin-top:12px">4. Ответственность</h4>
-      <p>Администратор несёт полную ответственность за качество товаров и своевременную обработку заказов.</p>
+      <p>Администратор несёт полную ответственность за качество товаров, корректность описания и своевременную обработку заказов.</p>
       <h4 style="margin-top:12px">5. Операторы и курьеры</h4>
-      <p>Вы самостоятельно назначаете операторов и добавляете постоянных курьеров.</p>
+      <p>Вы самостоятельно назначаете операторов и добавляете постоянных курьеров. Их действия отражаются на репутации вашего заведения.</p>
     </div>
     <label class="check-row" id="agree-check-row" onclick="toggleAgreeCheck()">
       <input type="checkbox" id="agree-cb" style="display:none">
       <div class="check-box" id="agree-box"></div>
       <span class="check-label">Принимаю условия соглашения</span>
     </label>
-  </div>
-  <div class="agree-screen-foot">
     <button class="btn btn-primary" id="agree-btn" onclick="submitAgree()" disabled>Продолжить →</button>
   </div>
 </div>
@@ -104,13 +108,9 @@
       <div class="field"><label>Описание</label><textarea class="inp" id="cv-desc" rows="3" placeholder="Расскажите о заведении..." maxlength="500"></textarea></div>
     </div>
     <div class="section">
-      <div class="section-title">Расположение</div>
-      <div class="field"><label>Страна и город *</label><select class="inp" id="cv-city"><option value="">Выберите город...</option></select></div>
-      <div class="field"><label>Адрес заведения *</label><input class="inp" id="cv-address" placeholder="ул. Абая 10" maxlength="200"></div>
-      <div class="field"><label>Телефон заведения</label><input class="inp" id="cv-phone" placeholder="+7 (777) 000-00-00" type="tel" maxlength="30"></div>
-    </div>
-    <div class="section">
-      <div class="section-title">Часы работы</div>
+      <div class="section-title">Адрес и часы</div>
+      <div class="field"><label>Адрес заведения *</label><input class="inp" id="cv-address" placeholder="ул. Абая 10, г. Алматы" maxlength="200"></div>
+      <div class="field"><label>Номер телефона заведения</label><input class="inp" id="cv-phone" placeholder="+7 (777) 000-00-00" type="tel" maxlength="30"></div>
       <div class="inp-row">
         <div class="field"><label>Открытие</label><input class="inp" id="cv-work-open" type="time" value="09:00"></div>
         <div class="field"><label>Закрытие</label><input class="inp" id="cv-work-close" type="time" value="22:00"></div>
@@ -120,20 +120,18 @@
       <div class="section-title">Доставка</div>
       <div class="inp-row">
         <div class="field"><label>Время доставки (мин)</label><input class="inp" id="cv-delivery-time" type="number" value="30" min="5" max="300"></div>
-        <div class="field"><label>Время готовки (мин)</label><input class="inp" id="cv-cooking-time" type="number" value="20" min="5" max="240"></div>
+        <div class="field"><label>Цена доставки (₸)</label><input class="inp" id="cv-delivery-price" type="number" value="500" min="0"></div>
       </div>
-      <div class="field"><label>Мин. сумма заказа</label><input class="inp" id="cv-min-order" type="number" value="0" min="0"></div>
-      <div class="section-title" style="margin-top:8px">Способы оплаты</div>
-      <div style="display:flex;gap:8px;margin-top:6px">
-        <button class="pay-tag active-cash" id="cv-pay-cash" onclick="togglePayTag('cv-pay-cash','cash')">💵 Наличные</button>
-        <button class="pay-tag active-card" id="cv-pay-card" onclick="togglePayTag('cv-pay-card','card')">💳 Карта</button>
+      <div class="inp-row">
+        <div class="field"><label>Время готовки (мин)</label><input class="inp" id="cv-cooking-time" type="number" value="20" min="5" max="240"></div>
+        <div class="field"><label>Мин. сумма заказа (₸)</label><input class="inp" id="cv-min-order" type="number" value="0" min="0"></div>
       </div>
     </div>
     <div class="section">
       <div class="section-title">Обложка</div>
       <div class="field"><label>Ссылка на фото</label><input class="inp" id="cv-cover-url" placeholder="https://..." type="url"></div>
       <div class="img-upload" id="cv-cover-upload" onclick="document.getElementById('cv-cover-file').click()">
-        <input type="file" id="cv-cover-file" accept="image/*" onchange="previewCover(this,'cv-cover-upload')">
+        <input type="file" id="cv-cover-file" accept="image/*" onchange="previewCover(this)">
         <span class="img-upload-txt">📷 Загрузить обложку</span>
       </div>
     </div>
@@ -146,7 +144,7 @@
   <div class="splash">
     <div class="splash-logo">⏳</div>
     <div class="splash-title">На модерации</div>
-    <div class="splash-sub">Ваше заведение проверяется.<br>Обычно это занимает до 24 часов.</div>
+    <div class="splash-sub">Ваше заведение проверяется.<br>Обычно это занимает до 24 часов.<br><br>По вопросам свяжитесь с поддержкой.</div>
     <button class="btn btn-ghost btn-sm" style="margin-top:16px" onclick="checkVenueStatus()">🔄 Проверить статус</button>
   </div>
 </div>
@@ -156,7 +154,7 @@
   <div class="splash">
     <div class="splash-logo">❌</div>
     <div class="splash-title">Заявка отклонена</div>
-    <div class="splash-sub">Заведение не прошло модерацию.<br>Свяжитесь с поддержкой Vezoo.</div>
+    <div class="splash-sub">Заведение не прошло модерацию.<br>Свяжитесь с поддержкой Vezoo для уточнения причины.</div>
     <button class="btn btn-outline btn-sm" style="margin-top:16px" onclick="resetVenueAndCreate()">🔄 Создать заново</button>
   </div>
 </div>
@@ -173,10 +171,7 @@
 
 <!-- MAIN — ORDERS TAB -->
 <div id="s-orders" class="screen">
-  <div class="page-hdr">
-    <h2>Заказы</h2>
-    <div class="page-hdr-end"><button class="btn btn-primary btn-sm" onclick="openManualOrder()">+ Вручную</button></div>
-  </div>
+  <div class="page-hdr"><h2>Заказы</h2></div>
   <div class="cat-tabs" style="padding-top:8px">
     <button class="cat-tab active" onclick="loadOrders('active',this)">Активные</button>
     <button class="cat-tab" onclick="loadOrders('pending',this)">Ожидают</button>
@@ -203,16 +198,11 @@
     <div class="section">
       <div class="section-title">Заведение</div>
       <div class="field"><label>Название</label><input class="inp" id="set-name" placeholder="Название"></div>
-      <div class="field"><label>Город</label><select class="inp" id="set-city"><option value="">Выберите город...</option></select></div>
       <div class="field"><label>Адрес</label><input class="inp" id="set-address" placeholder="Адрес"></div>
-      <div class="field"><label>Телефон</label><input class="inp" id="set-phone" placeholder="+7 (777) 000-00-00" type="tel" maxlength="30"></div>
+      <div class="field"><label>Номер телефона</label><input class="inp" id="set-phone" placeholder="+7 (777) 000-00-00" type="tel" maxlength="30"></div>
       <div class="field"><label>Описание</label><textarea class="inp" id="set-desc" rows="3"></textarea></div>
       <div class="field"><label>Ссылка на обложку</label><input class="inp" id="set-cover" placeholder="https://..."></div>
-      <div class="img-upload" id="set-cover-upload" onclick="document.getElementById('set-cover-file').click()" style="margin-top:6px">
-        <input type="file" id="set-cover-file" accept="image/*" onchange="previewCover(this,'set-cover-upload')">
-        <span class="img-upload-txt">📷 Загрузить обложку</span>
-      </div>
-      <button class="btn btn-secondary btn-sm" style="margin-top:8px" onclick="saveVenueInfo()">💾 Сохранить</button>
+      <button class="btn btn-secondary btn-sm" onclick="saveVenueInfo()">💾 Сохранить</button>
     </div>
     <div class="section">
       <div class="section-title">Часы работы</div>
@@ -223,33 +213,23 @@
       <button class="btn btn-secondary btn-sm" onclick="saveWorkHours()">💾 Сохранить часы</button>
     </div>
     <div class="section">
-      <div class="section-title">Доставка и оплата</div>
+      <div class="section-title">Доставка</div>
       <div class="inp-row">
         <div class="field"><label>Время доставки (мин)</label><input class="inp" id="set-delivery-time" type="number" min="5"></div>
-        <div class="field"><label>Цена доставки</label><input class="inp" id="set-delivery-price" type="number" min="0"></div>
+        <div class="field"><label>Цена доставки (₸)</label><input class="inp" id="set-delivery-price" type="number" min="0"></div>
       </div>
       <div class="inp-row">
         <div class="field"><label>Время готовки (мин)</label><input class="inp" id="set-cooking-time" type="number" min="5"></div>
-        <div class="field"><label>Мин. сумма</label><input class="inp" id="set-min-order" type="number" min="0"></div>
+        <div class="field"><label>Мин. сумма (₸)</label><input class="inp" id="set-min-order" type="number" min="0"></div>
       </div>
-      <div style="margin-top:8px">
-        <div class="section-title" style="margin-bottom:6px">Способы оплаты</div>
-        <div style="display:flex;gap:8px">
-          <button class="pay-tag" id="set-pay-cash" onclick="togglePayTag('set-pay-cash','cash')">💵 Наличные</button>
-          <button class="pay-tag" id="set-pay-card" onclick="togglePayTag('set-pay-card','card')">💳 Карта</button>
-        </div>
-      </div>
-      <button class="btn btn-secondary btn-sm" style="margin-top:10px" onclick="saveDeliverySettings()">💾 Сохранить</button>
+      <button class="btn btn-secondary btn-sm" onclick="saveDeliverySettings()">💾 Сохранить</button>
     </div>
     <div class="section">
       <div class="section-title">Оператор</div>
       <div id="current-operator-info" class="alert-box info" style="margin-bottom:10px">Оператор не назначен</div>
       <div class="field">
         <label>Телефон оператора</label>
-        <div style="display:flex;gap:8px;align-items:flex-start">
-          <input class="inp" id="op-phone" type="tel" placeholder="+7 (777) 000-00-00" style="flex:1">
-          <button class="btn btn-secondary btn-sm btn-icon" onclick="scanQrOperator()" title="Сканировать QR" style="margin-top:0;height:46px;width:46px;flex-shrink:0;font-size:20px">📷</button>
-        </div>
+        <input class="inp" id="op-phone" type="tel" placeholder="+7 (777) 000-00-00">
         <button class="btn btn-secondary btn-sm" style="margin-top:8px;width:100%" onclick="assignOperator()">Назначить оператора</button>
       </div>
       <button class="btn btn-ghost btn-sm" onclick="removeOperator()" id="remove-op-btn" style="display:none;margin-top:6px;color:var(--danger)">✕ Снять оператора</button>
@@ -259,29 +239,18 @@
       <div id="perm-couriers-list" style="display:flex;flex-direction:column;gap:6px;margin-bottom:10px"></div>
       <div class="field">
         <label>Телефон курьера</label>
-        <div style="display:flex;gap:8px;align-items:flex-start">
-          <input class="inp" id="courier-phone" type="tel" placeholder="+7 (777) 000-00-00" style="flex:1">
-          <button class="btn btn-secondary btn-sm btn-icon" onclick="scanQrCourier()" title="Сканировать QR" style="margin-top:0;height:46px;width:46px;flex-shrink:0;font-size:20px">📷</button>
-        </div>
+        <input class="inp" id="courier-phone" type="tel" placeholder="+7 (777) 000-00-00">
         <button class="btn btn-secondary btn-sm" style="margin-top:8px;width:100%" onclick="addPermCourier()">Добавить курьера</button>
       </div>
     </div>
     <div class="section">
       <div class="section-title">🚫 Чёрный список</div>
-      <div class="alert-box info" style="margin-bottom:10px;font-size:12px">Клиенты из ЧС не смогут оформить заказ</div>
+      <div class="alert-box info" style="margin-bottom:10px;font-size:12px">Клиенты из ЧС не смогут оформить заказ в вашем заведении</div>
       <div id="blacklist-items" style="display:flex;flex-direction:column;gap:6px;margin-bottom:10px"></div>
       <div class="field">
         <label>Телефон клиента</label>
         <input class="inp" id="bl-phone" type="tel" placeholder="+7 (777) 000-00-00">
         <button class="btn btn-danger btn-sm" style="margin-top:8px;width:100%" onclick="addToBlacklistByPhone()">+ Добавить в ЧС</button>
-      </div>
-    </div>
-    <div class="section">
-      <div class="section-title">Безопасность</div>
-      <div class="card card-body" style="display:flex;flex-direction:column;gap:10px">
-        <div style="font-weight:600;font-size:14px">Сменить PIN</div>
-        <div class="field"><label>Новый PIN (4 цифры)</label><input class="inp" id="new-pin-input" type="number" inputmode="numeric" maxlength="4" placeholder="0000" style="letter-spacing:8px;font-size:20px;text-align:center"></div>
-        <button class="btn btn-outline btn-sm" onclick="changeAdminPin()">Сохранить PIN</button>
       </div>
     </div>
   </div>
@@ -320,11 +289,6 @@
         <div class="field"><label>Эмодзи</label><input class="inp" id="it-emoji" placeholder="🍕" maxlength="4" style="text-align:center;font-size:22px"></div>
       </div>
       <div class="field"><label>Описание</label><textarea class="inp" id="it-desc" rows="2" placeholder="Краткое описание..." maxlength="300"></textarea></div>
-      <div class="field">
-        <label>Состав / ингредиенты</label>
-        <input class="inp" id="it-ingredients" placeholder="Курица, сыр, помидоры, лук..." maxlength="300">
-        <div style="font-size:11px;color:var(--text-muted);margin-top:4px">Через запятую. Используется для системы аллергий.</div>
-      </div>
       <div class="field"><label>Ссылка на фото</label><input class="inp" id="it-img-url" placeholder="https://..." type="url"></div>
       <div class="img-upload" id="it-img-upload" onclick="document.getElementById('it-img-file').click()">
         <input type="file" id="it-img-file" accept="image/*" onchange="previewItemImg(this)">
@@ -336,11 +300,11 @@
           <span class="section-title">Цена</span>
           <label class="check-row" id="variants-toggle-row" onclick="toggleVariants()">
             <div class="check-box" id="variants-check-box" style="width:18px;height:18px;font-size:11px"></div>
-            <span class="check-label text-sm">С вариантами</span>
+            <span class="check-label text-sm">С вариантами (размеры)</span>
           </label>
         </div>
         <div id="simple-price-wrap">
-          <div class="field"><label>Цена</label><input class="inp" id="it-price" type="number" placeholder="1500" min="0"></div>
+          <div class="field"><label>Цена (₸)</label><input class="inp" id="it-price" type="number" placeholder="1500" min="0"></div>
         </div>
         <div id="variants-wrap" style="display:none">
           <div id="variants-list" style="display:flex;flex-direction:column;gap:6px;margin-bottom:8px"></div>
@@ -367,66 +331,12 @@
   </div>
 </div>
 
-<!-- COURIER SELECT SHEET (handoff) -->
+<!-- COURIER SELECT SHEET -->
 <div class="overlay" id="courier-overlay" onclick="closeCourierSheet(event)">
   <div class="sheet">
     <div class="sheet-handle"></div>
-    <div class="sheet-title">Передать курьеру</div>
-    <div id="handoff-courier-section">
-      <div class="btn-row" style="margin-bottom:14px">
-        <button class="btn btn-secondary btn-sm" onclick="handoffEnterManual()">✏️ Ввести вручную</button>
-        <button class="btn btn-primary btn-sm" onclick="handoffScanQr()">📷 Сканировать QR</button>
-      </div>
-      <div id="handoff-manual-wrap" style="display:none;margin-bottom:12px">
-        <div class="field">
-          <label>Телефон курьера</label>
-          <input class="inp" id="handoff-phone" type="tel" placeholder="+7 (777) 000-00-00">
-          <button class="btn btn-secondary btn-sm" style="margin-top:8px;width:100%" onclick="findHandoffCourier()">Найти курьера</button>
-        </div>
-      </div>
-      <div id="handoff-courier-found" style="display:none;margin-bottom:14px"></div>
-    </div>
-    <div id="handoff-orders-section" style="display:none">
-      <div class="section-title" style="margin-bottom:8px">Выберите заказы для передачи</div>
-      <div id="handoff-orders-list" style="display:flex;flex-direction:column;gap:6px;margin-bottom:12px"></div>
-      <div id="handoff-warn" style="display:none" class="handoff-warn" style="margin-bottom:10px"></div>
-      <button class="btn btn-primary" onclick="confirmHandoff()">✅ Передать выбранные</button>
-    </div>
-  </div>
-</div>
-
-<!-- MANUAL ORDER OVERLAY -->
-<div class="overlay" id="manual-order-overlay" onclick="closeManualOrder(event)">
-  <div class="sheet">
-    <div class="sheet-handle"></div>
-    <div class="sheet-title">Заказ по телефону</div>
-    <div style="display:flex;flex-direction:column;gap:12px">
-      <div class="field">
-        <label>Телефон клиента *</label>
-        <input class="inp" id="mo-phone" type="tel" placeholder="+7 (777) 000-00-00" oninput="moPhoneInput(this)">
-        <div id="mo-autocomplete" class="autocomplete-dropdown" style="display:none"></div>
-      </div>
-      <div class="field"><label>Имя клиента</label><input class="inp" id="mo-client-name" placeholder="Имя"></div>
-      <div class="field"><label>Адрес доставки *</label><input class="inp" id="mo-address" placeholder="ул. Абая 10, кв. 5"></div>
-      <div class="section-title">Позиции заказа</div>
-      <div class="cat-tabs" id="mo-cats-tabs" style="padding:0 0 8px;margin:0"></div>
-      <div id="mo-items-list" style="display:flex;flex-direction:column;gap:6px;max-height:200px;overflow-y:auto"></div>
-      <div id="mo-selected-items" style="display:flex;flex-direction:column;gap:4px;min-height:20px"></div>
-      <div class="flex justify-between" style="padding:6px 0;border-top:1px solid var(--border)">
-        <span style="font-weight:600">Итого:</span>
-        <span class="text-primary font-bold" id="mo-total">0</span>
-      </div>
-      <div class="field"><label>Способ оплаты</label>
-        <select class="inp" id="mo-payment">
-          <option value="cash">💵 Наличные</option>
-          <option value="card">💳 Карта</option>
-        </select>
-      </div>
-      <div class="btn-row">
-        <button class="btn btn-ghost" onclick="closeManualOrder()">Отмена</button>
-        <button class="btn btn-primary" onclick="submitManualOrder()">Оформить заказ</button>
-      </div>
-    </div>
+    <div class="sheet-title">Выбрать курьера</div>
+    <div id="courier-select-list" style="display:flex;flex-direction:column;gap:6px"></div>
   </div>
 </div>
 
