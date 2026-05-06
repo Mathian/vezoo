@@ -205,7 +205,7 @@ function playAlert()    { for(let i=0;i<3;i++) setTimeout(()=>_tone(550,.1,.5),i
 function playNewOrder() { _tone(800,.1,.5);setTimeout(()=>_tone(800,.1,.5),150);setTimeout(()=>_tone(1000,.2,.5),350); }
 
 // ─────────────────────── Format helpers ───────────────────────
-function fmtPrice(n)  { return Number(n||0).toLocaleString('ru-RU') + ' ₸'; }
+function fmtPrice(n, currency = '₸') { return Number(n||0).toLocaleString('ru-RU') + ' ' + currency; }
 function fmtDate(ts) {
   if (!ts) return '';
   const d = ts?.toDate ? ts.toDate() : new Date(ts);
@@ -328,6 +328,103 @@ function showToast(msg, type = 'info', dur = 3000) {
 const _ts = document.createElement('style');
 _ts.textContent = '@keyframes toastIn{from{opacity:0;transform:translateY(-10px)}to{opacity:1;transform:translateY(0)}}';
 document.head.appendChild(_ts);
+
+// ─────────────────────── Phone normalizer ───────────────────────
+function normPhone(raw) {
+  if (!raw) return '';
+  let d = raw.replace(/\D/g, '');
+  if (!d) return '';
+  // Russian/Kazakh 8-prefix → 7
+  if (d.length === 11 && d[0] === '8') d = '7' + d.slice(1);
+  // Strip leading country code duplicates
+  if (d.length === 10) d = '7' + d; // bare 10-digit
+  return '+' + d;
+}
+
+// ─────────────────────── QR helpers ───────────────────────
+function getQrUrl(phone, size = 200) {
+  const data = encodeURIComponent(normPhone(phone) || phone);
+  return `https://api.qrserver.com/v1/create-qr-code/?size=${size}x${size}&data=${data}&bgcolor=ffffff&color=000000&qzone=1`;
+}
+
+// ─────────────────────── Country/City cache ───────────────────────
+let _countriesCache = null;
+
+async function loadCountries(force = false) {
+  if (_countriesCache && !force) return _countriesCache;
+  try {
+    const docs = await dbGetAll('countries', 'name', 'asc', 200);
+    _countriesCache = docs;
+    return docs;
+  } catch { return []; }
+}
+
+async function getCitiesForCountry(countryId) {
+  try { return await dbQuery('cities', 'countryId', '==', countryId); }
+  catch { return []; }
+}
+
+async function getAllCities() {
+  try { return await dbGetAll('cities', 'name', 'asc', 500); }
+  catch { return []; }
+}
+
+async function getCurrencyForCity(cityId) {
+  try {
+    const city = await dbGet('cities', cityId);
+    if (!city?.countryId) return '₸';
+    const country = await dbGet('countries', city.countryId);
+    return country?.currency || '₸';
+  } catch { return '₸'; }
+}
+
+async function getDeliveryPriceForCity(cityId) {
+  try {
+    const city = await dbGet('cities', cityId);
+    return city?.deliveryPrice ?? 1000;
+  } catch { return 1000; }
+}
+
+// ─────────────────────── PIN helpers ───────────────────────
+const PIN_DEFAULTS = { admin:'0000', operator:'0000', master:'0000', superadmin:'0000' };
+
+async function verifyPin(role, entered) {
+  try {
+    const cfg = await dbGet('settings', 'pins');
+    const stored = cfg?.[role] || PIN_DEFAULTS[role] || '0000';
+    return entered === stored;
+  } catch { return entered === '0000'; }
+}
+
+async function savePin(role, newPin) {
+  await dbSet('settings', 'pins', { [role]: newPin });
+}
+
+async function getPinForRole(role) {
+  try {
+    const cfg = await dbGet('settings', 'pins');
+    return cfg?.[role] || '0000';
+  } catch { return '0000'; }
+}
+
+// ─────────────────────── Allergy helpers ───────────────────────
+async function getAllergyEnabled() {
+  try {
+    const cfg = await dbGet('settings', 'global');
+    return cfg?.allergyEnabled !== false; // default on
+  } catch { return true; }
+}
+
+function checkAllergyConflict(itemIngredients, userProfile) {
+  if (!itemIngredients?.length) return false;
+  const prefs = [];
+  if (userProfile?.isVegan)    prefs.push('мясо','рыба','птица','яйцо','молоко','сливки','сыр','творог');
+  if (userProfile?.isDiabetic) prefs.push('сахар','мёд','сироп');
+  if (userProfile?.allergies)  prefs.push(...(userProfile.allergies || []));
+  if (!prefs.length) return false;
+  const lower = itemIngredients.map(x => x.toLowerCase());
+  return prefs.some(p => lower.some(i => i.includes(p.toLowerCase())));
+}
 
 // ─────────────────────── Agreement checkbox ───────────────────────
 // Универсальная функция для всех ролей — живёт в shared/firebase.js

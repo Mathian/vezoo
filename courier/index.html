@@ -21,17 +21,20 @@
   </div>
 </div>
 
+<!-- ERROR SCREENS -->
 <div id="s-blocked" class="screen no-nav"><div class="splash"><div class="splash-logo">🚫</div><div class="splash-title">Доступ закрыт</div><div class="splash-sub">Аккаунт заблокирован.</div></div></div>
 <div id="s-no-uid" class="screen no-nav"><div class="splash"><div class="splash-logo">🤖</div><div class="splash-title">Нужен бот</div><div class="splash-sub">Откройте через Telegram-бот<br>курьера Vezoo.</div></div></div>
 
 <!-- AGREEMENT -->
-<div id="s-agree" class="screen no-nav">
-  <div class="content" style="padding-top:40px;gap:20px;max-width:480px;margin:0 auto">
-    <div class="logo" style="justify-content:center"><div class="logo-icon">🚴</div><div class="logo-text"><span>Vezoo</span> Курьер</div></div>
-    <h2 style="text-align:center">Соглашение курьера</h2>
+<div id="s-agree" class="agree-screen" style="display:none">
+  <div class="page-hdr" style="position:static">
+    <div class="logo"><div class="logo-icon">🚴</div><div class="logo-text"><span>Vezoo</span> Курьер</div></div>
+  </div>
+  <div class="agree-screen-body">
+    <h2>Соглашение курьера</h2>
     <div class="agree-doc">
       <h4>1. Требования к курьеру</h4>
-      <p>Курьер обязан иметь действующий документ, удостоверяющий личность, и транспортное средство для доставки. Аккаунт проходит модерацию суперадминистратором.</p>
+      <p>Курьер обязан иметь действующий документ, удостоверяющий личность, и транспортное средство. Аккаунт проходит модерацию суперадминистратором.</p>
       <h4 style="margin-top:12px">2. Смены и заказы</h4>
       <p>Курьер самостоятельно управляет своими сменами. Во время смены доступны как заказы от постоянных партнёров, так и свободные заказы из общего списка.</p>
       <h4 style="margin-top:12px">3. Качество доставки</h4>
@@ -39,24 +42,16 @@
       <h4 style="margin-top:12px">4. Оплата</h4>
       <p>Вознаграждение за доставку оговаривается с заведением-партнёром. Vezoo выступает посредником и не является работодателем курьера.</p>
       <h4 style="margin-top:12px">5. Ответственность</h4>
-      <p>Курьер несёт ответственность за сохранность заказа с момента получения его в заведении до передачи клиенту.</p>
+      <p>Курьер несёт ответственность за сохранность заказа с момента получения до передачи клиенту.</p>
     </div>
     <label class="check-row" id="agree-check-row" onclick="toggleAgreeCheck()">
+      <input type="checkbox" id="agree-cb" style="display:none">
       <div class="check-box" id="agree-box"></div>
       <span class="check-label">Принимаю условия соглашения</span>
     </label>
-    <button class="btn btn-primary" id="agree-btn" onclick="submitAgree()" disabled>Продолжить →</button>
   </div>
-</div>
-
-<!-- ONBOARDING -->
-<div id="s-onboard" class="screen no-nav">
-  <div class="content" style="padding-top:60px;gap:20px;max-width:480px;margin:0 auto">
-    <div class="logo" style="justify-content:center"><div class="logo-icon">🚴</div><div class="logo-text"><span>Vezoo</span> Курьер</div></div>
-    <h2 style="text-align:center">Регистрация курьера</h2>
-    <p class="text-dim" style="text-align:center;font-size:14px">После отправки ваши данные пройдут проверку суперадминистратором.</p>
-    <div class="field"><label>Ваше имя *</label><input class="inp" id="ob-name" placeholder="Имя Фамилия" maxlength="60"></div>
-    <button class="btn btn-primary" id="ob-btn" onclick="onboardSubmit()">Отправить на проверку →</button>
+  <div class="agree-screen-foot">
+    <button class="btn btn-primary" id="agree-btn" onclick="submitAgree()" disabled>Продолжить →</button>
   </div>
 </div>
 
@@ -65,7 +60,7 @@
   <div class="splash">
     <div class="splash-logo">⏳</div>
     <div class="splash-title">На проверке</div>
-    <div class="splash-sub">Ваши данные проверяются<br>администрацией Vezoo.<br><br>Обычно это занимает до 24 часов.<br>Мы свяжемся с вами в Telegram.</div>
+    <div class="splash-sub">Ваши данные проверяются<br>администрацией Vezoo.<br><br>Обычно это занимает до 24 часов.</div>
     <button class="btn btn-ghost btn-sm" style="margin-top:16px" onclick="checkCourierStatus()">🔄 Проверить статус</button>
   </div>
 </div>
@@ -88,10 +83,10 @@
   </div>
 </div>
 
-<!-- MAIN — AVAILABLE ORDERS (shift screen) -->
+<!-- MAIN — ДОСТУПНЫЕ ЗАКАЗЫ (общий пул) -->
 <div id="s-available" class="screen">
   <div class="page-hdr">
-    <div class="logo"><div class="logo-icon">🚴</div><div class="logo-text"><span>Vezoo</span></div></div>
+    <div class="logo"><div class="logo-icon">🚴</div><div class="logo-text" id="courier-city-label" style="font-size:13px;color:var(--text-dim)">Везу</div></div>
     <div class="page-hdr-end">
       <label class="toggle" style="margin-right:4px"><input type="checkbox" id="shift-toggle" onchange="toggleShift(this)"><span class="toggle-sl"></span></label>
       <span id="shift-label" class="text-sm text-dim">Офлайн</span>
@@ -105,34 +100,89 @@
   </div>
 </div>
 
-<!-- MAIN — MY ORDERS -->
+<!-- MAIN — ВАЖНЫЕ (заказы своего заведения) -->
+<div id="s-venue-orders" class="screen">
+  <div class="page-hdr">
+    <h2>Важные</h2>
+    <div class="page-hdr-end"><span id="primary-venue-label" class="text-sm text-dim">—</span></div>
+  </div>
+  <div id="venue-orders-list" style="display:flex;flex-direction:column;gap:10px;padding:12px 20px 16px">
+    <div class="empty"><div class="empty-icon">⭐</div><div class="empty-text">Здесь будут заказы вашего<br>постоянного заведения</div></div>
+  </div>
+</div>
+
+<!-- MAIN — МОИ ЗАКАЗЫ -->
 <div id="s-my-orders" class="screen">
   <div class="page-hdr"><h2>Мои заказы</h2></div>
   <div id="my-orders-list" style="display:flex;flex-direction:column;gap:10px;padding:12px 20px 16px"></div>
 </div>
 
-<!-- MAIN — HISTORY -->
-<div id="s-courier-history" class="screen">
-  <div class="page-hdr"><h2>История доставок</h2></div>
-  <div id="courier-history-list" style="display:flex;flex-direction:column;gap:10px;padding:12px 20px 16px"></div>
+<!-- MAIN — ПРОФИЛЬ -->
+<div id="s-courier-profile" class="screen">
+  <div class="page-hdr"><h2>Профиль</h2></div>
+  <div class="content" style="gap:14px">
+
+    <!-- QR -->
+    <div class="section-title">Мой QR-код</div>
+    <div class="qr-container" id="courier-qr-container">
+      <img class="qr-code-img" id="courier-qr-img" src="" alt="QR">
+      <div class="qr-label">QR-код для подтверждения личности</div>
+      <div class="qr-phone" id="courier-qr-phone">—</div>
+    </div>
+
+    <!-- Stats -->
+    <div class="section-title">Статистика</div>
+    <div class="stats-grid" id="courier-stats-grid"></div>
+
+    <!-- Rating -->
+    <div class="section-title">Мой рейтинг</div>
+    <div class="card card-body" style="display:flex;align-items:center;gap:16px" id="courier-rating-card">
+      <div style="font-size:40px;font-weight:800;color:var(--primary)" id="cr-rating-val">—</div>
+      <div>
+        <div class="star-row" id="cr-stars-row" style="font-size:20px"></div>
+        <div class="text-sm text-dim mt-1" id="cr-rating-cnt">Нет оценок</div>
+      </div>
+    </div>
+
+    <!-- Venue -->
+    <div class="section-title">Постоянное заведение</div>
+    <div class="card card-body" id="courier-venue-card">
+      <div class="text-dim text-sm">Загрузка...</div>
+    </div>
+
+    <!-- History -->
+    <div class="section-title" style="margin-top:4px">
+      История доставок
+      <div class="page-hdr-end" style="display:inline-flex;margin-left:auto">
+        <input class="inp" id="cr-hist-date" type="date" style="width:140px;padding:8px 10px;font-size:13px" onchange="loadCourierHistory()">
+      </div>
+    </div>
+    <div id="courier-history-list" style="display:flex;flex-direction:column;gap:8px"></div>
+
+    <button class="btn btn-ghost btn-sm" style="color:var(--danger);margin-top:8px" onclick="courierLeaveVenue()">Отвязаться от заведения</button>
+  </div>
 </div>
 
 <!-- BOTTOM NAV -->
 <div class="bottom-nav" id="main-nav" style="display:none">
-  <div class="nav-item active" id="nav-avail" onclick="showScreen('s-available');setNav(this);tg?.BackButton?.hide()">
+  <div class="nav-item active" id="nav-avail" onclick="navToAvailable()">
     <div class="nav-icon">🔍</div><div class="nav-label">Заказы</div>
     <div class="nav-badge hidden" id="avail-badge">0</div>
   </div>
-  <div class="nav-item" id="nav-my" onclick="showScreen('s-my-orders');setNav(this);tg?.BackButton?.show()">
+  <div class="nav-item" id="nav-venue" onclick="navToVenueOrders()">
+    <div class="nav-icon">⭐</div><div class="nav-label">Важные</div>
+    <div class="nav-badge hidden" id="venue-badge">0</div>
+  </div>
+  <div class="nav-item" id="nav-my" onclick="navToMyOrders()">
     <div class="nav-icon">📦</div><div class="nav-label">Мои</div>
     <div class="nav-badge hidden" id="my-badge">0</div>
   </div>
-  <div class="nav-item" id="nav-chist" onclick="showScreen('s-courier-history');setNav(this);loadCourierHistory();tg?.BackButton?.show()">
-    <div class="nav-icon">📋</div><div class="nav-label">История</div>
+  <div class="nav-item" id="nav-profile" onclick="navToProfile()">
+    <div class="nav-icon">👤</div><div class="nav-label">Профиль</div>
   </div>
 </div>
 
-<!-- ORDER ACCEPT SHEET (from available) -->
+<!-- ORDER ACCEPT SHEET (from available/venue pool) -->
 <div class="overlay" id="accept-overlay" onclick="closeAcceptSheet(event)">
   <div class="sheet"><div class="sheet-handle"></div><div id="accept-order-content"></div></div>
 </div>
@@ -142,12 +192,12 @@
   <div class="sheet"><div class="sheet-handle"></div><div id="my-order-detail"></div></div>
 </div>
 
-<!-- NOTIFICATIONS -->
+<!-- NOTIFICATION: новый назначенный заказ -->
 <div class="fs-notif" id="notif-assigned">
   <div class="fs-notif-icon primary">📦</div>
   <div class="fs-notif-title">Новый заказ!</div>
   <div class="fs-notif-text" id="notif-assigned-text">Вам назначен заказ.</div>
-  <button class="btn btn-primary" onclick="document.getElementById('notif-assigned').classList.remove('open');showScreen('s-my-orders');setNav(document.getElementById('nav-my'))">Посмотреть заказ</button>
+  <button class="btn btn-primary" onclick="document.getElementById('notif-assigned').classList.remove('open');navToMyOrders()">Посмотреть заказ</button>
 </div>
 
 <script src="../shared/firebase.js"></script>

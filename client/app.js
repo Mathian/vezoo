@@ -4,24 +4,31 @@
    ============================================================ */
 
 const STATE = { uid: null, user: null };
-let VENUES       = [];
-let CATEGORIES   = [];
+let VENUES        = [];
+let CATEGORIES    = [];
+let ALL_CITIES    = [];
 let CURRENT_VENUE = null;
 let VENUE_MENU    = [];
-let CART          = {};   // { venueId: [{cartKey, id, variantName, name, price, qty, emoji}] }
+let CART          = {};
 let ACTIVE_ORDERS = [];
-let FAVORITES     = [];   // [venueId]
+let FAVORITES     = [];
 let _ordersUnsub  = null;
 let _shownNotifs  = new Set();
 let _cdIntervals  = {};
-let _paymentMethod  = 'cash';
-let _deliveryType   = 'delivery';
+let _paymentMethod   = 'cash';
+let _deliveryType    = 'delivery';
 let _intercomChecked = false;
-let _favFilter      = false;
+let _favFilter       = false;
 let _currentReviewVenueId = null;
-let _agreedCheck = false;
-// Откуда открыли s-cart: 'venue' | 'overview'
-let _cartOpenedFrom = 'venue';
+let _cartOpenedFrom  = 'venue';
+let _allergyEnabled  = true;
+let _selectedCityId  = null;
+let _selectedCurrency = '₸';
+
+// Courier rating state
+let _ratingOrderId   = null;
+let _ratingCouierUid = null;
+let _selectedRating  = 0;
 
 // ══════════════════════════════════════════════════════════
 //  BOOT
@@ -33,7 +40,6 @@ window.addEventListener('DOMContentLoaded', async () => {
   tgReady();
   _initBackButton();
 
-  // Multi-account guard: clear cached state if different TG user on same device
   const _tgUserId = tg?.initDataUnsafe?.user?.id ? String(tg.initDataUnsafe.user.id) : null;
   try {
     const s = JSON.parse(localStorage.getItem('vez_client_state') || '{}');
@@ -41,88 +47,120 @@ window.addEventListener('DOMContentLoaded', async () => {
       STATE.uid  = s.uid  || null;
       STATE.user = s.user || null;
     }
-    CART       = JSON.parse(localStorage.getItem('vez_cart') || '{}');
-    FAVORITES  = JSON.parse(localStorage.getItem('vez_favorites') || '[]');
+    CART      = JSON.parse(localStorage.getItem('vez_cart') || '{}');
+    FAVORITES = JSON.parse(localStorage.getItem('vez_favorites') || '[]');
   } catch {}
 
   const urlUid = readUidFromUrl();
-  if (urlUid) { STATE.uid = urlUid; saveClientState(); }
+  if (urlUid) { STATE.uid = urlUid; _saveClientState(); }
 
   await initFirebase();
 
   if (!STATE.uid) {
     const tgUid = await resolveUidByTgId();
-    if (tgUid) { STATE.uid = tgUid; saveClientState(); }
+    if (tgUid) { STATE.uid = tgUid; _saveClientState(); }
   }
-
   if (!STATE.uid) { showScreen('s-no-uid'); return; }
 
   const existing = await dbGet('users', STATE.uid);
   if (existing?.blocked) { showScreen('s-blocked'); return; }
-  if (!existing?.agreedClient) { showScreen('s-agree'); return; }
-  // Auto-set name from Telegram if missing (no onboard screen)
+
+  if (!existing?.agreedClient) {
+    document.getElementById('s-agree').style.display = 'flex';
+    return;
+  }
+
   if (!existing.name) {
     const autoName = _getTgName() || existing.firstName || 'Пользователь';
     await dbSet('users', STATE.uid, { name: autoName });
     existing.name = autoName;
   }
-  STATE.user = existing; saveClientState();
+  STATE.user = existing; _saveClientState();
+
+  // City check
+  if (!existing.cityId) {
+    await _showCitySelect();
+    return;
+  }
+  _selectedCityId   = existing.cityId;
+  _selectedCurrency = await getCurrencyForCity(_selectedCityId);
   initMain();
 });
 
-function saveClientState() {
-  const tgUserId = tg?.initDataUnsafe?.user?.id ? String(tg.initDataUnsafe.user.id) : null;
-  try { localStorage.setItem('vez_client_state', JSON.stringify({ uid: STATE.uid, user: STATE.user, tgId: tgUserId })); } catch {}
-}
-function saveCart() {
-  try { localStorage.setItem('vez_cart', JSON.stringify(CART)); } catch {}
-}
-function saveFavorites() {
-  try { localStorage.setItem('vez_favorites', JSON.stringify(FAVORITES)); } catch {}
+function _getTgName() {
+  const u = tg?.initDataUnsafe?.user;
+  if (!u) return null;
+  return (u.first_name + (u.last_name ? ' ' + u.last_name : '')).trim() || null;
 }
 
-// ── Agreement ──
-function toggleAgreeCheck() {
-  const cb = document.getElementById('agree-cb');
-  _agreedCheck = cb ? cb.checked : !_agreedCheck;
-  document.getElementById('agree-box').textContent = _agreedCheck ? '✓' : '';
-  document.getElementById('agree-check-row').classList.toggle('checked', _agreedCheck);
-  document.getElementById('agree-btn').disabled = !_agreedCheck;
+function _saveClientState() {
+  const tgId = tg?.initDataUnsafe?.user?.id ? String(tg.initDataUnsafe.user.id) : null;
+  try { localStorage.setItem('vez_client_state', JSON.stringify({ uid: STATE.uid, user: STATE.user, tgId })); } catch {}
 }
+function _saveCart()      { try { localStorage.setItem('vez_cart', JSON.stringify(CART)); } catch {} }
+function _saveFavorites() { try { localStorage.setItem('vez_favorites', JSON.stringify(FAVORITES)); } catch {} }
+
+// ── Agreement ──
 async function submitAgree() {
   const btn = document.getElementById('agree-btn');
   if (btn) { btn.disabled = true; btn.classList.add('btn-loading'); }
   const linkData = await dbGet('user_links', STATE.uid);
   const autoName = _getTgName() || linkData?.firstName || 'Пользователь';
   STATE.user = {
-    name: autoName,
-    phone: linkData?.phone || '',
-    tgId: linkData?.tgId || '',
-    role: 'client',
-    agreedClient: true,
-    createdAt: new Date().toISOString()
-  };
-  await dbSet('users', STATE.uid, STATE.user);
-  saveClientState();
-  if (btn) { btn.disabled = false; btn.classList.remove('btn-loading'); }
-  initMain();
-}
-
-// ── Onboarding (не используется — имя берётся из Telegram) ──
-async function onboardSubmit() {
-  const linkData = await dbGet('user_links', STATE.uid);
-  STATE.user = {
-    ...(STATE.user || {}),
-    phone: linkData?.phone || '', tgId: linkData?.tgId || '',
+    name: autoName, phone: linkData?.phone || '', tgId: linkData?.tgId || '',
     role: 'client', agreedClient: true, createdAt: new Date().toISOString()
   };
   await dbSet('users', STATE.uid, STATE.user);
-  if (linkData?.phone) {
-    STATE.user.phone = linkData.phone;
+  _saveClientState();
+  if (btn) { btn.disabled = false; btn.classList.remove('btn-loading'); }
+  document.getElementById('s-agree').style.display = 'none';
+  await _showCitySelect();
+}
+
+// ── City select ──
+async function _showCitySelect() {
+  showScreen('s-city-select');
+  document.getElementById('city-select-loader').style.display = 'flex';
+  document.getElementById('city-select-list').innerHTML = '';
+  ALL_CITIES = await getAllCities();
+  const countries = await loadCountries();
+  document.getElementById('city-select-loader').style.display = 'none';
+  if (!ALL_CITIES.length) {
+    document.getElementById('city-select-list').innerHTML =
+      '<div class="text-dim text-sm" style="text-align:center">Города ещё не добавлены.<br>Обратитесь к администратору.</div>';
+    return;
   }
-  saveClientState();
-  btn.disabled = false; btn.classList.remove('btn-loading');
+  const grouped = {};
+  ALL_CITIES.forEach(c => {
+    const cid = c.countryId || '__';
+    if (!grouped[cid]) grouped[cid] = [];
+    grouped[cid].push(c);
+  });
+  let html = '';
+  for (const [cid, cities] of Object.entries(grouped)) {
+    const country = countries.find(c => c.id === cid);
+    if (country) html += `<div class="country-group-title">${country.name}</div>`;
+    html += cities.map(city => `
+      <div class="city-item" onclick="selectCity('${city.id}','${(city.name||'').replace(/'/g,"\\'")}','${country?.currency||'₸'}')">
+        <span class="font-bold">${city.name}</span>
+        <span class="text-dim text-sm">Доставка от ${fmtPrice(city.deliveryPrice || 0, country?.currency || '₸')}</span>
+      </div>`).join('');
+  }
+  document.getElementById('city-select-list').innerHTML = html;
+}
+
+async function selectCity(cityId, cityName, currency) {
+  _selectedCityId   = cityId;
+  _selectedCurrency = currency || '₸';
+  STATE.user = { ...STATE.user, cityId, cityName };
+  await dbSet('users', STATE.uid, { cityId, cityName });
+  _saveClientState();
+  document.getElementById('city-btn').textContent = '📍 ' + cityName;
   initMain();
+}
+
+function openCityChange() {
+  _showCitySelect();
 }
 
 // ── Init main ──
@@ -131,6 +169,10 @@ function initMain() {
   startHeartbeat(STATE.uid);
   FAVORITES = JSON.parse(localStorage.getItem('vez_favorites') || '[]');
   if (STATE.user?.favorites) FAVORITES = STATE.user.favorites;
+  if (STATE.user?.cityName) {
+    document.getElementById('city-btn').textContent = '📍 ' + STATE.user.cityName;
+  }
+  getAllergyEnabled().then(v => { _allergyEnabled = v; });
   loadVenues();
   watchActiveOrders();
   showScreen('s-home');
@@ -146,6 +188,11 @@ async function loadVenues() {
   ]);
   VENUES     = venues.filter(v => v.status === 'approved' && !v.blocked);
   CATEGORIES = cats;
+  // Filter by city if selected
+  if (_selectedCityId) {
+    const cityVenues = VENUES.filter(v => v.cityId === _selectedCityId);
+    if (cityVenues.length) VENUES = cityVenues;
+  }
   renderCatTabs();
   renderVenues(null);
 }
@@ -154,7 +201,7 @@ function renderCatTabs() {
   const container = document.getElementById('home-cat-tabs');
   const tabs = [{ id: null, name: 'Все', icon: '🏪' }, ...CATEGORIES.map(c => ({ id: c.id, name: c.name, icon: c.icon || '📦' }))];
   container.innerHTML = tabs.map((c, i) =>
-    `<button class="cat-tab${i===0?' active':''}" onclick="filterVenues(this,'${c.id||''}')">${c.icon} ${c.name}</button>`
+    `<button class="cat-tab${i === 0 ? ' active' : ''}" onclick="filterVenues(this,'${c.id || ''}')">${c.icon} ${c.name}</button>`
   ).join('');
 }
 
@@ -169,20 +216,19 @@ function renderVenues(catId) {
   if (catId) list = list.filter(v => v.categoryId === catId);
   const container = document.getElementById('home-venues');
   if (!list.length) {
-    container.innerHTML = `<div class="empty"><div class="empty-icon">🏪</div><div class="empty-text">${_favFilter ? 'Нет избранных заведений' : 'Заведений пока нет'}</div></div>`;
+    container.innerHTML = `<div class="empty"><div class="empty-icon">🏪</div><div class="empty-text">${_favFilter ? 'Нет избранных' : 'Заведений пока нет'}</div></div>`;
     return;
   }
   container.innerHTML = list.map(v => {
-    const isFav = FAVORITES.includes(v.id);
-    const cat   = CATEGORIES.find(c => c.id === v.categoryId);
-    const open  = isVenueOpen(v);
-    const cover = v.coverUrl
-      ? `<img src="${v.coverUrl}" onerror="this.style.display='none'">`
-      : `<span style="font-size:48px">${cat?.icon||'🏪'}</span>`;
-    // Показываем счётчик товаров в корзине прямо на карточке заведения
+    const isFav  = FAVORITES.includes(v.id);
+    const cat    = CATEGORIES.find(c => c.id === v.categoryId);
+    const open   = isVenueOpen(v);
+    const cover  = v.coverUrl
+      ? `<img src="${v.coverUrl}" onerror="this.style.display='none'" style="width:100%;height:100%;object-fit:cover">`
+      : `<span style="font-size:48px">${cat?.icon || '🏪'}</span>`;
     const venueCartCount = (CART[v.id] || []).reduce((s, c) => s + c.qty, 0);
     const cartBadge = venueCartCount > 0
-      ? `<span style="background:var(--primary,#2563eb);color:#fff;border-radius:999px;font-size:11px;font-weight:700;padding:2px 8px;margin-left:6px">${venueCartCount} в корзине</span>`
+      ? `<span style="background:var(--primary);color:#000;border-radius:999px;font-size:11px;font-weight:700;padding:2px 8px;margin-left:6px">${venueCartCount} в корзине</span>`
       : '';
     return `
       <div class="venue-card" onclick="openVenue('${v.id}')">
@@ -190,15 +236,15 @@ function renderVenues(catId) {
         <div class="venue-card-body">
           <div class="flex justify-between items-center">
             <div class="venue-card-name">${v.name}${cartBadge}</div>
-            <button class="venue-fav${isFav?' active':''}" onclick="event.stopPropagation();toggleFav('${v.id}',this)">${isFav?'❤️':'🤍'}</button>
+            <button class="venue-fav${isFav ? ' active' : ''}" onclick="event.stopPropagation();toggleFav('${v.id}',this)">${isFav ? '❤️' : '🤍'}</button>
           </div>
           <div class="venue-card-meta">
-            ${cat ? `<span class="cat-pill">${cat.icon||''} ${cat.name}</span>` : ''}
-            <div class="star-row">${renderStars(v.rating||0)}<span class="rating-val" style="font-size:12px;margin-left:4px">${(v.rating||0).toFixed(1)}</span></div>
+            ${cat ? `<span class="cat-pill">${cat.icon || ''} ${cat.name}</span>` : ''}
+            <div class="star-row">${renderStars(v.rating || 0)}<span class="rating-val" style="font-size:12px;margin-left:4px">${(v.rating || 0).toFixed(1)}</span></div>
           </div>
           <div class="venue-card-foot">
-            <span class="${open?'venue-open':'venue-closed'}">${open?'● Открыто':'● Закрыто'}</span>
-            <span class="venue-delivery-info">🚴 ${v.deliveryTime||'?'} мин · ${fmtPrice(v.deliveryPrice||0)}</span>
+            <span class="${open ? 'venue-open' : 'venue-closed'}">${open ? '● Открыто' : '● Закрыто'}</span>
+            <span class="venue-delivery-info">🚴 ${v.deliveryTime || '?'} мин · ${fmtPrice(v.deliveryPrice || 0, _selectedCurrency)}</span>
           </div>
         </div>
       </div>`;
@@ -207,31 +253,25 @@ function renderVenues(catId) {
 
 function isVenueOpen(v) {
   if (!v.workOpen || !v.workClose) return true;
-  const now = new Date();
+  const now  = new Date();
   const [oh, om] = v.workOpen.split(':').map(Number);
   const [ch, cm] = v.workClose.split(':').map(Number);
-  const mins = now.getHours()*60+now.getMinutes();
-  return mins >= oh*60+om && mins < ch*60+cm;
+  const mins = now.getHours() * 60 + now.getMinutes();
+  return mins >= oh * 60 + om && mins < ch * 60 + cm;
 }
 
 function toggleFavFilter() {
   _favFilter = !_favFilter;
-  const btn = document.getElementById('fav-filter-btn');
-  btn.textContent = _favFilter ? '❤️' : '🤍';
+  document.getElementById('fav-filter-btn').textContent = _favFilter ? '❤️' : '🤍';
   renderVenues(null);
-  document.querySelectorAll('#home-cat-tabs .cat-tab').forEach((b,i) => b.classList.toggle('active', i===0));
+  document.querySelectorAll('#home-cat-tabs .cat-tab').forEach((b, i) => b.classList.toggle('active', i === 0));
 }
 
 function toggleFav(venueId, btn) {
   const idx = FAVORITES.indexOf(venueId);
-  if (idx >= 0) {
-    FAVORITES.splice(idx, 1);
-    btn.textContent = '🤍'; btn.classList.remove('active');
-  } else {
-    FAVORITES.push(venueId);
-    btn.textContent = '❤️'; btn.classList.add('active');
-  }
-  saveFavorites();
+  if (idx >= 0) { FAVORITES.splice(idx, 1); btn.textContent = '🤍'; btn.classList.remove('active'); }
+  else          { FAVORITES.push(venueId); btn.textContent = '❤️'; btn.classList.add('active'); }
+  _saveFavorites();
   dbSet('users', STATE.uid, { favorites: FAVORITES });
 }
 
@@ -243,49 +283,31 @@ async function openVenue(venueId) {
   if (!venue) return;
   CURRENT_VENUE = venue;
 
-  const coverEl  = document.getElementById('venue-cover-el');
-  const imgEl    = document.getElementById('venue-cover-img');
-  const emojiEl  = document.getElementById('venue-cover-emoji');
-  const cat      = CATEGORIES.find(c => c.id === venue.categoryId);
-
+  const imgEl   = document.getElementById('venue-cover-img');
+  const emojiEl = document.getElementById('venue-cover-emoji');
+  const cat     = CATEGORIES.find(c => c.id === venue.categoryId);
   if (venue.coverUrl) {
-    imgEl.src = venue.coverUrl; imgEl.style.display = 'block';
-    emojiEl.style.display = 'none';
+    imgEl.src = venue.coverUrl; imgEl.style.display = 'block'; emojiEl.style.display = 'none';
   } else {
-    imgEl.style.display = 'none';
-    emojiEl.textContent = cat?.icon || '🏪'; emojiEl.style.display = '';
+    imgEl.style.display = 'none'; emojiEl.textContent = cat?.icon || '🏪'; emojiEl.style.display = '';
   }
 
-  document.getElementById('venue-name-el').textContent  = venue.name;
+  document.getElementById('venue-name-el').textContent = venue.name;
   const open = isVenueOpen(venue);
   const openEl = document.getElementById('venue-open-el');
   openEl.textContent = open ? '● Открыто' : '● Закрыто';
   openEl.className   = open ? 'venue-open' : 'venue-closed';
   document.getElementById('venue-closed-banner').classList.toggle('hidden', open);
 
-  const metaEl = document.getElementById('venue-meta-el');
-  metaEl.innerHTML = `
-    ${cat ? `<span class="cat-pill">${cat.icon||''} ${cat.name}</span>` : ''}
-    <span class="venue-delivery-info">🚴 ${venue.deliveryTime||'?'} мин</span>
-    <span class="venue-delivery-info">💰 Доставка: ${fmtPrice(venue.deliveryPrice||0)}</span>
-    ${venue.workOpen ? `<span class="venue-delivery-info">🕐 ${venue.workOpen}–${venue.workClose}</span>` : ''}
-  `;
+  document.getElementById('venue-meta-el').innerHTML = `
+    ${cat ? `<span class="cat-pill">${cat.icon || ''} ${cat.name}</span>` : ''}
+    <span class="venue-delivery-info">🚴 ${venue.deliveryTime || '?'} мин</span>
+    <span class="venue-delivery-info">💰 ${fmtPrice(venue.deliveryPrice || 0, _selectedCurrency)}</span>
+    ${venue.workOpen ? `<span class="venue-delivery-info">🕐 ${venue.workOpen}–${venue.workClose}</span>` : ''}`;
 
-  document.getElementById('venue-stars-el').innerHTML = renderStars(venue.rating||0);
-  document.getElementById('venue-rating-val').textContent  = (venue.rating||0).toFixed(1);
-  document.getElementById('venue-rating-cnt').textContent  = `(${venue.reviewCount||0} отзывов)`;
-
-  // Show venue phone if available
-  let venuePhoneEl = document.getElementById('venue-phone-el');
-  if (!venuePhoneEl) {
-    venuePhoneEl = document.createElement('div');
-    venuePhoneEl.id = 'venue-phone-el';
-    venuePhoneEl.className = 'text-sm text-dim';
-    venuePhoneEl.style.cssText = 'margin:4px 20px 0;';
-    document.getElementById('venue-stars-el').parentElement.after(venuePhoneEl);
-  }
-  venuePhoneEl.textContent = venue.phone ? '📞 ' + venue.phone : '';
-  venuePhoneEl.style.display = venue.phone ? '' : 'none';
+  document.getElementById('venue-stars-el').innerHTML  = renderStars(venue.rating || 0);
+  document.getElementById('venue-rating-val').textContent = (venue.rating || 0).toFixed(1);
+  document.getElementById('venue-rating-cnt').textContent = `(${venue.reviewCount || 0} отзывов)`;
 
   const isFav = FAVORITES.includes(venueId);
   const favBtn = document.getElementById('venue-fav-btn');
@@ -297,26 +319,16 @@ async function openVenue(venueId) {
   updateCartFAB();
 }
 
-function backToHome() {
-  showScreen('s-home');
-  setNav(document.getElementById('nav-home'));
-  // FAB скрываем только если корзина пуста для этого заведения
-  updateCartFAB();
-}
-
-function toggleCurrentVenueFav() {
-  if (!CURRENT_VENUE) return;
-  toggleFav(CURRENT_VENUE.id, document.getElementById('venue-fav-btn'));
-}
+function backToHome() { showScreen('s-home'); setNav(document.getElementById('nav-home')); updateCartFAB(); }
+function toggleCurrentVenueFav() { if (!CURRENT_VENUE) return; toggleFav(CURRENT_VENUE.id, document.getElementById('venue-fav-btn')); }
 
 async function loadVenueMenu(venueId) {
   const grid = document.getElementById('venue-menu-grid');
   grid.innerHTML = '<div class="loader" style="grid-column:1/-1"><div class="spinner"></div></div>';
   VENUE_MENU = (await dbQuery('menu_items', 'venueId', '==', venueId)).filter(i => i.available !== false);
   const menuCats = ['Все', ...new Set(VENUE_MENU.map(i => i.category).filter(Boolean))];
-  const tabsEl = document.getElementById('venue-cat-tabs');
-  tabsEl.innerHTML = menuCats.map((c, i) =>
-    `<button class="cat-tab${i===0?' active':''}" onclick="filterVenueMenu(this,'${c}')">${c}</button>`
+  document.getElementById('venue-cat-tabs').innerHTML = menuCats.map((c, i) =>
+    `<button class="cat-tab${i === 0 ? ' active' : ''}" onclick="filterVenueMenu(this,'${c}')">${c}</button>`
   ).join('');
   renderVenueMenuGrid(null);
 }
@@ -331,37 +343,45 @@ function renderVenueMenuGrid(cat) {
   const items = cat ? VENUE_MENU.filter(i => i.category === cat) : VENUE_MENU;
   const grid  = document.getElementById('venue-menu-grid');
   if (!items.length) {
-    grid.innerHTML = '<div class="empty" style="grid-column:1/-1"><div class="empty-icon">🍽️</div><div class="empty-text">Нет позиций в этой категории</div></div>';
+    grid.innerHTML = '<div class="empty" style="grid-column:1/-1"><div class="empty-icon">🍽️</div><div class="empty-text">Нет позиций</div></div>';
     return;
   }
-  const venueId = CURRENT_VENUE?.id;
+  const venueId   = CURRENT_VENUE?.id;
   const venueCart = CART[venueId] || [];
+  const userProfile = STATE.user;
+
   grid.innerHTML = items.map(item => {
+    const hasConflict = _allergyEnabled && checkAllergyConflict(item.ingredients || [], userProfile);
+    const allergyBadge = hasConflict
+      ? `<span class="badge-allergy" title="Содержит ваши аллергены">⚠️</span>`
+      : '';
+    const veganBadge = (item.isVegan)
+      ? `<span class="badge-vegan" title="Веган-продукт">🌿</span>`
+      : '';
     const imgHtml = item.imageUrl
-      ? `<div class="menu-card-img"><img src="${item.imageUrl}" alt="${item.name}" loading="lazy" onerror="this.parentElement.innerHTML='<span style=font-size:44px>${item.emoji||'🍽️'}</span>'"></div>`
-      : `<div class="menu-card-img"><span style="font-size:44px">${item.emoji||'🍽️'}</span></div>`;
+      ? `<div class="menu-card-img"><img src="${item.imageUrl}" alt="${item.name}" loading="lazy" onerror="this.parentElement.innerHTML='<span style=font-size:44px>${item.emoji || '🍽️'}</span>'"></div>`
+      : `<div class="menu-card-img"><span style="font-size:44px">${item.emoji || '🍽️'}</span></div>`;
 
     if (item.variants && item.variants.length > 0) {
       const variantRows = item.variants.map(v => {
         const key = `${item.id}::${v.name}`;
-        const qty = (venueCart.find(c => c.cartKey === key)||{qty:0}).qty;
+        const qty = (venueCart.find(c => c.cartKey === key) || { qty: 0 }).qty;
         return `<div class="variant-row" id="vr-${CSS.escape(key)}">
           <span class="variant-name">${v.name}</span>
           <div style="display:flex;align-items:center;gap:4px">
-            <span class="variant-price">${fmtPrice(v.price)}</span>
+            <span class="variant-price">${fmtPrice(v.price, _selectedCurrency)}</span>
             <div class="qty-ctrl">
-              ${qty>0?`<div class="qty-btn" onclick="changeQty('${item.id}',-1,'${v.name}')">−</div><div class="qty-num">${qty}</div>`:''}
+              ${qty > 0 ? `<div class="qty-btn" onclick="changeQty('${item.id}',-1,'${v.name}')">−</div><div class="qty-num">${qty}</div>` : ''}
               <div class="qty-btn add" onclick="changeQty('${item.id}',1,'${v.name}')">+</div>
             </div>
           </div>
         </div>`;
       }).join('');
-      return `<div class="menu-card menu-card-wide" id="mc-${item.id}">${imgHtml}<div class="menu-card-body"><div class="menu-card-name">${item.name}</div>${item.description?`<div class="menu-card-desc">${item.description}</div>`:''}<div class="variants-container" style="margin-top:8px">${variantRows}</div></div></div>`;
+      return `<div class="menu-card menu-card-wide${hasConflict ? ' menu-card-warn' : ''}" id="mc-${item.id}">${imgHtml}<div class="menu-card-body"><div class="menu-card-name">${item.name} ${allergyBadge}${veganBadge}</div>${item.description ? `<div class="menu-card-desc">${item.description}</div>` : ''}<div class="variants-container" style="margin-top:8px">${variantRows}</div></div></div>`;
     } else {
-      const cartItem = venueCart.find(c => c.cartKey===item.id);
+      const cartItem = venueCart.find(c => c.cartKey === item.id);
       const qty = cartItem ? cartItem.qty : 0;
-      return `<div class="menu-card" id="mc-${item.id}">${imgHtml}<div class="menu-card-body"><div class="menu-card-name">${item.name}</div>${item.description?`<div class="menu-card-desc">${item.description}</div>`:''}<div class="qty-row"><div class="menu-card-price">${fmtPrice(item.price)}</div><div class="qty-ctrl">${qty>0?`<div class="qty-btn" onclick="changeQty('${item.id}',-1)">−</div><div class="qty-num" id="qn-${item.id}">${qty}</div>`:''}
-        <div class="qty-btn add" onclick="changeQty('${item.id}',1)">+</div></div></div></div></div>`;
+      return `<div class="menu-card${hasConflict ? ' menu-card-warn' : ''}" id="mc-${item.id}">${imgHtml}<div class="menu-card-body"><div class="menu-card-name">${item.name} ${allergyBadge}${veganBadge}</div>${item.description ? `<div class="menu-card-desc">${item.description}</div>` : ''}<div class="qty-row"><div class="menu-card-price">${fmtPrice(item.price, _selectedCurrency)}</div><div class="qty-ctrl">${qty > 0 ? `<div class="qty-btn" onclick="changeQty('${item.id}',-1)">−</div><div class="qty-num" id="qn-${item.id}">${qty}</div>` : ''}<div class="qty-btn add" onclick="changeQty('${item.id}',1)">+</div></div></div></div></div>`;
     }
   }).join('');
 }
@@ -371,7 +391,7 @@ function changeQty(itemId, delta, variantName = null) {
   tgHaptic('light');
   const menuItem = VENUE_MENU.find(i => i.id === itemId);
   if (!menuItem) return;
-  const venueId  = CURRENT_VENUE?.id;
+  const venueId = CURRENT_VENUE?.id;
   if (!venueId) return;
   if (!CART[venueId]) CART[venueId] = [];
   const key = variantName ? `${itemId}::${variantName}` : itemId;
@@ -381,15 +401,14 @@ function changeQty(itemId, delta, variantName = null) {
     const price = variantName
       ? (menuItem.variants?.find(v => v.name === variantName)?.price ?? menuItem.price)
       : menuItem.price;
-    const name  = variantName ? `${menuItem.name} (${variantName})` : menuItem.name;
-    cartItem = { cartKey: key, id: itemId, variantName: variantName||null, name, price, qty: 0, emoji: menuItem.emoji||'🍽️' };
+    const name = variantName ? `${menuItem.name} (${variantName})` : menuItem.name;
+    cartItem = { cartKey: key, id: itemId, variantName: variantName || null, name, price, qty: 0, emoji: menuItem.emoji || '🍽️' };
     CART[venueId].push(cartItem);
   }
   cartItem.qty = Math.max(0, cartItem.qty + delta);
   if (cartItem.qty === 0) CART[venueId] = CART[venueId].filter(c => c.cartKey !== key);
-  // Удаляем пустую корзину заведения
-  if (CART[venueId] && CART[venueId].length === 0) delete CART[venueId];
-  saveCart();
+  if (!CART[venueId]?.length) delete CART[venueId];
+  _saveCart();
   updateMenuItemUI(itemId);
   updateCartFAB();
   updateCartNavBadge();
@@ -403,7 +422,7 @@ function updateMenuItemUI(itemId) {
   if (menuItem.variants?.length > 0) {
     menuItem.variants.forEach(v => {
       const key    = `${itemId}::${v.name}`;
-      const qty    = (venueCart.find(c => c.cartKey===key)||{qty:0}).qty;
+      const qty    = (venueCart.find(c => c.cartKey === key) || { qty: 0 }).qty;
       const safeId = CSS.escape(key);
       const row    = document.getElementById(`vr-${safeId}`);
       if (!row) return;
@@ -414,7 +433,7 @@ function updateMenuItemUI(itemId) {
         : `<div class="qty-btn add" onclick="changeQty('${itemId}',1,'${v.name}')">+</div>`;
     });
   } else {
-    const qty  = (venueCart.find(c => c.cartKey===itemId)||{qty:0}).qty;
+    const qty  = (venueCart.find(c => c.cartKey === itemId) || { qty: 0 }).qty;
     const ctrl = document.querySelector(`#mc-${itemId} .qty-ctrl`);
     if (!ctrl) return;
     ctrl.innerHTML = qty > 0
@@ -423,94 +442,65 @@ function updateMenuItemUI(itemId) {
   }
 }
 
-// Обновляет бейдж иконки корзины в навбаре
 function updateCartNavBadge() {
-  const venueCount = Object.keys(CART).filter(id => CART[id] && CART[id].length > 0).length;
+  const cnt   = Object.keys(CART).filter(id => CART[id]?.length > 0).length;
   const badge = document.getElementById('cart-nav-badge');
   if (!badge) return;
-  if (venueCount > 0) {
-    badge.textContent = venueCount;
-    badge.classList.remove('hidden');
-  } else {
-    badge.classList.add('hidden');
-  }
+  badge.textContent = cnt;
+  badge.classList.toggle('hidden', cnt === 0);
 }
 
 function updateCartFAB() {
-  const fab    = document.getElementById('cart-fab');
-  const venueId = CURRENT_VENUE?.id;
-  const venueCart = (venueId && CART[venueId]) || [];
-  const count  = venueCart.reduce((s,c) => s+c.qty, 0);
-  const total  = venueCart.reduce((s,c) => s+c.price*c.qty, 0);
-  const onVenue = document.getElementById('s-venue').classList.contains('active');
+  const fab      = document.getElementById('cart-fab');
+  const venueId  = CURRENT_VENUE?.id;
+  const items    = (venueId && CART[venueId]) || [];
+  const count    = items.reduce((s, c) => s + c.qty, 0);
+  const total    = items.reduce((s, c) => s + c.price * c.qty, 0);
+  const onVenue  = document.getElementById('s-venue').classList.contains('active');
   if (count > 0 && onVenue) {
     fab.classList.remove('hidden');
     document.getElementById('cart-fab-count').textContent = `${count} поз.`;
-    document.getElementById('cart-fab-total').textContent = fmtPrice(total);
+    document.getElementById('cart-fab-total').textContent = fmtPrice(total, _selectedCurrency);
   } else {
     fab.classList.add('hidden');
   }
 }
 
 function venueCartTotal(venueId) {
-  return (CART[venueId]||[]).reduce((s,c) => s+c.price*c.qty, 0);
+  return (CART[venueId] || []).reduce((s, c) => s + c.price * c.qty, 0);
 }
 
 // ══════════════════════════════════════════════════════════
-//  CART OVERVIEW — список всех корзин
+//  CART OVERVIEW
 // ══════════════════════════════════════════════════════════
-function navToCart() {
-  showScreen('s-cart-overview');
-  renderCartOverview();
-}
+function navToCart() { showScreen('s-cart-overview'); renderCartOverview(); }
 
 function renderCartOverview() {
   const container = document.getElementById('cart-overview-content');
-  const venueIds  = Object.keys(CART).filter(id => CART[id] && CART[id].length > 0);
-
+  const venueIds  = Object.keys(CART).filter(id => CART[id]?.length > 0);
   if (!venueIds.length) {
-    container.innerHTML = `
-      <div class="empty" style="padding-top:40px">
-        <div class="empty-icon">🛒</div>
-        <div class="empty-text">Корзина пуста</div>
-        <button class="btn btn-primary" style="margin-top:20px" onclick="navTo('s-home');setNav(document.getElementById('nav-home'))">🏪 К заведениям</button>
-      </div>`;
+    container.innerHTML = `<div class="empty" style="padding-top:40px"><div class="empty-icon">🛒</div><div class="empty-text">Корзина пуста</div><button class="btn btn-primary" style="margin-top:20px" onclick="navTo('s-home');setNav(document.getElementById('nav-home'))">🏪 К заведениям</button></div>`;
     return;
   }
-
   container.innerHTML = venueIds.map(venueId => {
-    const venue = VENUES.find(v => v.id === venueId);
-    const venueName = venue?.name || venueId;
-    const items = CART[venueId];
-    const totalQty   = items.reduce((s, c) => s + c.qty, 0);
-    const totalPrice = items.reduce((s, c) => s + c.price * c.qty, 0);
-    const cat  = venue ? CATEGORIES.find(c => c.id === venue.categoryId) : null;
-    const icon = cat?.icon || '🏪';
-    const open = venue ? isVenueOpen(venue) : true;
-
-    const itemsPreview = items.slice(0, 3).map(c =>
-      `<div class="flex justify-between" style="font-size:13px">
-        <span>${c.emoji} ${c.name}</span>
-        <span style="color:var(--text-dim)">${c.qty} × ${fmtPrice(c.price)}</span>
-      </div>`
-    ).join('');
-    const moreCount = items.length - 3;
-
+    const venue    = VENUES.find(v => v.id === venueId);
+    const items    = CART[venueId];
+    const totalQty = items.reduce((s, c) => s + c.qty, 0);
+    const totPrc   = items.reduce((s, c) => s + c.price * c.qty, 0);
+    const cat      = venue ? CATEGORIES.find(c => c.id === venue.categoryId) : null;
+    const open     = venue ? isVenueOpen(venue) : true;
     return `
       <div class="card card-body" style="gap:12px">
         <div class="flex justify-between items-center">
           <div style="display:flex;align-items:center;gap:8px">
-            <span style="font-size:22px">${icon}</span>
-            <div>
-              <div class="font-bold" style="font-size:15px">${venueName}</div>
-              <div style="font-size:12px;color:var(--text-dim)">${totalQty} позиц. · ${fmtPrice(totalPrice)}</div>
-            </div>
+            <span style="font-size:22px">${cat?.icon || '🏪'}</span>
+            <div><div class="font-bold">${venue?.name || venueId}</div><div class="text-dim text-sm">${totalQty} позиц. · ${fmtPrice(totPrc, _selectedCurrency)}</div></div>
           </div>
           <span class="${open ? 'venue-open' : 'venue-closed'}" style="font-size:12px">${open ? '● Открыто' : '● Закрыто'}</span>
         </div>
         <div style="display:flex;flex-direction:column;gap:4px">
-          ${itemsPreview}
-          ${moreCount > 0 ? `<div style="font-size:12px;color:var(--text-dim);margin-top:2px">и ещё ${moreCount} позиц.</div>` : ''}
+          ${items.slice(0, 3).map(c => `<div class="flex justify-between" style="font-size:13px"><span>${c.emoji} ${c.name}</span><span class="text-dim">${c.qty} × ${fmtPrice(c.price, _selectedCurrency)}</span></div>`).join('')}
+          ${items.length > 3 ? `<div class="text-dim text-sm">и ещё ${items.length - 3} позиц.</div>` : ''}
         </div>
         <div class="divider" style="margin:0"></div>
         <div class="btn-row">
@@ -521,19 +511,15 @@ function renderCartOverview() {
   }).join('');
 }
 
-// Открыть страницу заведения, чтобы отредактировать состав корзины
 async function openVenueFromCart(venueId) {
   const venue = VENUES.find(v => v.id === venueId);
   if (!venue) { showToast('Заведение не найдено', 'warning'); return; }
-  await openVenue(venueId);
-  setNav(document.getElementById('nav-home'));
+  await openVenue(venueId); setNav(document.getElementById('nav-home'));
 }
 
-// Открыть оформление заказа из обзора корзин
 async function openCartFromOverview(venueId) {
   const venue = VENUES.find(v => v.id === venueId);
   if (!venue) { showToast('Заведение не найдено', 'warning'); return; }
-  // Устанавливаем CURRENT_VENUE и подгружаем меню (нужно для submitOrder)
   CURRENT_VENUE = venue;
   if (!VENUE_MENU.length || VENUE_MENU[0]?.venueId !== venueId) {
     VENUE_MENU = (await dbQuery('menu_items', 'venueId', '==', venueId)).filter(i => i.available !== false);
@@ -542,9 +528,10 @@ async function openCartFromOverview(venueId) {
   renderCartScreen();
   showScreen('s-cart');
   document.getElementById('cart-venue-name').textContent = venue.name;
+  // Show available payment methods
+  _renderPaymentOpts(venue);
 }
 
-// ── Cart screen ──
 function openCart() {
   if (!CURRENT_VENUE) return;
   _cartOpenedFrom = 'venue';
@@ -552,42 +539,45 @@ function openCart() {
   showScreen('s-cart');
   document.getElementById('cart-fab').classList.add('hidden');
   document.getElementById('cart-venue-name').textContent = CURRENT_VENUE.name;
+  _renderPaymentOpts(CURRENT_VENUE);
 }
 
-// Кнопка «назад» в s-cart: возвращает туда, откуда открыли
+function _renderPaymentOpts(venue) {
+  const row = document.getElementById('payment-opts-row');
+  const hasCash = venue?.paymentMethods?.cash !== false;
+  const hasCard = venue?.paymentMethods?.card !== false;
+  let html = '';
+  if (hasCash) html += `<button class="btn ${_paymentMethod === 'cash' ? 'btn-primary' : 'btn-secondary'} payment-opt" data-val="cash" onclick="selectPayment(this)">💵 Наличные</button>`;
+  if (hasCard) html += `<button class="btn ${_paymentMethod === 'card' ? 'btn-primary' : 'btn-secondary'} payment-opt" data-val="card" onclick="selectPayment(this)">💳 Карта</button>`;
+  row.innerHTML = html;
+  // Auto-select first available
+  if (!hasCash && hasCard) _paymentMethod = 'card';
+  if (hasCash && !hasCard) _paymentMethod = 'cash';
+}
+
 function cartGoBack() {
-  if (_cartOpenedFrom === 'overview') {
-    showScreen('s-cart-overview');
-    renderCartOverview();
-  } else {
-    showScreen('s-venue');
-    updateCartFAB();
-  }
+  if (_cartOpenedFrom === 'overview') { showScreen('s-cart-overview'); renderCartOverview(); }
+  else { showScreen('s-venue'); updateCartFAB(); }
 }
 
 function renderCartScreen() {
   const venueId   = CURRENT_VENUE?.id;
   const venueCart = (venueId && CART[venueId]) || [];
   const wrap      = document.getElementById('cart-items-wrap');
-
   if (!venueCart.length) {
     wrap.innerHTML = '<div class="empty"><div class="empty-icon">🛒</div><div class="empty-text">Корзина пуста</div></div>';
     document.getElementById('order-btn').disabled = true;
     return;
   }
   document.getElementById('order-btn').disabled = false;
-
   const itemsHtml = venueCart.map(c => `
     <div class="flex items-center gap-2" style="justify-content:space-between;margin-bottom:10px">
       <div style="display:flex;align-items:center;gap:8px">
         <span style="font-size:22px">${c.emoji}</span>
-        <div>
-          <div style="font-weight:600;font-size:13px">${c.name}</div>
-          <div style="font-size:12px;color:var(--text-dim)">${fmtPrice(c.price)} × ${c.qty}</div>
-        </div>
+        <div><div style="font-weight:600;font-size:13px">${c.name}</div><div style="font-size:12px;color:var(--text-dim)">${fmtPrice(c.price, _selectedCurrency)} × ${c.qty}</div></div>
       </div>
       <div style="display:flex;align-items:center;gap:6px">
-        <div style="font-weight:700;font-size:14px">${fmtPrice(c.price*c.qty)}</div>
+        <div style="font-weight:700;font-size:14px">${fmtPrice(c.price * c.qty, _selectedCurrency)}</div>
         <button class="btn-xs btn-ghost" onclick="changeQtyCart('${c.cartKey}',-1)">−</button>
         <span style="font-weight:700;min-width:16px;text-align:center">${c.qty}</span>
         <button class="btn-xs btn-ghost" onclick="changeQtyCart('${c.cartKey}',1)">+</button>
@@ -597,27 +587,24 @@ function renderCartScreen() {
 
   const itemsTotal    = venueCartTotal(venueId);
   const deliveryPrice = CURRENT_VENUE?.deliveryPrice || 0;
-  document.getElementById('cart-items-sum').textContent      = fmtPrice(itemsTotal);
-  document.getElementById('cart-delivery-price').textContent = _deliveryType==='pickup' ? 'Бесплатно' : fmtPrice(deliveryPrice);
-  document.getElementById('cart-total-final').textContent    = fmtPrice(itemsTotal + (_deliveryType==='pickup' ? 0 : deliveryPrice));
+  document.getElementById('cart-items-sum').textContent      = fmtPrice(itemsTotal, _selectedCurrency);
+  document.getElementById('cart-delivery-price').textContent = _deliveryType === 'pickup' ? 'Бесплатно' : fmtPrice(deliveryPrice, _selectedCurrency);
+  document.getElementById('cart-total-final').textContent    = fmtPrice(itemsTotal + (_deliveryType === 'pickup' ? 0 : deliveryPrice), _selectedCurrency);
 
-  // Prefill saved address
   const saved = STATE.user?.savedAddress;
   if (saved) {
-    if (!document.getElementById('addr-street').value) document.getElementById('addr-street').value = saved.street||'';
-    if (!document.getElementById('addr-house').value)  document.getElementById('addr-house').value  = saved.house||'';
-    if (!document.getElementById('addr-apt').value)    document.getElementById('addr-apt').value    = saved.apt||'';
+    if (!document.getElementById('addr-street').value) document.getElementById('addr-street').value = saved.street || '';
+    if (!document.getElementById('addr-house').value)  document.getElementById('addr-house').value  = saved.house || '';
+    if (!document.getElementById('addr-apt').value)    document.getElementById('addr-apt').value    = saved.apt   || '';
   }
 }
 
 function changeQtyCart(key, delta) {
-  const venueId   = CURRENT_VENUE?.id;
-  const venueCart = CART[venueId] || [];
-  const c = venueCart.find(x => x.cartKey === key);
+  const venueId = CURRENT_VENUE?.id;
+  const c = (CART[venueId] || []).find(x => x.cartKey === key);
   if (!c) return;
-  changeQty(c.id, delta, c.variantName||null);
-  renderCartScreen();
-  updateCartNavBadge();
+  changeQty(c.id, delta, c.variantName || null);
+  renderCartScreen(); updateCartNavBadge();
 }
 
 function toggleIntercom() {
@@ -651,7 +638,7 @@ function selectPayment(el) {
 async function submitOrder() {
   const venueId   = CURRENT_VENUE?.id;
   const venueCart = CART[venueId] || [];
-  if (!venueCart.length) { showToast('Корзина пуста', 'warning'); return; }
+  if (!venueCart.length)           { showToast('Корзина пуста', 'warning'); return; }
   if (!isVenueOpen(CURRENT_VENUE)) { showToast('Заведение сейчас закрыто', 'warning'); return; }
 
   const isPickup = _deliveryType === 'pickup';
@@ -662,12 +649,8 @@ async function submitOrder() {
   const code     = _intercomChecked ? document.getElementById('intercom-code').value.trim() : '';
   if (!isPickup && (!street || !house)) { showToast('Укажите улицу и дом', 'warning'); return; }
 
-  // Blacklist check
   const blEntry = await dbGet('venue_blacklist', venueId + '_' + STATE.uid);
-  if (blEntry) {
-    showToast('Вы не можете оформить заказ в этом заведении', 'error');
-    return;
-  }
+  if (blEntry) { showToast('Вы не можете оформить заказ в этом заведении', 'error'); return; }
 
   const btn = document.getElementById('order-btn');
   btn.disabled = true; btn.textContent = 'Оформляем...';
@@ -676,32 +659,31 @@ async function submitOrder() {
   const deliveryPrice = isPickup ? 0 : (CURRENT_VENUE.deliveryPrice || 0);
   const order = {
     id: orderId, venueId, venueName: CURRENT_VENUE.name,
-    clientUid: STATE.uid, clientName: STATE.user?.name||'', clientPhone: STATE.user?.phone||'', clientTgId: STATE.user?.tgId||'',
-    items: venueCart.map(c => ({ id:c.id, name:c.name, price:c.price, qty:c.qty, emoji:c.emoji, variantName:c.variantName||null })),
+    clientUid: STATE.uid, clientName: STATE.user?.name || '', clientPhone: STATE.user?.phone || '',
+    clientTgId: STATE.user?.tgId || '',
+    cityId: _selectedCityId || '', currency: _selectedCurrency,
+    items: venueCart.map(c => ({ id: c.id, name: c.name, price: c.price, qty: c.qty, emoji: c.emoji, variantName: c.variantName || null })),
     total: venueCartTotal(venueId), deliveryPrice,
     address: isPickup ? null : { street, house, apt, hasIntercom: _intercomChecked, intercomCode: code },
     payment: _paymentMethod, deliveryType: _deliveryType, comment,
     status: 'pending', createdAt: new Date().toISOString(),
-    clientNotification: { type:'', seen:true }
+    clientNotification: { type: '', seen: true }
   };
 
   try {
     await dbSet('orders', orderId, order);
-    CART[venueId] = [];
-    delete CART[venueId];
-    saveCart();
-    updateCartNavBadge();
-    tgHaptic('success');
-    showToast('Заказ оформлен!', 'success');
+    CART[venueId] = []; delete CART[venueId];
+    _saveCart(); updateCartNavBadge();
+    tgHaptic('success'); showToast('Заказ оформлен!', 'success');
     navToAllOrders();
-  } catch(e) {
+  } catch (e) {
     showToast('Ошибка при оформлении', 'error');
   }
   btn.disabled = false; btn.textContent = 'Оформить заказ';
 }
 
 // ══════════════════════════════════════════════════════════
-//  ORDERS (active + history combined)
+//  ORDERS
 // ══════════════════════════════════════════════════════════
 let _allClientOrders = [];
 
@@ -709,8 +691,8 @@ function watchActiveOrders() {
   if (_ordersUnsub) { _ordersUnsub(); _ordersUnsub = null; }
   _ordersUnsub = onQuerySnap('orders', 'clientUid', '==', STATE.uid, orders => {
     _allClientOrders = orders;
-    ACTIVE_ORDERS = orders.filter(o => !['delivered','cancelled'].includes(o.status))
-      .sort((a,b) => (b.createdAt||'').localeCompare(a.createdAt||''));
+    ACTIVE_ORDERS = orders.filter(o => !['delivered', 'cancelled'].includes(o.status))
+      .sort((a, b) => (b.createdAt || '').localeCompare(a.createdAt || ''));
 
     document.getElementById('order-nav-badge').classList.toggle('hidden', ACTIVE_ORDERS.length === 0);
 
@@ -720,7 +702,7 @@ function watchActiveOrders() {
         const key = `${o.id}:${n.type}`;
         if (!_shownNotifs.has(key)) {
           _shownNotifs.add(key);
-          showClientNotification(o);
+          _showClientNotification(o);
         }
       }
     });
@@ -729,26 +711,30 @@ function watchActiveOrders() {
   });
 }
 
-function showClientNotification(order) {
-  const type = order.clientNotification?.type;
-  const idMap = { accepted:'notif-accepted', cancelled:'notif-cancelled', delivering:'notif-delivering', delivered:'notif-delivered' };
-  const notifId = idMap[type];
+function _showClientNotification(order) {
+  const type  = order.clientNotification?.type;
+  const notifMap = { accepted: 'notif-accepted', cancelled: 'notif-cancelled', delivering: 'notif-delivering', delivered: 'notif-delivered' };
+  const notifId  = notifMap[type];
   if (!notifId) return;
-
   if (type === 'accepted') {
     const mins = order.deliveryMinutes || 60;
-    const h = Math.floor(mins/60), m = mins%60;
-    const ts = h>0 ? `${h} ч ${m>0?m+' мин':''}` : `${m} мин`;
+    const h = Math.floor(mins / 60), m = mins % 60;
+    const ts = h > 0 ? `${h} ч ${m > 0 ? m + ' мин' : ''}` : `${m} мин`;
     const el = document.getElementById('notif-accepted-text');
-    if (el) el.textContent = order.deliveryType==='pickup'
-      ? `Заказ принят! Он будет готов примерно через ${ts}.`
+    if (el) el.textContent = order.deliveryType === 'pickup'
+      ? `Заказ принят! Будет готов через ${ts}.`
       : `Заказ принят! Ожидайте доставку в течение ${ts}.`;
   }
   if (type === 'delivering') {
     const el = document.getElementById('notif-delivering-text');
     if (el) el.textContent = order.clientNotification?.message || 'Курьер везёт ваш заказ!';
   }
-
+  if (type === 'delivered') {
+    // Save order info for rating
+    _ratingOrderId   = order.id;
+    _ratingCouierUid = order.courierUid || null;
+    _selectedRating  = 0;
+  }
   tgHaptic('heavy'); playAlert();
   const el = document.getElementById(notifId);
   if (el) el.classList.add('open');
@@ -760,108 +746,153 @@ function closeNotif(id) {
   tgHaptic('light');
 }
 
+function onDeliveredClose() {
+  closeNotif('notif-delivered');
+  // Show courier rating if there was a courier
+  if (_ratingCouierUid && _ratingOrderId) {
+    setTimeout(() => _openCourierRating(), 300);
+  }
+}
+
+// ══════════════════════════════════════════════════════════
+//  COURIER RATING
+// ══════════════════════════════════════════════════════════
+function _openCourierRating() {
+  _selectedRating = 0;
+  document.getElementById('courier-rating-submit').disabled = true;
+  document.getElementById('courier-rating-hint').textContent = 'Нажмите на звезду';
+  document.querySelectorAll('.rating-star-btn').forEach(b => b.classList.remove('lit'));
+  document.getElementById('courier-rating-overlay').classList.add('open');
+}
+
+function selectCourierRating(n) {
+  _selectedRating = n;
+  const hints = ['', 'Плохо 😕', 'Не очень 😐', 'Нормально 🙂', 'Хорошо 😊', 'Отлично! 🤩'];
+  document.getElementById('courier-rating-hint').textContent = hints[n] || '';
+  document.querySelectorAll('.rating-star-btn').forEach((b, i) => {
+    b.classList.toggle('lit', i < n);
+  });
+  document.getElementById('courier-rating-submit').disabled = false;
+  tgHaptic('light');
+}
+
+async function submitCourierRating() {
+  if (!_selectedRating || !_ratingCouierUid || !_ratingOrderId) { skipCourierRating(); return; }
+  try {
+    await dbSet('orders', _ratingOrderId, { courierRating: _selectedRating });
+    // Update courier's running average
+    const courier = await dbGet('couriers', _ratingCouierUid);
+    if (courier) {
+      const oldCnt = courier.ratingCount || 0;
+      const oldAvg = courier.rating || 0;
+      const newCnt = oldCnt + 1;
+      const newAvg = Math.round(((oldAvg * oldCnt + _selectedRating) / newCnt) * 10) / 10;
+      await dbSet('couriers', _ratingCouierUid, { rating: newAvg, ratingCount: newCnt });
+    }
+    tgHaptic('success');
+    showToast('Спасибо за оценку!', 'success');
+  } catch (e) {
+    console.warn('[Rating] Error:', e);
+  }
+  skipCourierRating();
+}
+
+function skipCourierRating() {
+  document.getElementById('courier-rating-overlay').classList.remove('open');
+  _ratingOrderId = null; _ratingCouierUid = null; _selectedRating = 0;
+}
+
+// ══════════════════════════════════════════════════════════
+//  ORDER LIST RENDERING
+// ══════════════════════════════════════════════════════════
 function renderAllOrders() {
   const container = document.getElementById('orders-content');
-  const active  = (_allClientOrders.length ? _allClientOrders : ACTIVE_ORDERS)
-    .filter(o => !['delivered','cancelled'].includes(o.status))
-    .sort((a,b) => (b.createdAt||'').localeCompare(a.createdAt||''));
-  const history = (_allClientOrders)
-    .filter(o => ['delivered','cancelled'].includes(o.status))
-    .sort((a,b) => (b.createdAt||'').localeCompare(a.createdAt||''))
+  const active  = _allClientOrders
+    .filter(o => !['delivered', 'cancelled'].includes(o.status))
+    .sort((a, b) => (b.createdAt || '').localeCompare(a.createdAt || ''));
+  const history = _allClientOrders
+    .filter(o => ['delivered', 'cancelled'].includes(o.status))
+    .sort((a, b) => (b.createdAt || '').localeCompare(a.createdAt || ''))
     .slice(0, 60);
 
   if (!active.length && !history.length) {
-    container.innerHTML = `
-      <div class="empty" style="padding-top:40px">
-        <div class="empty-icon">📦</div>
-        <div class="empty-text">Заказов пока нет</div>
-        <button class="btn btn-primary" style="margin-top:20px" onclick="navTo('s-home');setNav(document.getElementById('nav-home'))">🏪 К заведениям</button>
-      </div>`;
+    container.innerHTML = `<div class="empty" style="padding-top:40px"><div class="empty-icon">📦</div><div class="empty-text">Заказов пока нет</div><button class="btn btn-primary" style="margin-top:20px" onclick="navTo('s-home');setNav(document.getElementById('nav-home'))">🏪 К заведениям</button></div>`;
     return;
   }
-
   let html = '';
-
   if (active.length) {
     html += `<div class="section-title" style="padding:0 4px;margin-bottom:4px">Активные (${active.length})</div>`;
     html += active.map(renderOrderCard).join('');
   }
-
   if (history.length) {
     html += `<div class="section-title" style="padding:0 4px;margin:12px 0 4px">История</div>`;
     html += history.map(renderHistoryCard).join('');
   }
-
   container.innerHTML = html;
   startAllCountdowns();
 }
 
-// Compact history card (no status track)
 function renderHistoryCard(o) {
   return `
-    <div class="order-card" style="border-left:3px solid ${o.status==='delivered'?'var(--success)':'var(--danger)'}">
+    <div class="order-card" style="border-left:3px solid ${o.status === 'delivered' ? 'var(--success)' : 'var(--danger)'}">
       <div class="order-card-hdr">
-        <div>
-          <div class="font-bold" style="font-size:13px">📍 ${o.venueName||'Заведение'}</div>
-          <div class="order-id">${fmtDate(o.createdAt)} · #${(o.id||'').slice(-6)}</div>
-        </div>
+        <div><div class="font-bold" style="font-size:13px">📍 ${o.venueName || 'Заведение'}</div><div class="order-id">${fmtDate(o.createdAt)} · #${(o.id || '').slice(-6)}</div></div>
         <div style="text-align:right">
           <span class="${statusBadgeClass(o.status)}">${statusLabel(o.status)}</span>
-          <div class="order-total" style="font-size:15px;margin-top:3px">${fmtPrice(o.total)}</div>
+          <div class="order-total" style="font-size:15px;margin-top:3px">${fmtPrice(o.total, o.currency || _selectedCurrency)}</div>
+          ${o.courierRating ? `<div style="font-size:12px;color:var(--text-dim)">Курьер: ${'★'.repeat(o.courierRating)}</div>` : ''}
         </div>
       </div>
       <div class="order-card-body">
-        <div class="text-sm text-dim">${(o.items||[]).map(i=>`${i.emoji||'🍽️'} ${i.name} ×${i.qty}`).join(', ')}</div>
+        <div class="text-sm text-dim">${(o.items || []).map(i => `${i.emoji || '🍽️'} ${i.name} ×${i.qty}`).join(', ')}</div>
       </div>
     </div>`;
 }
 
 function renderOrderCard(o) {
   const isPickup = o.deliveryType === 'pickup';
-  // Simplified 4-step track
   const steps = isPickup
-    ? [{icon:'📋',label:'Создан'},{icon:'👨‍🍳',label:'Готовится'},{icon:'✅',label:'Готов'}]
-    : [{icon:'📋',label:'Создан'},{icon:'👨‍🍳',label:'Готовится'},{icon:'🚴',label:'В пути'},{icon:'✅',label:'Доставлен'}];
+    ? [{ icon: '📋', label: 'Создан' }, { icon: '👨‍🍳', label: 'Готовится' }, { icon: '✅', label: 'Готов' }]
+    : [{ icon: '📋', label: 'Создан' }, { icon: '👨‍🍳', label: 'Готовится' }, { icon: '🚴', label: 'В пути' }, { icon: '✅', label: 'Доставлен' }];
   const stepIdx = isPickup
-    ? { pending:0, accepted:0, cooking:1, delivered:2, cancelled:0 }
-    : { pending:0, accepted:0, cooking:1, searching_courier:2, courier_assigned:2, delivering:2, delivered:3, cancelled:0 };
+    ? { pending: 0, accepted: 0, cooking: 1, delivered: 2, cancelled: 0 }
+    : { pending: 0, accepted: 0, cooking: 1, searching_courier: 2, courier_assigned: 2, delivering: 2, delivered: 3, cancelled: 0 };
   const si = stepIdx[o.status] ?? 0;
-  const track = o.status==='cancelled'
+  const track = o.status === 'cancelled'
     ? '<div style="color:var(--danger);font-weight:600;font-size:14px;text-align:center">❌ Заказ отменён</div>'
-    : steps.map((s,i) => {
-        const cls = i<si?'done':i===si?'active':'';
-        return `<div class="st-step ${cls}"><div class="st-dot">${cls==='done'?'✓':s.icon}</div><div style="margin-top:4px;font-size:11px">${s.label}</div></div>${i<steps.length-1?`<div class="st-line ${i<si?'done':''}"></div>`:''}`;
+    : steps.map((s, i) => {
+        const cls = i < si ? 'done' : i === si ? 'active' : '';
+        return `<div class="st-step ${cls}"><div class="st-dot">${cls === 'done' ? '✓' : s.icon}</div><div style="margin-top:4px;font-size:11px">${s.label}</div></div>${i < steps.length - 1 ? `<div class="st-line ${i < si ? 'done' : ''}"></div>` : ''}`;
       }).join('');
-
-  const showCd = o.estimatedAt && !['pending','delivered','cancelled'].includes(o.status);
+  const showCd = o.estimatedAt && !['pending', 'delivered', 'cancelled'].includes(o.status);
   const addr   = o.address;
-
+  const cur    = o.currency || _selectedCurrency;
   return `
     <div class="order-card" style="margin-bottom:2px">
       <div class="order-card-hdr">
-        <div><div class="font-bold" style="font-size:13px">📍 ${o.venueName||'Заведение'}</div><div class="order-id">#${(o.id||'').slice(-6)}</div></div>
+        <div><div class="font-bold" style="font-size:13px">📍 ${o.venueName || 'Заведение'}</div><div class="order-id">#${(o.id || '').slice(-6)}</div></div>
         <span class="${statusBadgeClass(o.status)}">${statusLabel(o.status)}</span>
       </div>
       <div class="order-card-body">
         <div class="status-track" style="margin-bottom:12px">${track}</div>
-        ${showCd?`<div class="countdown-box" style="margin-bottom:12px"><div class="countdown-lbl">${isPickup?'Готовность':'Время доставки'}</div><div class="countdown-val" id="cd-val-${o.id}">—</div><div class="progress-wrap" style="margin-top:8px"><div class="progress-bar" id="cd-bar-${o.id}"></div></div></div>`:''}
+        ${showCd ? `<div class="countdown-box" style="margin-bottom:12px"><div class="countdown-lbl">${isPickup ? 'Готовность' : 'Время доставки'}</div><div class="countdown-val" id="cd-val-${o.id}">—</div><div class="progress-wrap" style="margin-top:8px"><div class="progress-bar" id="cd-bar-${o.id}"></div></div></div>` : ''}
         <div style="display:flex;flex-direction:column;gap:4px;font-size:13px;margin-bottom:8px">
-          ${(o.items||[]).map(it=>`<div class="flex justify-between"><span>${it.emoji||'🍽️'} ${it.name}${it.variantName?' ('+it.variantName+')':''} ×${it.qty}</span><span class="font-bold">${fmtPrice(it.price*it.qty)}</span></div>`).join('')}
+          ${(o.items || []).map(it => `<div class="flex justify-between"><span>${it.emoji || '🍽️'} ${it.name}${it.variantName ? ' (' + it.variantName + ')' : ''} ×${it.qty}</span><span class="font-bold">${fmtPrice(it.price * it.qty, cur)}</span></div>`).join('')}
         </div>
         <div class="divider" style="margin:6px 0"></div>
-        <div class="flex justify-between"><span class="text-dim">Товары</span><span>${fmtPrice(o.total)}</span></div>
-        ${o.deliveryPrice?`<div class="flex justify-between"><span class="text-dim">Доставка</span><span>${fmtPrice(o.deliveryPrice)}</span></div>`:''}
-        <div class="flex justify-between"><span class="text-dim">Оплата</span><span>${o.payment==='cash'?'💵 Наличные':'💳 Карта'}</span></div>
-        ${addr?`<div class="flex justify-between"><span class="text-dim">Адрес</span><span style="text-align:right;max-width:58%;font-size:12px">${addr.street} ${addr.house}${addr.apt?', кв.'+addr.apt:''}</span></div>`:''}
+        <div class="flex justify-between"><span class="text-dim">Товары</span><span>${fmtPrice(o.total, cur)}</span></div>
+        ${o.deliveryPrice ? `<div class="flex justify-between"><span class="text-dim">Доставка</span><span>${fmtPrice(o.deliveryPrice, cur)}</span></div>` : ''}
+        <div class="flex justify-between"><span class="text-dim">Оплата</span><span>${o.payment === 'cash' ? '💵 Наличные' : '💳 Карта'}</span></div>
+        ${addr ? `<div class="flex justify-between"><span class="text-dim">Адрес</span><span style="text-align:right;max-width:58%;font-size:12px">${addr.street} ${addr.house}${addr.apt ? ', кв.' + addr.apt : ''}</span></div>` : ''}
+        ${o.courierName ? `<div class="flex justify-between"><span class="text-dim">Курьер</span><span>${o.courierName}</span></div>` : ''}
       </div>
     </div>`;
 }
 
 function startAllCountdowns() {
-  Object.values(_cdIntervals).forEach(clearInterval);
-  _cdIntervals = {};
+  Object.values(_cdIntervals).forEach(clearInterval); _cdIntervals = {};
   ACTIVE_ORDERS.forEach(o => {
-    if (o.estimatedAt && !['pending','delivered','cancelled'].includes(o.status)) _startCountdown(o);
+    if (o.estimatedAt && !['pending', 'delivered', 'cancelled'].includes(o.status)) _startCountdown(o);
   });
 }
 
@@ -874,15 +905,13 @@ function _startCountdown(o) {
     const bar = document.getElementById(`cd-bar-${o.id}`);
     if (!val) { clearInterval(_cdIntervals[o.id]); delete _cdIntervals[o.id]; return; }
     const rem = target - Date.now();
-    if (rem <= 0) { val.textContent='Совсем скоро!'; val.classList.add('urgent'); if(bar){bar.style.width='0%';bar.classList.add('urgent');} clearInterval(_cdIntervals[o.id]); return; }
+    if (rem <= 0) { val.textContent = 'Совсем скоро!'; val.classList.add('urgent'); if (bar) { bar.style.width = '0%'; bar.classList.add('urgent'); } clearInterval(_cdIntervals[o.id]); return; }
     val.textContent = fmtCountdown(rem);
     val.classList.toggle('urgent', rem < 300000);
-    if (bar) { bar.style.width=Math.max(0,(rem/total)*100)+'%'; bar.classList.toggle('urgent',rem<300000); }
+    if (bar) { bar.style.width = Math.max(0, (rem / total) * 100) + '%'; bar.classList.toggle('urgent', rem < 300000); }
   };
   tick(); _cdIntervals[o.id] = setInterval(tick, 1000);
 }
-
-// loadHistory is now merged into renderAllOrders() above
 
 // ══════════════════════════════════════════════════════════
 //  REVIEWS
@@ -893,34 +922,24 @@ async function openReviews() {
   navTo('s-reviews');
   await renderReviews();
 }
-
 function closeReviews() {
-  if (_navHistory.length > 0) {
-    const prev = _navHistory.pop();
-    _rawShowScreen(prev);
-    if (_navHistory.length === 0) tg?.BackButton?.hide();
-  } else {
-    showScreen('s-venue');
-  }
+  if (_navHistory.length > 0) { _rawShowScreen(_navHistory.pop()); if (!_navHistory.length) tg?.BackButton?.hide(); }
+  else showScreen('s-venue');
 }
-
 async function renderReviews() {
-  const venueId = _currentReviewVenueId;
+  const venueId  = _currentReviewVenueId;
   const mySection = document.getElementById('my-review-section');
-  const listEl    = document.getElementById('reviews-list');
-
-  const myReviewId = `${venueId}_${STATE.uid}`;
-  const myReview   = await dbGet('reviews', myReviewId);
-  let selectedStars = myReview?.stars || 0;
-
+  const listEl   = document.getElementById('reviews-list');
+  const myReview = await dbGet('reviews', `${venueId}_${STATE.uid}`);
+  let _reviewStarsSel = myReview?.stars || 0;
   if (myReview) {
     mySection.innerHTML = `
       <div class="section" style="margin-bottom:16px">
         <div class="section-title">Мой отзыв</div>
         <div class="review-card" style="border-color:var(--primary);border-width:1.5px">
           <div class="star-row">${renderStars(myReview.stars)}</div>
-          <div class="review-text">${myReview.text||''}</div>
-          <div class="review-date">${fmtDate(myReview.updatedAt||myReview.createdAt)}</div>
+          <div class="review-text">${myReview.text || ''}</div>
+          <div class="review-date">${fmtDate(myReview.updatedAt || myReview.createdAt)}</div>
           <div class="btn-row" style="margin-top:10px">
             <button class="btn btn-sm btn-outline" onclick="editReview()">✏️ Изменить</button>
             <button class="btn btn-sm btn-danger" onclick="deleteReview()">🗑 Удалить</button>
@@ -934,7 +953,7 @@ async function renderReviews() {
         <div class="card card-body" style="gap:10px">
           <div><div class="text-dim text-sm" style="margin-bottom:6px">Оценка</div>
             <div class="star-row" id="review-stars-sel">
-              ${[1,2,3,4,5].map(i=>`<span class="star star-interactive ${i<=selectedStars?'star-filled':'star-empty'}" onclick="selectReviewStar(${i})" style="font-size:28px">★</span>`).join('')}
+              ${[1,2,3,4,5].map(i => `<span class="star star-interactive ${i <= _reviewStarsSel ? 'star-filled' : 'star-empty'}" onclick="selectReviewStar(${i})" style="font-size:28px">★</span>`).join('')}
             </div>
           </div>
           <div class="field"><label>Комментарий</label><textarea class="inp" id="review-text" rows="3" placeholder="Поделитесь впечатлениями..."></textarea></div>
@@ -942,20 +961,19 @@ async function renderReviews() {
         </div>
       </div>`;
   }
-
-  const allReviews = (await dbQuery('reviews','venueId','==',venueId))
+  const allReviews = (await dbQuery('reviews', 'venueId', '==', venueId))
     .filter(r => r.uid !== STATE.uid)
-    .sort((a,b)=>(b.createdAt||'').localeCompare(a.createdAt||''));
-  if (!allReviews.length) { listEl.innerHTML='<div class="empty" style="padding:24px"><div class="empty-icon">💬</div><div class="empty-text">Отзывов ещё нет</div></div>'; return; }
+    .sort((a, b) => (b.createdAt || '').localeCompare(a.createdAt || ''));
+  if (!allReviews.length) { listEl.innerHTML = '<div class="empty" style="padding:24px"><div class="empty-icon">💬</div><div class="empty-text">Отзывов ещё нет</div></div>'; return; }
   listEl.innerHTML = allReviews.map(r => `
     <div class="review-card" style="margin-bottom:10px">
       <div class="flex items-center gap-2">
-        <div class="avatar" style="width:32px;height:32px;font-size:13px">${(r.userName||'?')[0].toUpperCase()}</div>
-        <div class="review-user">${r.userName||'Пользователь'}</div>
+        <div class="avatar" style="width:32px;height:32px;font-size:13px">${(r.userName || '?')[0].toUpperCase()}</div>
+        <div class="review-user">${r.userName || 'Пользователь'}</div>
         <div class="star-row" style="margin-left:auto">${renderStars(r.stars)}</div>
       </div>
-      <div class="review-text">${r.text||''}</div>
-      <div class="review-date">${fmtDate(r.updatedAt||r.createdAt)}</div>
+      <div class="review-text">${r.text || ''}</div>
+      <div class="review-date">${fmtDate(r.updatedAt || r.createdAt)}</div>
     </div>`).join('');
 }
 
@@ -964,82 +982,63 @@ function selectReviewStar(n) {
   _reviewStarsSel = n;
   const row = document.getElementById('review-stars-sel');
   if (!row) return;
-  row.querySelectorAll('.star').forEach((s,i) => {
-    s.classList.toggle('star-filled', i<n);
-    s.classList.toggle('star-empty',  i>=n);
+  row.querySelectorAll('.star').forEach((s, i) => {
+    s.classList.toggle('star-filled', i < n); s.classList.toggle('star-empty', i >= n);
   });
 }
-
 async function submitReview() {
   if (_reviewStarsSel < 1) { showToast('Выберите оценку', 'warning'); return; }
   const text = document.getElementById('review-text')?.value.trim() || '';
-  const venueId  = _currentReviewVenueId;
-  const reviewId = `${venueId}_${STATE.uid}`;
-  await dbSet('reviews', reviewId, {
+  const venueId = _currentReviewVenueId;
+  await dbSet('reviews', `${venueId}_${STATE.uid}`, {
     uid: STATE.uid, venueId, stars: _reviewStarsSel, text,
-    userName: STATE.user?.name||'Пользователь',
+    userName: STATE.user?.name || 'Пользователь',
     createdAt: new Date().toISOString(), updatedAt: new Date().toISOString()
   });
-  await updateVenueRating(venueId);
+  await _updateVenueRating(venueId);
   tgHaptic('success'); showToast('Отзыв отправлен!', 'success');
-  _reviewStarsSel = 0;
-  renderReviews();
+  _reviewStarsSel = 0; renderReviews();
 }
-
 async function editReview() {
-  const venueId  = _currentReviewVenueId;
-  const reviewId = `${venueId}_${STATE.uid}`;
-  const r = await dbGet('reviews', reviewId);
+  const venueId = _currentReviewVenueId;
+  const r = await dbGet('reviews', `${venueId}_${STATE.uid}`);
   if (!r) return;
-  const mySection = document.getElementById('my-review-section');
   _reviewStarsSel = r.stars || 0;
-  mySection.innerHTML = `
+  document.getElementById('my-review-section').innerHTML = `
     <div class="section" style="margin-bottom:16px">
       <div class="section-title">Редактировать отзыв</div>
       <div class="card card-body" style="gap:10px">
         <div><div class="text-dim text-sm" style="margin-bottom:6px">Оценка</div>
           <div class="star-row" id="review-stars-sel">
-            ${[1,2,3,4,5].map(i=>`<span class="star star-interactive ${i<=_reviewStarsSel?'star-filled':'star-empty'}" onclick="selectReviewStar(${i})" style="font-size:28px">★</span>`).join('')}
+            ${[1,2,3,4,5].map(i => `<span class="star star-interactive ${i <= _reviewStarsSel ? 'star-filled' : 'star-empty'}" onclick="selectReviewStar(${i})" style="font-size:28px">★</span>`).join('')}
           </div>
         </div>
-        <div class="field"><label>Комментарий</label><textarea class="inp" id="review-text" rows="3">${r.text||''}</textarea></div>
+        <div class="field"><label>Комментарий</label><textarea class="inp" id="review-text" rows="3">${r.text || ''}</textarea></div>
         <button class="btn btn-primary btn-sm" onclick="submitEditReview()">Сохранить</button>
         <button class="btn btn-ghost btn-sm" onclick="renderReviews()">Отмена</button>
       </div>
     </div>`;
 }
-
 async function submitEditReview() {
   if (_reviewStarsSel < 1) { showToast('Выберите оценку', 'warning'); return; }
-  const text    = document.getElementById('review-text')?.value.trim() || '';
-  const venueId = _currentReviewVenueId;
-  await dbSet('reviews', `${venueId}_${STATE.uid}`, { stars: _reviewStarsSel, text, updatedAt: new Date().toISOString() });
-  await updateVenueRating(venueId);
-  tgHaptic('success'); showToast('Отзыв обновлён', 'success');
-  renderReviews();
+  const text = document.getElementById('review-text')?.value.trim() || '';
+  await dbSet('reviews', `${_currentReviewVenueId}_${STATE.uid}`, { stars: _reviewStarsSel, text, updatedAt: new Date().toISOString() });
+  await _updateVenueRating(_currentReviewVenueId);
+  tgHaptic('success'); showToast('Отзыв обновлён', 'success'); renderReviews();
 }
-
 async function deleteReview() {
   if (!confirm('Удалить отзыв?')) return;
-  const venueId = _currentReviewVenueId;
-  await dbDelete('reviews', `${venueId}_${STATE.uid}`);
-  await updateVenueRating(venueId);
-  tgHaptic('light'); showToast('Отзыв удалён', 'info');
-  renderReviews();
+  await dbDelete('reviews', `${_currentReviewVenueId}_${STATE.uid}`);
+  await _updateVenueRating(_currentReviewVenueId);
+  tgHaptic('light'); showToast('Отзыв удалён', 'info'); renderReviews();
 }
-
-async function updateVenueRating(venueId) {
-  const reviews = await dbQuery('reviews','venueId','==',venueId);
+async function _updateVenueRating(venueId) {
+  const reviews = await dbQuery('reviews', 'venueId', '==', venueId);
   if (!reviews.length) { await dbSet('venues', venueId, { rating: 0, reviewCount: 0 }); return; }
-  const avg = reviews.reduce((s,r)=>s+(r.stars||0),0) / reviews.length;
-  await dbSet('venues', venueId, { rating: Math.round(avg*10)/10, reviewCount: reviews.length });
-  const venue = VENUES.find(v => v.id === venueId);
-  if (venue) { venue.rating = Math.round(avg*10)/10; venue.reviewCount = reviews.length; }
-  if (CURRENT_VENUE?.id === venueId) {
-    document.getElementById('venue-stars-el').innerHTML = renderStars(avg);
-    document.getElementById('venue-rating-val').textContent = avg.toFixed(1);
-    document.getElementById('venue-rating-cnt').textContent = `(${reviews.length} отзывов)`;
-  }
+  const avg = reviews.reduce((s, r) => s + (r.stars || 0), 0) / reviews.length;
+  await dbSet('venues', venueId, { rating: Math.round(avg * 10) / 10, reviewCount: reviews.length });
+  const v = VENUES.find(v => v.id === venueId);
+  if (v) { v.rating = Math.round(avg * 10) / 10; v.reviewCount = reviews.length; }
 }
 
 // ══════════════════════════════════════════════════════════
@@ -1050,20 +1049,32 @@ function loadSettings2() {
   if (!u) return;
   document.getElementById('profile-name').textContent   = u.name   || '—';
   document.getElementById('profile-phone').textContent  = u.phone  || '—';
-  document.getElementById('profile-avatar').textContent = (u.name||'?')[0].toUpperCase();
+  document.getElementById('profile-avatar').textContent = (u.name || '?')[0].toUpperCase();
+  document.getElementById('profile-city-label').textContent = u.cityName ? '📍 ' + u.cityName : '📍 —';
+  document.getElementById('settings-city-name').textContent  = u.cityName || '—';
+
   const saved = u.savedAddress;
   if (saved) {
-    document.getElementById('saved-street').value = saved.street||'';
-    document.getElementById('saved-house').value  = saved.house ||'';
-    document.getElementById('saved-apt').value    = saved.apt   ||'';
+    document.getElementById('saved-street').value = saved.street || '';
+    document.getElementById('saved-house').value  = saved.house  || '';
+    document.getElementById('saved-apt').value    = saved.apt    || '';
   }
-  const favList = document.getElementById('favorites-list');
+
+  // Allergy toggles
+  document.getElementById('vegan-box').textContent = u.isVegan    ? '✓' : '';
+  document.getElementById('diab-box').textContent  = u.isDiabetic ? '✓' : '';
+  document.getElementById('vegan-row').classList.toggle('checked', !!u.isVegan);
+  document.getElementById('diab-row').classList.toggle('checked', !!u.isDiabetic);
+  document.getElementById('allergy-custom').value = (u.allergies || []).join(', ');
+
+  // Favourites
+  const favList   = document.getElementById('favorites-list');
   const favVenues = VENUES.filter(v => FAVORITES.includes(v.id));
-  if (!favVenues.length) { favList.innerHTML='<div class="text-dim text-sm">Нет избранных заведений</div>'; return; }
+  if (!favVenues.length) { favList.innerHTML = '<div class="text-dim text-sm">Нет избранных заведений</div>'; return; }
   favList.innerHTML = favVenues.map(v => `
     <div class="list-item" onclick="openVenue('${v.id}');setNav(document.getElementById('nav-home'))">
-      <div class="li-icon yellow">${CATEGORIES.find(c=>c.id===v.categoryId)?.icon||'🏪'}</div>
-      <div class="li-body"><div class="li-title">${v.name}</div><div class="li-sub">${isVenueOpen(v)?'Открыто':'Закрыто'}</div></div>
+      <div class="li-icon yellow">${CATEGORIES.find(c => c.id === v.categoryId)?.icon || '🏪'}</div>
+      <div class="li-body"><div class="li-title">${v.name}</div><div class="li-sub">${isVenueOpen(v) ? 'Открыто' : 'Закрыто'}</div></div>
       <div class="chevron">›</div>
     </div>`).join('');
 }
@@ -1075,73 +1086,78 @@ async function saveAddress() {
   if (!street || !house) { showToast('Введите улицу и дом', 'warning'); return; }
   const savedAddress = { street, house, apt };
   STATE.user = { ...STATE.user, savedAddress };
-  saveClientState();
+  _saveClientState();
   await dbSet('users', STATE.uid, { savedAddress });
   tgHaptic('success'); showToast('Адрес сохранён', 'success');
 }
 
-// ══════════════════════════════════════════════════════════
-//  HELPERS
-// ══════════════════════════════════════════════════════════
-function _getTgName() {
-  const u = tg?.initDataUnsafe?.user;
-  if (!u) return null;
-  return (u.first_name + (u.last_name ? ' ' + u.last_name : '')).trim() || null;
+function toggleDiet(type) {
+  if (type === 'vegan') {
+    const cur = STATE.user?.isVegan || false;
+    STATE.user = { ...STATE.user, isVegan: !cur };
+    document.getElementById('vegan-box').textContent = !cur ? '✓' : '';
+    document.getElementById('vegan-row').classList.toggle('checked', !cur);
+  } else if (type === 'diabetic') {
+    const cur = STATE.user?.isDiabetic || false;
+    STATE.user = { ...STATE.user, isDiabetic: !cur };
+    document.getElementById('diab-box').textContent = !cur ? '✓' : '';
+    document.getElementById('diab-row').classList.toggle('checked', !cur);
+  }
+  _saveClientState();
+  dbSet('users', STATE.uid, { isVegan: STATE.user.isVegan, isDiabetic: STATE.user.isDiabetic });
+}
+
+async function saveAllergies() {
+  const raw = document.getElementById('allergy-custom').value.trim();
+  const allergies = raw ? raw.split(',').map(s => s.trim()).filter(Boolean) : [];
+  STATE.user = { ...STATE.user, allergies };
+  _saveClientState();
+  await dbSet('users', STATE.uid, { allergies });
+  tgHaptic('success'); showToast('Аллергены сохранены', 'success');
 }
 
 // ══════════════════════════════════════════════════════════
-//  NAVIGATION + TELEGRAM BACK BUTTON
+//  NAVIGATION
 // ══════════════════════════════════════════════════════════
 const _navHistory = [];
-const _NO_HISTORY_SCREENS = ['s-splash','s-blocked','s-no-uid','s-agree','s-onboard'];
+const _NO_HISTORY_SCREENS = ['s-splash', 's-blocked', 's-no-uid', 's-agree', 's-city-select'];
+const _rawShowScreen = id => {
+  document.querySelectorAll('.screen').forEach(s => s.classList.remove('active'));
+  const el = document.getElementById(id);
+  if (el) el.classList.add('active');
+};
 
 function _initBackButton() {
   if (!tg?.BackButton) return;
   tg.BackButton.onClick(() => {
-    // 1. Close any open overlay/sheet first
-    const open = document.querySelector('.overlay.open, .notif-card.open');
-    if (open) {
-      open.classList.remove('open');
-      if (!_navHistory.length) tg.BackButton.hide();
-      return;
-    }
-    // 2. Go back in history
+    const open = document.querySelector('.overlay.open, .rating-overlay.open');
+    if (open) { open.classList.remove('open'); if (!_navHistory.length) tg.BackButton.hide(); return; }
     if (_navHistory.length > 0) {
       const prev = _navHistory.pop();
       _rawShowScreen(prev);
-      if (_navHistory.length === 0) tg.BackButton.hide();
+      if (prev === 's-venue') updateCartFAB();
+      if (!_navHistory.length) tg.BackButton.hide();
       return;
     }
     tg.BackButton.hide();
   });
 }
 
-const _rawShowScreen = showScreen; // reference to shared showScreen
-
 function navTo(screenId) {
   const cur = document.querySelector('.screen.active')?.id;
   if (cur && cur !== screenId && !_NO_HISTORY_SCREENS.includes(cur)) {
-    _navHistory.push(cur);
-    tg?.BackButton?.show();
+    _navHistory.push(cur); tg?.BackButton?.show();
   }
   showScreen(screenId);
-  if (screenId !== 's-venue') {
-    document.getElementById('cart-fab').classList.add('hidden');
-  }
-  if (screenId === 's-home') loadVenues();
+  if (screenId !== 's-venue') document.getElementById('cart-fab').classList.add('hidden');
+  if (screenId === 's-home')   loadVenues();
   if (screenId === 's-orders') renderAllOrders();
 }
 
-function navToAllOrders() {
-  navTo('s-orders');
-  setNav(document.getElementById('nav-orders'));
-  renderAllOrders();
-}
+function navToAllOrders() { navTo('s-orders'); setNav(document.getElementById('nav-orders')); renderAllOrders(); }
 
 function setNav(el) {
-  // When using bottom nav, clear history (no back needed)
-  _navHistory.length = 0;
-  tg?.BackButton?.hide();
+  _navHistory.length = 0; tg?.BackButton?.hide();
   document.querySelectorAll('.nav-item').forEach(n => n.classList.remove('active'));
   if (el) el.classList.add('active');
 }

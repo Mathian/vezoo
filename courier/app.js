@@ -4,46 +4,56 @@
    ============================================================ */
 
 const STATE = { uid: null, user: null };
-let COURIER_DATA    = null;
-let _availUnsub     = null;
-let _myUnsub        = null;
-let _availOrders    = [];
-let _myOrders       = [];
-let _shownAssigned  = new Set();
-let _agreedCheck    = false;
-let _venueInvite    = null;
-let _acceptOrderId  = null;
+let COURIER_DATA      = null;
+let _availUnsub       = null;
+let _venueUnsub       = null;
+let _myUnsub          = null;
+let _availOrders      = [];
+let _venueOrders      = [];
+let _myOrders         = [];
+let _shownAssigned    = new Set();
+let _venueInvite      = null;
+let _acceptOrderId    = null;
+let _acceptFromPool   = 'available'; // 'available' | 'venue'
 
 // ══════════════════════════════════════════════════════════
 //  BOOT
 // ══════════════════════════════════════════════════════════
 window.addEventListener('DOMContentLoaded', async () => {
-  if (new URLSearchParams(location.search).get('reset') === '1') { localStorage.clear(); location.replace(location.pathname); return; }
+  if (new URLSearchParams(location.search).get('reset') === '1') {
+    localStorage.clear(); location.replace(location.pathname); return;
+  }
   tgReady();
   _initCourierBackButton();
+
   const _tgUserId = tg?.initDataUnsafe?.user?.id ? String(tg.initDataUnsafe.user.id) : null;
   try {
     const s = JSON.parse(localStorage.getItem('vez_courier_state') || '{}');
     if (!_tgUserId || s.tgId === _tgUserId) {
-      STATE.uid = s.uid||null; STATE.user = s.user||null;
+      STATE.uid = s.uid || null; STATE.user = s.user || null;
     }
   } catch {}
+
   const urlUid = readUidFromUrl();
-  if (urlUid) { STATE.uid = urlUid; saveState(); }
+  if (urlUid) { STATE.uid = urlUid; _saveState(); }
+
   await initFirebase();
-  if (!STATE.uid) { const tgUid = await resolveUidByTgId(); if (tgUid) { STATE.uid = tgUid; saveState(); } }
+
+  if (!STATE.uid) {
+    const tgUid = await resolveUidByTgId();
+    if (tgUid) { STATE.uid = tgUid; _saveState(); }
+  }
   if (!STATE.uid) { showScreen('s-no-uid'); return; }
 
   const existing = await dbGet('users', STATE.uid);
   if (existing?.blocked) { showScreen('s-blocked'); return; }
-  if (!existing?.agreedCourier) { showScreen('s-agree'); return; }
-  // Auto-set name from Telegram if missing (no onboard screen)
-  if (existing && !existing.name) {
-    const autoName = _getTgName() || existing.firstName || 'Курьер';
-    await dbSet('users', STATE.uid, { name: autoName });
-    existing.name = autoName;
+
+  if (!existing?.agreedCourier) {
+    document.getElementById('s-agree').style.display = 'flex';
+    return;
   }
-  STATE.user = existing; saveState();
+
+  STATE.user = existing; _saveState();
   await checkCourierStatus();
 });
 
@@ -53,19 +63,12 @@ function _getTgName() {
   return (u.first_name + (u.last_name ? ' ' + u.last_name : '')).trim() || null;
 }
 
-function saveState() {
-  const tgUserId = tg?.initDataUnsafe?.user?.id ? String(tg.initDataUnsafe.user.id) : null;
-  try { localStorage.setItem('vez_courier_state', JSON.stringify({ uid: STATE.uid, user: STATE.user, tgId: tgUserId })); } catch {}
+function _saveState() {
+  const tgId = tg?.initDataUnsafe?.user?.id ? String(tg.initDataUnsafe.user.id) : null;
+  try { localStorage.setItem('vez_courier_state', JSON.stringify({ uid: STATE.uid, user: STATE.user, tgId })); } catch {}
 }
 
 // ── Agreement ──
-function toggleAgreeCheck() {
-  const cb = document.getElementById('agree-cb');
-  _agreedCheck = cb ? cb.checked : !_agreedCheck;
-  document.getElementById('agree-box').textContent = _agreedCheck ? '✓' : '';
-  document.getElementById('agree-check-row').classList.toggle('checked', _agreedCheck);
-  document.getElementById('agree-btn').disabled = !_agreedCheck;
-}
 async function submitAgree() {
   const btn = document.getElementById('agree-btn');
   if (btn) { btn.disabled = true; btn.classList.add('btn-loading'); }
@@ -80,40 +83,37 @@ async function submitAgree() {
     createdAt: new Date().toISOString()
   };
   await dbSet('users', STATE.uid, STATE.user);
-  // Создаём / обновляем профиль курьера
   const existingCourier = await dbGet('couriers', STATE.uid);
   if (!existingCourier) {
     await dbSet('couriers', STATE.uid, {
       uid: STATE.uid, name: autoName, phone: linkData?.phone || '',
-      status: 'pending', onShift: false, createdAt: new Date().toISOString()
+      status: 'pending', onShift: false, rating: 0, ratingCount: 0,
+      totalDeliveries: 0, createdAt: new Date().toISOString()
     });
   }
-  saveState();
-  if (btn) { btn.disabled = false; btn.classList.remove('btn-loading'); }
+  _saveState();
+  document.getElementById('s-agree').style.display = 'none';
   showScreen('s-pending');
 }
-
-// ── Onboarding (не используется — имя берётся из Telegram) ──
-async function onboardSubmit() { showScreen('s-pending'); }
 
 // ── Check courier status ──
 async function checkCourierStatus() {
   const courier = await dbGet('couriers', STATE.uid);
-  COURIER_DATA  = courier;
-  if (!courier) { showScreen('s-pending'); return; }
-  if (courier.status === 'pending') { showScreen('s-pending'); return; }
-  if (courier.status === 'blocked') { showScreen('s-blocked'); return; }
+  COURIER_DATA = courier;
+  if (!courier)                         { showScreen('s-pending'); return; }
+  if (courier.status === 'pending')     { showScreen('s-pending'); return; }
+  if (courier.status === 'blocked')     { showScreen('s-blocked'); return; }
 
   // Check for pending venue invite
   const invite = await dbGet('courier_venue_links', STATE.uid);
   if (invite && invite.status === 'pending') {
     _venueInvite = invite;
-    document.getElementById('venue-invite-name').textContent = invite.venueName||'Заведение';
-    document.getElementById('venue-invite-addr').textContent = invite.venueAddress||'';
+    document.getElementById('venue-invite-name').textContent = invite.venueName || 'Заведение';
+    document.getElementById('venue-invite-addr').textContent = invite.venueAddress || '';
     const notice = document.getElementById('current-primary-notice');
     if (courier.primaryVenueId && courier.primaryVenueId !== invite.venueId) {
-      const primaryVenue = await dbGet('venues', courier.primaryVenueId);
-      notice.textContent = `Сейчас ваше постоянное кафе: ${primaryVenue?.name||courier.primaryVenueId}. При принятии — оно сменится.`;
+      const pv = await dbGet('venues', courier.primaryVenueId);
+      notice.textContent = `Сейчас ваше постоянное кафе: ${pv?.name || courier.primaryVenueId}. При принятии — оно сменится.`;
       notice.classList.remove('hidden');
     }
     showScreen('s-venue-invite'); return;
@@ -141,13 +141,54 @@ async function declineVenueInvite() {
 function initMain() {
   document.getElementById('main-nav').style.display = 'flex';
   startHeartbeat(STATE.uid);
+
   const onShift = COURIER_DATA?.onShift || false;
   document.getElementById('shift-toggle').checked = onShift;
   document.getElementById('shift-label').textContent = onShift ? '🟢 На смене' : 'Офлайн';
   document.getElementById('shift-info-banner').classList.toggle('hidden', !onShift);
+
+  // City label
+  if (COURIER_DATA?.cityName) {
+    document.getElementById('courier-city-label').textContent = '📍 ' + COURIER_DATA.cityName;
+  }
+
+  // Primary venue label
+  if (COURIER_DATA?.primaryVenueName) {
+    document.getElementById('primary-venue-label').textContent = COURIER_DATA.primaryVenueName;
+  }
+
   watchMyOrders();
-  if (onShift) watchAvailableOrders();
-  showScreen('s-available');
+  if (onShift) { watchAvailableOrders(); watchVenueOrders(); }
+  navToAvailable();
+}
+
+// ══════════════════════════════════════════════════════════
+//  NAVIGATION
+// ══════════════════════════════════════════════════════════
+function navToAvailable() {
+  showScreen('s-available'); setNav(document.getElementById('nav-avail'));
+  if (COURIER_DATA?.onShift) renderAvailableOrders();
+  tg?.BackButton?.hide();
+}
+function navToVenueOrders() {
+  showScreen('s-venue-orders'); setNav(document.getElementById('nav-venue'));
+  renderVenueOrders();
+  tg?.BackButton?.hide();
+}
+function navToMyOrders() {
+  showScreen('s-my-orders'); setNav(document.getElementById('nav-my'));
+  renderMyOrders();
+  tg?.BackButton?.hide();
+}
+function navToProfile() {
+  showScreen('s-courier-profile'); setNav(document.getElementById('nav-profile'));
+  loadCourierProfile();
+  tg?.BackButton?.hide();
+}
+
+function setNav(el) {
+  document.querySelectorAll('.nav-item').forEach(n => n.classList.remove('active'));
+  if (el) el.classList.add('active');
 }
 
 // ══════════════════════════════════════════════════════════
@@ -160,26 +201,32 @@ async function toggleShift(input) {
   await dbSet('couriers', STATE.uid, { onShift, shiftUpdatedAt: new Date().toISOString() });
   COURIER_DATA = { ...COURIER_DATA, onShift };
   if (onShift) {
-    watchAvailableOrders(); tgHaptic('success'); showToast('Смена начата', 'success');
+    watchAvailableOrders(); watchVenueOrders();
+    tgHaptic('success'); showToast('Смена начата', 'success');
   } else {
     if (_availUnsub) { _availUnsub(); _availUnsub = null; }
-    _availOrders = [];
-    document.getElementById('available-list').innerHTML = '<div class="empty"><div class="empty-icon">🚴</div><div class="empty-text">Включите смену, чтобы<br>видеть доступные заказы</div></div>';
+    if (_venueUnsub) { _venueUnsub(); _venueUnsub = null; }
+    _availOrders = []; _venueOrders = [];
+    document.getElementById('available-list').innerHTML =
+      '<div class="empty"><div class="empty-icon">🚴</div><div class="empty-text">Включите смену, чтобы<br>видеть доступные заказы</div></div>';
+    document.getElementById('venue-orders-list').innerHTML =
+      '<div class="empty"><div class="empty-icon">⭐</div><div class="empty-text">Здесь будут заказы вашего<br>постоянного заведения</div></div>';
     document.getElementById('avail-badge').classList.add('hidden');
+    document.getElementById('venue-badge').classList.add('hidden');
     tgHaptic('light'); showToast('Смена завершена', 'info');
   }
 }
 
 // ══════════════════════════════════════════════════════════
-//  AVAILABLE ORDERS
+//  AVAILABLE ORDERS (общий пул)
 // ══════════════════════════════════════════════════════════
-async function watchAvailableOrders() {
+function watchAvailableOrders() {
   if (_availUnsub) { _availUnsub(); _availUnsub = null; }
   _availUnsub = onQuerySnap('orders', 'status', '==', 'searching_courier', orders => {
     _availOrders = orders.filter(o => !o.courierUid);
     const cnt = _availOrders.length;
     document.getElementById('avail-badge').textContent = cnt;
-    document.getElementById('avail-badge').classList.toggle('hidden', cnt===0);
+    document.getElementById('avail-badge').classList.toggle('hidden', cnt === 0);
     if (document.getElementById('s-available').classList.contains('active')) renderAvailableOrders();
   });
 }
@@ -190,70 +237,132 @@ function renderAvailableOrders() {
     list.innerHTML = '<div class="empty"><div class="empty-icon">📭</div><div class="empty-text">Нет доступных заказов</div></div>';
     return;
   }
-  // Sort: primary venue orders first
   const myVenue = COURIER_DATA?.primaryVenueId;
-  const sorted = [..._availOrders].sort((a,_) => a.venueId === myVenue ? -1 : 1);
-  list.innerHTML = sorted.map(o => `
-    <div class="delivery-card" onclick="openAcceptSheet('${o.id}')" style="cursor:pointer">
-      <div class="delivery-card-hdr">
-        <div><div class="font-bold" style="font-size:14px">🏪 ${o.venueName||'Заведение'}</div><div class="text-xs text-dim">${fmtDate(o.createdAt)}</div></div>
-        <div class="text-primary font-bold">${fmtPrice(o.deliveryPrice||0)}</div>
-      </div>
-      <div class="delivery-card-body" style="font-size:13px">
-        ${o.address?`<div class="flex items-center gap-2"><span>📍</span><span>${o.address.street} ${o.address.house}${o.address.apt?', кв.'+o.address.apt:''}</span></div>`:'<div>🏪 Самовывоз</div>'}
-        <div class="flex items-center gap-2"><span>💰</span><span>${fmtPrice(o.total+(o.deliveryPrice||0))}</span><span class="text-dim">· ${o.payment==='cash'?'Наличные':'Карта'}</span></div>
-        ${o.venueId===myVenue?'<div class="pill" style="margin-top:4px;font-size:10px;width:fit-content">⭐ Ваше кафе</div>':''}
-      </div>
-      <div class="delivery-card-foot"><button class="btn btn-primary btn-sm" onclick="event.stopPropagation();openAcceptSheet('${o.id}')">✅ Принять заказ →</button></div>
-    </div>`).join('');
+  const sorted = [..._availOrders].sort((a, b) => (a.venueId === myVenue ? -1 : 1) - (b.venueId === myVenue ? -1 : 1));
+  list.innerHTML = sorted.map(o => _orderPoolCard(o, myVenue)).join('');
 }
 
-async function openAcceptSheet(orderId) {
+// ══════════════════════════════════════════════════════════
+//  VENUE ORDERS (важные — заказы своего заведения)
+// ══════════════════════════════════════════════════════════
+function watchVenueOrders() {
+  if (_venueUnsub) { _venueUnsub(); _venueUnsub = null; }
+  const myVenue = COURIER_DATA?.primaryVenueId;
+  if (!myVenue) return;
+  _venueUnsub = onQuerySnap('orders', 'venueId', '==', myVenue, orders => {
+    _venueOrders = orders.filter(o => o.status === 'searching_courier' && !o.courierUid);
+    const cnt = _venueOrders.length;
+    document.getElementById('venue-badge').textContent = cnt;
+    document.getElementById('venue-badge').classList.toggle('hidden', cnt === 0);
+    if (document.getElementById('s-venue-orders').classList.contains('active')) renderVenueOrders();
+  });
+}
+
+function renderVenueOrders() {
+  const list = document.getElementById('venue-orders-list');
+  const myVenue = COURIER_DATA?.primaryVenueId;
+  if (!myVenue) {
+    list.innerHTML = '<div class="empty"><div class="empty-icon">🏪</div><div class="empty-text">Вы не привязаны к заведению.<br>Ждите приглашения.</div></div>';
+    return;
+  }
+  if (!COURIER_DATA?.onShift) {
+    list.innerHTML = '<div class="empty"><div class="empty-icon">🚴</div><div class="empty-text">Включите смену, чтобы<br>видеть заказы</div></div>';
+    return;
+  }
+  if (!_venueOrders.length) {
+    list.innerHTML = `<div class="empty"><div class="empty-icon">✅</div><div class="empty-text">Нет ожидающих заказов</div></div>`;
+    return;
+  }
+  list.innerHTML = _venueOrders.map(o => _orderPoolCard(o, myVenue)).join('');
+}
+
+function _orderPoolCard(o, myVenueId) {
+  const addr = o.address;
+  const isOwn = o.venueId === myVenueId;
+  return `
+    <div class="delivery-card" onclick="openAcceptSheet('${o.id}','${isOwn ? 'venue' : 'available'}')" style="cursor:pointer">
+      <div class="delivery-card-hdr">
+        <div>
+          <div class="font-bold" style="font-size:14px">🏪 ${o.venueName || 'Заведение'}</div>
+          <div class="text-xs text-dim">${fmtDate(o.createdAt)}</div>
+        </div>
+        <div class="text-primary font-bold">${fmtPrice(o.deliveryPrice || 0)}</div>
+      </div>
+      <div class="delivery-card-body" style="font-size:13px">
+        ${addr
+          ? `<div class="flex items-center gap-2"><span>📍</span><span>${addr.street} ${addr.house}${addr.apt ? ', кв.' + addr.apt : ''}</span></div>`
+          : '<div>🏪 Самовывоз</div>'}
+        <div class="flex items-center gap-2">
+          <span>💰</span><span>${fmtPrice((o.total || 0) + (o.deliveryPrice || 0))}</span>
+          <span class="text-dim">· ${o.payment === 'cash' ? 'Наличные' : 'Карта'}</span>
+        </div>
+        ${isOwn ? '<div class="pill" style="margin-top:4px;font-size:10px;width:fit-content;background:var(--primary)20;color:var(--primary)">⭐ Ваше кафе</div>' : ''}
+      </div>
+      <div class="delivery-card-foot">
+        <button class="btn btn-primary btn-sm"
+          onclick="event.stopPropagation();openAcceptSheet('${o.id}','${isOwn ? 'venue' : 'available'}')">
+          ✅ Принять →
+        </button>
+      </div>
+    </div>`;
+}
+
+// ── Accept Sheet ──
+async function openAcceptSheet(orderId, pool) {
   _acceptOrderId = orderId;
-  const order = _availOrders.find(o => o.id === orderId);
+  _acceptFromPool = pool || 'available';
+  const order = (pool === 'venue' ? _venueOrders : _availOrders).find(o => o.id === orderId)
+    || _availOrders.find(o => o.id === orderId)
+    || _venueOrders.find(o => o.id === orderId);
   if (!order) return;
   const addr = order.address;
+  let venueAddr = '—';
+  try { venueAddr = (await dbGet('venues', order.venueId))?.address || '—'; } catch {}
   const content = document.getElementById('accept-order-content');
   content.innerHTML = `
     <div class="sheet-title">Принять заказ?</div>
     <div class="card card-body" style="margin-bottom:12px;gap:6px;display:flex;flex-direction:column">
-      <div class="flex justify-between"><span class="text-dim">Заведение</span><span class="font-bold">${order.venueName||'—'}</span></div>
-      <div class="flex justify-between"><span class="text-dim">Адрес кафе</span><span style="text-align:right;max-width:60%">${(await dbGet('venues',order.venueId))?.address||'—'}</span></div>
-      <div class="flex justify-between"><span class="text-dim">Адрес доставки</span><span style="text-align:right;max-width:60%">${addr?`${addr.street} ${addr.house}${addr.apt?', кв.'+addr.apt:''}`:order.deliveryType==='pickup'?'Самовывоз':'—'}</span></div>
-      <div class="flex justify-between"><span class="text-dim">Оплата</span><span>${order.payment==='cash'?'💵 Наличные':'💳 Карта'}</span></div>
-      <div class="flex justify-between"><span class="text-dim">Вознаграждение</span><span class="font-bold text-primary">${fmtPrice(order.deliveryPrice||0)}</span></div>
+      <div class="flex justify-between"><span class="text-dim">Заведение</span><span class="font-bold">${order.venueName || '—'}</span></div>
+      <div class="flex justify-between"><span class="text-dim">Адрес кафе</span><span style="text-align:right;max-width:60%">${venueAddr}</span></div>
+      <div class="flex justify-between"><span class="text-dim">Доставка</span><span style="text-align:right;max-width:60%">${addr ? `${addr.street} ${addr.house}${addr.apt ? ', кв.' + addr.apt : ''}` : 'Самовывоз'}</span></div>
+      <div class="flex justify-between"><span class="text-dim">Оплата</span><span>${order.payment === 'cash' ? '💵 Наличные' : '💳 Карта'}</span></div>
+      <div class="flex justify-between"><span class="text-dim">Вознаграждение</span><span class="font-bold text-primary">${fmtPrice(order.deliveryPrice || 0)}</span></div>
     </div>
     <div class="section-title" style="margin-bottom:6px">Состав</div>
     <div class="card card-body" style="margin-bottom:14px;gap:4px;display:flex;flex-direction:column">
-      ${(order.items||[]).map(it=>`<div class="flex justify-between text-sm"><span>${it.emoji||'🍽️'} ${it.name} ×${it.qty}</span><span>${fmtPrice(it.price*it.qty)}</span></div>`).join('')}
+      ${(order.items || []).map(it => `
+        <div class="flex justify-between text-sm">
+          <span>${it.emoji || '🍽️'} ${it.name}${it.variantName ? ' (' + it.variantName + ')' : ''} ×${it.qty}</span>
+          <span>${fmtPrice(it.price * it.qty)}</span>
+        </div>`).join('')}
     </div>
     <div class="btn-row">
       <button class="btn btn-ghost" onclick="closeAcceptSheet()">Отмена</button>
       <button class="btn btn-primary" onclick="acceptOrder('${order.id}')">✅ Принять заказ</button>
     </div>`;
-  document.getElementById('accept-overlay').classList.add('open'); tg?.BackButton?.show();
+  document.getElementById('accept-overlay').classList.add('open');
+  tg?.BackButton?.show();
 }
 
 async function acceptOrder(orderId) {
-  // Курьер принимает заказ — статус courier_assigned (едет в кафе)
-  // Оператор потом нажимает "Передал заказ" → статус delivering
-  _shownAssigned.add(orderId); // не показывать нотификацию о назначении — курьер сам принял
+  _shownAssigned.add(orderId);
   await dbSet('orders', orderId, {
     status: 'courier_assigned',
     courierUid: STATE.uid,
     courierName: COURIER_DATA?.name || 'Курьер',
+    courierPhone: COURIER_DATA?.phone || '',
     assignedAt: new Date().toISOString()
   });
   closeAcceptSheet();
   tgHaptic('success');
-  showToast('Заказ принят! Едете в кафе за заказом.', 'success');
-  showScreen('s-my-orders');
-  setNav(document.getElementById('nav-my'));
+  showToast('Заказ принят! Едете в кафе.', 'success');
+  navToMyOrders();
 }
 
 function closeAcceptSheet(e) {
   if (e && e.target !== document.getElementById('accept-overlay')) return;
   document.getElementById('accept-overlay').classList.remove('open');
+  if (document.querySelector('.overlay.open') === null) tg?.BackButton?.hide();
 }
 
 // ══════════════════════════════════════════════════════════
@@ -264,12 +373,11 @@ function watchMyOrders() {
   _myUnsub = onQuerySnap('orders', 'courierUid', '==', STATE.uid, orders => {
     _myOrders = orders
       .filter(o => o.status === 'courier_assigned' || o.status === 'delivering')
-      .sort((a,b) => (a.createdAt||'').localeCompare(b.createdAt||''));
+      .sort((a, b) => (a.createdAt || '').localeCompare(b.createdAt || ''));
     const cnt = _myOrders.length;
     document.getElementById('my-badge').textContent = cnt;
-    document.getElementById('my-badge').classList.toggle('hidden', cnt===0);
+    document.getElementById('my-badge').classList.toggle('hidden', cnt === 0);
 
-    // Нотификация при назначении оператором напрямую (courier_assigned)
     _myOrders.forEach(o => {
       if (!_shownAssigned.has(o.id)) {
         _shownAssigned.add(o.id);
@@ -282,87 +390,100 @@ function watchMyOrders() {
 }
 
 function showAssignedNotif(order) {
-  document.getElementById('notif-assigned-text').textContent = `Заказ из ${order.venueName||'заведения'} → ${order.address?order.address.street+' '+order.address.house:'клиенту'}`;
+  const addr = order.address;
+  document.getElementById('notif-assigned-text').textContent =
+    `Заказ из ${order.venueName || 'заведения'} → ${addr ? addr.street + ' ' + addr.house : 'клиенту'}`;
   document.getElementById('notif-assigned').classList.add('open');
   tgHaptic('heavy'); playNewOrder();
 }
 
 function renderMyOrders() {
   const list = document.getElementById('my-orders-list');
-  if (!_myOrders.length) { list.innerHTML='<div class="empty" style="padding-top:40px"><div class="empty-icon">📦</div><div class="empty-text">Нет активных доставок</div></div>'; return; }
+  if (!_myOrders.length) {
+    list.innerHTML = '<div class="empty" style="padding-top:40px"><div class="empty-icon">📦</div><div class="empty-text">Нет активных доставок</div></div>';
+    return;
+  }
   list.innerHTML = _myOrders.map(o => {
     const addr = o.address;
-    const showCd = o.estimatedAt;
     return `
       <div class="delivery-card" onclick="openMyOrder('${o.id}')" style="cursor:pointer">
         <div class="delivery-card-hdr">
-          <div><div class="font-bold" style="font-size:14px">🏪 ${o.venueName||'Заведение'}</div><div class="text-xs text-dim">#${(o.id||'').slice(-6)} · ${fmtDate(o.createdAt)}</div></div>
+          <div>
+            <div class="font-bold" style="font-size:14px">🏪 ${o.venueName || 'Заведение'}</div>
+            <div class="text-xs text-dim">#${(o.id || '').slice(-6)} · ${fmtDate(o.createdAt)}</div>
+          </div>
           <span class="${statusBadgeClass(o.status)}">${statusLabel(o.status)}</span>
         </div>
         <div class="delivery-card-body" style="font-size:13px">
-          ${addr?`<div>📍 ${addr.street} ${addr.house}${addr.apt?', кв.'+addr.apt:''}</div>`:''}
-          <div>💰 ${fmtPrice(o.total+(o.deliveryPrice||0))} · ${o.payment==='cash'?'Наличные':'Карта'}</div>
-          ${showCd?`<div id="cdc-${o.id}" style="font-size:12px;color:var(--primary);margin-top:2px">⏱ —</div>`:''}
+          ${addr ? `<div>📍 ${addr.street} ${addr.house}${addr.apt ? ', кв.' + addr.apt : ''}</div>` : '<div>🏪 Самовывоз</div>'}
+          <div>💰 ${fmtPrice((o.total || 0) + (o.deliveryPrice || 0))} · ${o.payment === 'cash' ? 'Наличные' : 'Карта'}</div>
         </div>
         <div class="delivery-card-foot">
           <button class="btn btn-primary btn-sm" onclick="event.stopPropagation();openMyOrder('${o.id}')">Детали →</button>
         </div>
       </div>`;
   }).join('');
-  _myOrders.forEach(o => { if (o.estimatedAt) startMiniCountdown(o); });
-}
-
-function startMiniCountdown(o) {
-  const target = new Date(o.estimatedAt).getTime();
-  const tick = () => {
-    const el = document.getElementById(`cdc-${o.id}`);
-    if (!el) return;
-    const rem = target - Date.now();
-    if (rem <= 0) { el.textContent = '⏱ Должно быть доставлено!'; el.style.color='var(--danger)'; return; }
-    el.textContent = '⏱ ' + fmtCountdown(rem);
-  };
-  tick(); setInterval(tick, 1000);
 }
 
 // ── My order detail ──
 async function openMyOrder(orderId) {
   const order = _myOrders.find(o => o.id === orderId);
   if (!order) return;
-  const addr    = order.address;
-  const venueDoc = await dbGet('venues', order.venueId);
-  const content  = document.getElementById('my-order-detail');
+  const addr = order.address;
+  let venueAddr = '—';
+  try { venueAddr = (await dbGet('venues', order.venueId))?.address || '—'; } catch {}
+  const callBtn = order.clientPhone
+    ? `<a href="tel:${normPhone(order.clientPhone)}" class="btn-call">📞 Позвонить клиенту</a>`
+    : '';
+  const content = document.getElementById('my-order-detail');
   content.innerHTML = `
-    <div class="sheet-title">Заказ #${(order.id||'').slice(-6)}</div>
+    <div class="sheet-title">Заказ #${(order.id || '').slice(-6)}</div>
     <div class="card card-body" style="margin-bottom:12px;gap:6px;display:flex;flex-direction:column">
-      <div class="flex justify-between"><span class="text-dim">Заведение</span><span class="font-bold">${order.venueName||'—'}</span></div>
-      <div class="flex justify-between"><span class="text-dim">Адрес кафе</span><span style="text-align:right;max-width:60%">${venueDoc?.address||'—'}</span></div>
-      <div class="flex justify-between"><span class="text-dim">Клиент</span><span>${order.clientName}</span></div>
-      <div class="flex justify-between"><span class="text-dim">Телефон</span><span>${order.clientPhone||'—'}</span></div>
-      <div class="flex justify-between"><span class="text-dim">Адрес доставки</span><span style="text-align:right;max-width:60%">${addr?`${addr.street} ${addr.house}${addr.apt?', кв.'+addr.apt:''}${addr.hasIntercom?' · домофон: '+(addr.intercomCode||'есть'):''}`:order.deliveryType==='pickup'?'Самовывоз':'—'}</span></div>
-      <div class="flex justify-between"><span class="text-dim">Оплата</span><span>${order.payment==='cash'?'💵 Наличные':'💳 Карта'}</span></div>
-      <div class="flex justify-between"><span class="text-dim">Сумма</span><span class="font-bold text-primary">${fmtPrice(order.total+(order.deliveryPrice||0))}</span></div>
-      ${order.comment?`<div class="flex justify-between"><span class="text-dim">Комментарий</span><span style="text-align:right;max-width:60%">${order.comment}</span></div>`:''}
+      <div class="flex justify-between"><span class="text-dim">Заведение</span><span class="font-bold">${order.venueName || '—'}</span></div>
+      <div class="flex justify-between"><span class="text-dim">Адрес кафе</span><span style="text-align:right;max-width:60%">${venueAddr}</span></div>
+      <div class="flex justify-between"><span class="text-dim">Клиент</span><span>${order.clientName || '—'}</span></div>
+      <div class="flex justify-between"><span class="text-dim">Телефон</span><span>${order.clientPhone || '—'}</span></div>
+      <div class="flex justify-between"><span class="text-dim">Адрес</span><span style="text-align:right;max-width:60%">${addr ? `${addr.street} ${addr.house}${addr.apt ? ', кв.' + addr.apt : ''}${addr.hasIntercom ? ' · домофон: ' + (addr.intercomCode || 'есть') : ''}` : 'Самовывоз'}</span></div>
+      <div class="flex justify-between"><span class="text-dim">Оплата</span><span>${order.payment === 'cash' ? '💵 Наличные' : '💳 Карта'}</span></div>
+      <div class="flex justify-between"><span class="text-dim">Итого</span><span class="font-bold text-primary">${fmtPrice((order.total || 0) + (order.deliveryPrice || 0))}</span></div>
+      ${order.comment ? `<div class="flex justify-between"><span class="text-dim">Комментарий</span><span style="text-align:right;max-width:60%">${order.comment}</span></div>` : ''}
     </div>
-    <div class="card card-body" style="margin-bottom:14px;gap:5px;display:flex;flex-direction:column">
-      ${(order.items||[]).map(it=>`<div class="flex justify-between text-sm"><span>${it.emoji||'🍽️'} ${it.name}${it.variantName?' ('+it.variantName+')':''} ×${it.qty}</span><span>${fmtPrice(it.price*it.qty)}</span></div>`).join('')}
+    <div class="card card-body" style="margin-bottom:12px;gap:5px;display:flex;flex-direction:column">
+      ${(order.items || []).map(it => `
+        <div class="flex justify-between text-sm">
+          <span>${it.emoji || '🍽️'} ${it.name}${it.variantName ? ' (' + it.variantName + ')' : ''} ×${it.qty}</span>
+          <span>${fmtPrice(it.price * it.qty)}</span>
+        </div>`).join('')}
     </div>
+    ${callBtn}
     ${order.status === 'courier_assigned'
-      ? `<div class="alert-box info" style="text-align:center;font-size:14px">🏃 Едете в кафе за заказом.<br><span style="font-size:12px;color:var(--text-dim)">Оператор передаст заказ и подтвердит выдачу</span></div>`
+      ? `<div class="alert-box info" style="text-align:center;font-size:14px;margin-bottom:12px">
+           🏃 Едете в кафе за заказом.<br>
+           <span style="font-size:12px;color:var(--text-dim)">Оператор передаст заказ и подтвердит выдачу</span>
+         </div>`
       : `<div class="btn-row">
            <button class="btn btn-ghost btn-sm" onclick="courierReturn('${order.id}')">↩ Возврат</button>
            <button class="btn btn-success" onclick="courierDeliver('${order.id}')">✅ Доставил</button>
          </div>`
     }`;
-  document.getElementById('my-order-overlay').classList.add('open'); tg?.BackButton?.show();
+  document.getElementById('my-order-overlay').classList.add('open');
+  tg?.BackButton?.show();
 }
 
 async function courierDeliver(orderId) {
   const doDeliver = async () => {
     await dbSet('orders', orderId, {
-      status: 'delivered', deliveredAt: new Date().toISOString(),
+      status: 'delivered',
+      deliveredAt: new Date().toISOString(),
       clientNotification: { type: 'delivered', seen: false }
     });
-    closeMyOrderSheet(); tgHaptic('success'); showToast('Заказ доставлен!', 'success');
+    // Increment total deliveries
+    const courier = await dbGet('couriers', STATE.uid);
+    const total = (courier?.totalDeliveries || 0) + 1;
+    await dbSet('couriers', STATE.uid, { totalDeliveries: total });
+    COURIER_DATA = { ...COURIER_DATA, totalDeliveries: total };
+    closeMyOrderSheet();
+    tgHaptic('success'); showToast('Заказ доставлен!', 'success');
   };
   if (tg?.showConfirm) tg.showConfirm('Подтвердить доставку?', ok => { if (ok) doDeliver(); });
   else if (confirm('Подтвердить доставку?')) await doDeliver();
@@ -370,8 +491,13 @@ async function courierDeliver(orderId) {
 
 async function courierReturn(orderId) {
   const doReturn = async () => {
-    await dbSet('orders', orderId, { status: 'searching_courier', courierUid: null, courierName: null, returnAt: new Date().toISOString() });
-    closeMyOrderSheet(); tgHaptic('light'); showToast('Возврат оформлен', 'info');
+    await dbSet('orders', orderId, {
+      status: 'searching_courier',
+      courierUid: null, courierName: null, courierPhone: null,
+      returnAt: new Date().toISOString()
+    });
+    closeMyOrderSheet();
+    tgHaptic('light'); showToast('Возврат оформлен', 'info');
   };
   if (tg?.showConfirm) tg.showConfirm('Вернуть заказ оператору?', ok => { if (ok) doReturn(); });
   else if (confirm('Вернуть заказ?')) await doReturn();
@@ -380,44 +506,151 @@ async function courierReturn(orderId) {
 function closeMyOrderSheet(e) {
   if (e && e.target !== document.getElementById('my-order-overlay')) return;
   document.getElementById('my-order-overlay').classList.remove('open');
+  if (document.querySelector('.overlay.open') === null) tg?.BackButton?.hide();
 }
 
-// ── History ──
+// ══════════════════════════════════════════════════════════
+//  PROFILE
+// ══════════════════════════════════════════════════════════
+async function loadCourierProfile() {
+  const courier = await dbGet('couriers', STATE.uid) || COURIER_DATA || {};
+  COURIER_DATA = { ...COURIER_DATA, ...courier };
+
+  const phone = courier.phone || STATE.user?.phone || '';
+  // QR
+  document.getElementById('courier-qr-phone').textContent = phone || '—';
+  if (phone) {
+    document.getElementById('courier-qr-img').src = getQrUrl(phone, 180);
+  }
+
+  // Stats
+  const statsGrid = document.getElementById('courier-stats-grid');
+  const delivered = courier.totalDeliveries || 0;
+  const rating = courier.rating || 0;
+  const ratingCnt = courier.ratingCount || 0;
+  statsGrid.innerHTML = `
+    <div class="stat-card"><div class="stat-val">${delivered}</div><div class="stat-lbl">Доставок</div></div>
+    <div class="stat-card"><div class="stat-val">${rating > 0 ? rating.toFixed(1) : '—'}</div><div class="stat-lbl">Рейтинг</div></div>
+    <div class="stat-card"><div class="stat-val">${ratingCnt}</div><div class="stat-lbl">Оценок</div></div>`;
+
+  // Rating
+  const ratingVal = document.getElementById('cr-rating-val');
+  const starsRow = document.getElementById('cr-stars-row');
+  const ratingCntEl = document.getElementById('cr-rating-cnt');
+  if (rating > 0) {
+    ratingVal.textContent = rating.toFixed(1);
+    starsRow.innerHTML = renderStars(rating);
+    ratingCntEl.textContent = ratingCnt + (ratingCnt === 1 ? ' оценка' : ratingCnt < 5 ? ' оценки' : ' оценок');
+  } else {
+    ratingVal.textContent = '—';
+    starsRow.innerHTML = renderStars(0);
+    ratingCntEl.textContent = 'Нет оценок';
+  }
+
+  // Venue info
+  const venueCard = document.getElementById('courier-venue-card');
+  if (courier.primaryVenueId) {
+    try {
+      const venue = await dbGet('venues', courier.primaryVenueId);
+      venueCard.innerHTML = `
+        <div class="font-bold">${venue?.name || courier.primaryVenueId}</div>
+        <div class="text-dim text-sm mt-1">${venue?.address || ''}</div>
+        ${venue?.phone ? `<div class="text-sm mt-1">📞 ${venue.phone}</div>` : ''}`;
+    } catch {
+      venueCard.innerHTML = `<div class="text-dim text-sm">Ошибка загрузки</div>`;
+    }
+  } else {
+    venueCard.innerHTML = `<div class="text-dim text-sm">Не привязан к заведению</div>`;
+  }
+
+  // Set today's date by default in history picker
+  const histDate = document.getElementById('cr-hist-date');
+  if (!histDate.value) {
+    histDate.value = new Date().toISOString().slice(0, 10);
+  }
+  await loadCourierHistory();
+}
+
 async function loadCourierHistory() {
   const list = document.getElementById('courier-history-list');
   list.innerHTML = '<div class="loader"><div class="spinner"></div></div>';
-  const orders = (await dbQuery('orders','courierUid','==',STATE.uid))
-    .filter(o => o.status === 'delivered').sort((a,b)=>(b.deliveredAt||b.createdAt||'').localeCompare(a.deliveredAt||a.createdAt||'')).slice(0,60);
-  if (!orders.length) { list.innerHTML='<div class="empty"><div class="empty-icon">📋</div><div class="empty-text">Нет завершённых доставок</div></div>'; return; }
-  list.innerHTML = orders.map(o => `
-    <div class="delivery-card">
-      <div class="delivery-card-hdr">
-        <div><div class="font-bold" style="font-size:13px">${o.venueName||'Заведение'}</div><div class="text-xs text-dim">${fmtDate(o.deliveredAt||o.createdAt)}</div></div>
-        <div class="text-success font-bold">${fmtPrice(o.deliveryPrice||0)}</div>
-      </div>
-      <div class="delivery-card-body text-sm">
-        <div>${o.address?`📍 ${o.address.street} ${o.address.house}`:'Самовывоз'}</div>
-        <div class="text-dim">${(o.items||[]).slice(0,2).map(i=>`${i.emoji||'🍽️'} ${i.name} ×${i.qty}`).join(', ')}</div>
-      </div>
-    </div>`).join('');
+
+  const dateStr = document.getElementById('cr-hist-date').value;
+  let orders = (await dbQuery('orders', 'courierUid', '==', STATE.uid))
+    .filter(o => o.status === 'delivered');
+
+  if (dateStr) {
+    orders = orders.filter(o => {
+      const d = (o.deliveredAt || o.createdAt || '').slice(0, 10);
+      return d === dateStr;
+    });
+  }
+  orders.sort((a, b) => (b.deliveredAt || b.createdAt || '').localeCompare(a.deliveredAt || a.createdAt || ''));
+
+  if (!orders.length) {
+    list.innerHTML = '<div class="empty" style="padding:16px 0"><div class="empty-icon">📋</div><div class="empty-text">Нет доставок за этот день</div></div>';
+    return;
+  }
+
+  let dayEarnings = 0;
+  orders.forEach(o => { dayEarnings += o.deliveryPrice || 0; });
+
+  list.innerHTML = `
+    <div class="flex justify-between" style="padding:8px 4px;border-bottom:1px solid var(--border);margin-bottom:4px">
+      <span class="text-dim text-sm">${orders.length} ${orders.length === 1 ? 'доставка' : orders.length < 5 ? 'доставки' : 'доставок'}</span>
+      <span class="font-bold text-primary">${fmtPrice(dayEarnings)}</span>
+    </div>` +
+    orders.map(o => `
+      <div class="delivery-card">
+        <div class="delivery-card-hdr">
+          <div>
+            <div class="font-bold" style="font-size:13px">${o.venueName || 'Заведение'}</div>
+            <div class="text-xs text-dim">${fmtTime(o.deliveredAt || o.createdAt)} · #${(o.id || '').slice(-6)}</div>
+          </div>
+          <div>
+            <div class="text-success font-bold">${fmtPrice(o.deliveryPrice || 0)}</div>
+            ${o.courierRating ? `<div style="text-align:right;font-size:12px;color:var(--text-dim)">${'★'.repeat(o.courierRating)}</div>` : ''}
+          </div>
+        </div>
+        <div class="delivery-card-body text-sm">
+          <div>${o.address ? `📍 ${o.address.street} ${o.address.house}` : '🏪 Самовывоз'}</div>
+          <div class="text-dim">${(o.items || []).slice(0, 2).map(i => `${i.emoji || '🍽️'} ${i.name} ×${i.qty}`).join(', ')}</div>
+        </div>
+      </div>`).join('');
 }
 
-function setNav(el) {
-  document.querySelectorAll('.nav-item').forEach(n => n.classList.remove('active'));
-  if (el) el.classList.add('active');
+async function courierLeaveVenue() {
+  const ok = await new Promise(resolve => {
+    if (tg?.showConfirm) tg.showConfirm('Отвязаться от заведения?', resolve);
+    else resolve(confirm('Отвязаться от заведения?'));
+  });
+  if (!ok) return;
+  await dbSet('couriers', STATE.uid, { primaryVenueId: null, primaryVenueName: null });
+  COURIER_DATA = { ...COURIER_DATA, primaryVenueId: null, primaryVenueName: null };
+  document.getElementById('primary-venue-label').textContent = '—';
+  if (_venueUnsub) { _venueUnsub(); _venueUnsub = null; }
+  _venueOrders = [];
+  document.getElementById('venue-orders-list').innerHTML =
+    '<div class="empty"><div class="empty-icon">🏪</div><div class="empty-text">Вы не привязаны к заведению.<br>Ждите приглашения.</div></div>';
+  tgHaptic('light'); showToast('Вы отвязаны от заведения', 'info');
+  loadCourierProfile();
 }
 
+// ══════════════════════════════════════════════════════════
+//  BACK BUTTON
+// ══════════════════════════════════════════════════════════
 function _initCourierBackButton() {
   if (!tg?.BackButton) return;
   tg.BackButton.onClick(() => {
     const open = document.querySelector('.overlay.open');
-    if (open) { open.classList.remove('open'); return; }
-    const cur = document.querySelector('.screen.active')?.id;
-    if (cur === 's-my-orders' || cur === 's-history') {
-      showScreen('s-available');
-      setNav(document.getElementById('nav-avail'));
-      tg.BackButton.hide();
+    if (open) {
+      open.classList.remove('open');
+      if (!document.querySelector('.overlay.open')) tg.BackButton.hide();
       return;
+    }
+    const cur = document.querySelector('.screen.active')?.id;
+    if (cur && cur !== 's-available') {
+      navToAvailable(); return;
     }
     tg.BackButton.hide();
   });

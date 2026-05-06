@@ -4,9 +4,14 @@
    ============================================================ */
 
 const STATE = { uid: null, user: null };
-let ALL_CATS    = [];
-let _editCatId  = null;
-let _agreedCheck = false;
+let ALL_CATS     = [];
+let ALL_COUNTRIES = [];
+let ALL_CITIES   = [];
+let _editCatId   = null;
+let _editCountryId = null;
+let _editCityId  = null;
+let _pinBuffer   = '';
+let _saStatsPeriod = 7;
 
 // ══════════════════════════════════════════════════════════
 //  BOOT
@@ -14,37 +19,37 @@ let _agreedCheck = false;
 window.addEventListener('DOMContentLoaded', async () => {
   if (new URLSearchParams(location.search).get('reset') === '1') { localStorage.clear(); location.replace(location.pathname); return; }
   tgReady();
-  // Back button: close overlay or hide
   if (tg?.BackButton) tg.BackButton.onClick(() => {
     const open = document.querySelector('.overlay.open');
     if (open) { open.classList.remove('open'); return; }
     tg.BackButton.hide();
   });
+
   const _tgUserId = tg?.initDataUnsafe?.user?.id ? String(tg.initDataUnsafe.user.id) : null;
   try {
     const s = JSON.parse(localStorage.getItem('vez_sa_state') || '{}');
-    if (!_tgUserId || s.tgId === _tgUserId) {
-      STATE.uid = s.uid||null; STATE.user = s.user||null;
-    }
+    if (!_tgUserId || s.tgId === _tgUserId) { STATE.uid = s.uid||null; STATE.user = s.user||null; }
   } catch {}
+
   const urlUid = readUidFromUrl();
   if (urlUid) { STATE.uid = urlUid; saveState(); }
+
   await initFirebase();
   if (!STATE.uid) { const tgUid = await resolveUidByTgId(); if (tgUid) { STATE.uid = tgUid; saveState(); } }
   if (!STATE.uid) { showScreen('s-no-uid'); return; }
 
-  // Чистим localStorage-кэш пользователя чтобы получить свежие данные из Firestore
   try { localStorage.removeItem('vez_users_' + STATE.uid); } catch {}
-
-  // Принудительно выставляем роль superadmin — доступ сюда только через SA-бот
   await dbSet('users', STATE.uid, { role: 'superadmin' });
-
-  // Читаем свежие данные
   const existing = await dbGet('users', STATE.uid);
 
-  if (!existing?.agreedSA) { STATE.user = existing || { uid: STATE.uid, role: 'superadmin' }; saveState(); showScreen('s-agree'); return; }
+  if (!existing?.agreedSA) {
+    STATE.user = existing || { uid: STATE.uid, role: 'superadmin' };
+    saveState();
+    showAgreement();
+    return;
+  }
   STATE.user = existing; saveState();
-  initMain();
+  showPinScreen();
 });
 
 function saveState() {
@@ -52,20 +57,84 @@ function saveState() {
   try { localStorage.setItem('vez_sa_state', JSON.stringify({ uid: STATE.uid, user: STATE.user, tgId: tgUserId })); } catch {}
 }
 
-function toggleAgreeCheck() {
-  const cb = document.getElementById('agree-cb');
-  _agreedCheck = cb ? cb.checked : !_agreedCheck;
-  document.getElementById('agree-box').textContent = _agreedCheck ? '✓' : '';
-  document.getElementById('agree-check-row').classList.toggle('checked', _agreedCheck);
-  document.getElementById('agree-btn').disabled = !_agreedCheck;
+// ══════════════════════════════════════════════════════════
+//  AGREEMENT
+// ══════════════════════════════════════════════════════════
+function showAgreement() {
+  document.getElementById('s-splash').style.display = 'none';
+  document.getElementById('s-agree').style.display  = 'flex';
 }
 
 async function submitAgree() {
   await dbSet('users', STATE.uid, { agreedSA: true });
   STATE.user = { ...STATE.user, agreedSA: true }; saveState();
-  initMain();
+  document.getElementById('s-agree').style.display = 'none';
+  showPinScreen();
 }
 
+// ══════════════════════════════════════════════════════════
+//  PIN CODE
+// ══════════════════════════════════════════════════════════
+function showPinScreen() {
+  document.getElementById('s-splash').style.display = 'none';
+  document.getElementById('s-agree').style.display  = 'none';
+  document.getElementById('s-pin').style.display    = 'flex';
+  _pinBuffer = '';
+  updatePinDots();
+  document.getElementById('pin-sub-text').textContent = 'Введите PIN-код';
+}
+
+function pinInput(digit) {
+  if (_pinBuffer.length >= 4) return;
+  tgHaptic('light');
+  _pinBuffer += digit;
+  updatePinDots();
+  if (_pinBuffer.length === 4) setTimeout(checkPin, 80);
+}
+
+function pinDelete() {
+  if (!_pinBuffer.length) return;
+  tgHaptic('light');
+  _pinBuffer = _pinBuffer.slice(0, -1);
+  updatePinDots();
+}
+
+function updatePinDots() {
+  for (let i = 0; i < 4; i++) {
+    const dot = document.getElementById('pd' + i);
+    if (!dot) continue;
+    dot.classList.toggle('filled', i < _pinBuffer.length);
+    dot.classList.remove('error');
+  }
+}
+
+async function checkPin() {
+  const ok = await verifyPin('superadmin', _pinBuffer);
+  if (ok) {
+    document.getElementById('s-pin').style.display = 'none';
+    initMain();
+  } else {
+    tgHaptic('error');
+    for (let i = 0; i < 4; i++) {
+      const dot = document.getElementById('pd' + i);
+      if (dot) { dot.classList.add('error'); dot.classList.remove('filled'); }
+    }
+    document.getElementById('pin-sub-text').textContent = 'Неверный PIN. Попробуйте снова';
+    setTimeout(() => { _pinBuffer = ''; updatePinDots(); document.getElementById('pin-sub-text').textContent = 'Введите PIN-код'; }, 900);
+  }
+}
+
+async function changePinSa() {
+  const val = (document.getElementById('new-pin-input').value || '').trim();
+  if (val.length !== 4 || !/^\d{4}$/.test(val)) { showToast('PIN должен быть 4 цифры', 'warning'); return; }
+  await savePin('superadmin', val);
+  document.getElementById('new-pin-input').value = '';
+  tgHaptic('success'); showToast('PIN изменён', 'success');
+}
+
+// ══════════════════════════════════════════════════════════
+//  MAIN
+// ══════════════════════════════════════════════════════════
 function initMain() {
   document.getElementById('main-nav').style.display = 'flex';
   startHeartbeat(STATE.uid);
@@ -76,12 +145,19 @@ function initMain() {
 }
 
 async function loadPendingBadges() {
-  const pendingVenues  = await dbQuery('venues','status','==','pending');
-  const pendingCouriers = await dbQuery('couriers','status','==','pending');
+  const [pv, pc] = await Promise.all([
+    dbQuery('venues','status','==','pending'),
+    dbQuery('couriers','status','==','pending')
+  ]);
   const vb = document.getElementById('venues-badge');
-  vb.textContent = pendingVenues.length; vb.classList.toggle('hidden', pendingVenues.length===0);
+  vb.textContent = pv.length; vb.classList.toggle('hidden', pv.length === 0);
   const cb = document.getElementById('couriers-badge');
-  cb.textContent = pendingCouriers.length; cb.classList.toggle('hidden', pendingCouriers.length===0);
+  cb.textContent = pc.length; cb.classList.toggle('hidden', pc.length === 0);
+}
+
+function setNav(el) {
+  document.querySelectorAll('.nav-item').forEach(n => n.classList.remove('active'));
+  if (el) el.classList.add('active');
 }
 
 // ══════════════════════════════════════════════════════════
@@ -100,8 +176,8 @@ async function loadCategories() {
       <div class="li-icon yellow" style="font-size:24px">${c.icon||'📦'}</div>
       <div class="li-body"><div class="li-title">${c.name}</div><div class="li-sub">Порядок: ${c.order||0}</div></div>
       <div style="display:flex;gap:6px">
-        <button class="btn-icon btn-ghost" onclick="openEditCategory('${c.id}')">✏️</button>
-        <button class="btn-icon btn-danger" onclick="deleteCategory('${c.id}')">🗑</button>
+        <button class="btn btn-icon btn-ghost" onclick="openEditCategory('${c.id}')">✏️</button>
+        <button class="btn btn-icon btn-danger" onclick="deleteCategory('${c.id}')">🗑</button>
       </div>
     </div>`).join('');
 }
@@ -133,15 +209,15 @@ async function saveCategory() {
   if (!name) { showToast('Введите название', 'warning'); return; }
   const catId = _editCatId || genId();
   await dbSet('categories', catId, { id: catId, name, icon, order });
-  closeCatSheet(); tgHaptic('success'); showToast(_editCatId?'Категория обновлена':'Категория добавлена', 'success');
+  closeCatSheet(); tgHaptic('success');
+  showToast(_editCatId ? 'Категория обновлена' : 'Категория добавлена', 'success');
   await loadCategories();
 }
 
 async function deleteCategory(catId) {
-  const cat     = ALL_CATS.find(c => c.id === catId);
-  const venues  = await dbQuery('venues','categoryId','==',catId);
-  const confirm1 = confirm(`Удалить категорию "${cat?.name}"?${venues.length?`\n\n${venues.length} заведений потеряют категорию.`:''}`);
-  if (!confirm1) return;
+  const cat    = ALL_CATS.find(c => c.id === catId);
+  const venues = await dbQuery('venues','categoryId','==',catId);
+  if (!confirm(`Удалить категорию "${cat?.name}"?${venues.length ? `\n\n${venues.length} заведений потеряют категорию.` : ''}`)) return;
   await dbDelete('categories', catId);
   tgHaptic('light'); showToast('Категория удалена', 'info');
   await loadCategories();
@@ -153,6 +229,150 @@ function closeCatSheet(e) {
 }
 
 // ══════════════════════════════════════════════════════════
+//  GEOGRAPHY — COUNTRIES & CITIES
+// ══════════════════════════════════════════════════════════
+async function loadGeo() {
+  const list = document.getElementById('geo-list');
+  list.innerHTML = '<div class="loader"><div class="spinner"></div></div>';
+  ALL_COUNTRIES = await dbGetAll('countries','name','asc');
+  ALL_CITIES    = await dbGetAll('cities','name','asc');
+  _countriesCache = ALL_COUNTRIES; // sync shared cache
+
+  if (!ALL_COUNTRIES.length) {
+    list.innerHTML = '<div class="empty"><div class="empty-icon">🌍</div><div class="empty-text">Стран нет.<br>Добавьте первую страну.</div></div>';
+    return;
+  }
+
+  list.innerHTML = ALL_COUNTRIES.map(country => {
+    const cities = ALL_CITIES.filter(c => c.countryId === country.id);
+    return `
+      <div class="country-card">
+        <div class="country-card-hdr">
+          <div>
+            <div class="country-card-name">🏳 ${country.name}</div>
+            <div class="country-currency">${country.currency} · ${cities.length} ${pluralCity(cities.length)}</div>
+          </div>
+          <div style="display:flex;gap:6px">
+            <button class="btn btn-xs btn-outline" onclick="openAddCity('${country.id}')">+ Город</button>
+            <button class="btn btn-icon btn-ghost" style="width:32px;height:32px;font-size:14px" onclick="openEditCountry('${country.id}')">✏️</button>
+            <button class="btn btn-icon" style="width:32px;height:32px;font-size:14px;background:var(--danger-soft);color:var(--danger);border:none;border-radius:8px;cursor:pointer" onclick="deleteCountry('${country.id}')">🗑</button>
+          </div>
+        </div>
+        ${cities.length ? cities.map(city => `
+          <div class="city-row">
+            <div>
+              <div class="city-row-name">📍 ${city.name}</div>
+            </div>
+            <div style="display:flex;align-items:center;gap:8px">
+              <div class="city-row-price">${fmtPrice(city.deliveryPrice, country.currency)}</div>
+              <button class="btn btn-icon btn-ghost" style="width:28px;height:28px;font-size:13px" onclick="openEditCity('${city.id}','${country.id}')">✏️</button>
+              <button class="btn btn-icon" style="width:28px;height:28px;font-size:13px;background:var(--danger-soft);color:var(--danger);border:none;border-radius:8px;cursor:pointer" onclick="deleteCity('${city.id}')">🗑</button>
+            </div>
+          </div>`).join('') : `<div style="padding:12px 15px;font-size:13px;color:var(--text-muted)">Городов нет — добавьте первый</div>`}
+      </div>`;
+  }).join('');
+}
+
+function pluralCity(n) {
+  if (n % 10 === 1 && n % 100 !== 11) return 'город';
+  if ([2,3,4].includes(n % 10) && ![12,13,14].includes(n % 100)) return 'города';
+  return 'городов';
+}
+
+// COUNTRY CRUD
+function openAddCountry() {
+  _editCountryId = null;
+  document.getElementById('country-sheet-title').textContent = 'Новая страна';
+  document.getElementById('country-name').value     = '';
+  document.getElementById('country-currency').value = '';
+  document.getElementById('country-overlay').classList.add('open');
+}
+
+function openEditCountry(countryId) {
+  const c = ALL_COUNTRIES.find(x => x.id === countryId);
+  if (!c) return;
+  _editCountryId = countryId;
+  document.getElementById('country-sheet-title').textContent = 'Редактировать страну';
+  document.getElementById('country-name').value     = c.name||'';
+  document.getElementById('country-currency').value = c.currency||'';
+  document.getElementById('country-overlay').classList.add('open');
+}
+
+async function saveCountry() {
+  const name     = document.getElementById('country-name').value.trim();
+  const currency = document.getElementById('country-currency').value.trim();
+  if (!name)     { showToast('Введите название страны', 'warning'); return; }
+  if (!currency) { showToast('Введите символ валюты', 'warning'); return; }
+  const countryId = _editCountryId || genId();
+  await dbSet('countries', countryId, { id: countryId, name, currency });
+  closeCountrySheet(); tgHaptic('success');
+  showToast(_editCountryId ? 'Страна обновлена' : 'Страна добавлена', 'success');
+  await loadGeo();
+}
+
+async function deleteCountry(countryId) {
+  const c = ALL_COUNTRIES.find(x => x.id === countryId);
+  const cities = ALL_CITIES.filter(x => x.countryId === countryId);
+  if (!confirm(`Удалить страну "${c?.name}"?${cities.length ? `\n\n${cities.length} городов также будут удалены.` : ''}`)) return;
+  await dbDelete('countries', countryId);
+  for (const city of cities) await dbDelete('cities', city.id);
+  tgHaptic('light'); showToast('Страна удалена', 'info');
+  await loadGeo();
+}
+
+function closeCountrySheet(e) {
+  if (e && e.target !== document.getElementById('country-overlay')) return;
+  document.getElementById('country-overlay').classList.remove('open');
+}
+
+// CITY CRUD
+function openAddCity(countryId) {
+  _editCityId = null;
+  document.getElementById('city-sheet-title').textContent = 'Новый город';
+  document.getElementById('city-name').value           = '';
+  document.getElementById('city-delivery-price').value = '1000';
+  document.getElementById('city-country-id').value    = countryId;
+  document.getElementById('city-overlay').classList.add('open');
+}
+
+function openEditCity(cityId, countryId) {
+  const c = ALL_CITIES.find(x => x.id === cityId);
+  if (!c) return;
+  _editCityId = cityId;
+  document.getElementById('city-sheet-title').textContent = 'Редактировать город';
+  document.getElementById('city-name').value           = c.name||'';
+  document.getElementById('city-delivery-price').value = c.deliveryPrice||1000;
+  document.getElementById('city-country-id').value    = countryId || c.countryId || '';
+  document.getElementById('city-overlay').classList.add('open');
+}
+
+async function saveCity() {
+  const name          = document.getElementById('city-name').value.trim();
+  const deliveryPrice = parseInt(document.getElementById('city-delivery-price').value)||1000;
+  const countryId     = document.getElementById('city-country-id').value;
+  if (!name)      { showToast('Введите название города', 'warning'); return; }
+  if (!countryId) { showToast('Не выбрана страна', 'warning'); return; }
+  const cityId = _editCityId || genId();
+  await dbSet('cities', cityId, { id: cityId, name, countryId, deliveryPrice });
+  closeCitySheet(); tgHaptic('success');
+  showToast(_editCityId ? 'Город обновлён' : 'Город добавлен', 'success');
+  await loadGeo();
+}
+
+async function deleteCity(cityId) {
+  const c = ALL_CITIES.find(x => x.id === cityId);
+  if (!confirm(`Удалить город "${c?.name}"?`)) return;
+  await dbDelete('cities', cityId);
+  tgHaptic('light'); showToast('Город удалён', 'info');
+  await loadGeo();
+}
+
+function closeCitySheet(e) {
+  if (e && e.target !== document.getElementById('city-overlay')) return;
+  document.getElementById('city-overlay').classList.remove('open');
+}
+
+// ══════════════════════════════════════════════════════════
 //  VENUES
 // ══════════════════════════════════════════════════════════
 async function loadVenuesByStatus(status, el) {
@@ -160,10 +380,12 @@ async function loadVenuesByStatus(status, el) {
   const list = document.getElementById('sa-venues-list');
   list.innerHTML = '<div class="loader"><div class="spinner"></div></div>';
   const venues = await dbQuery('venues','status','==',status);
-  if (!venues.length) { list.innerHTML='<div class="empty"><div class="empty-icon">🏪</div><div class="empty-text">Нет заведений</div></div>'; return; }
-  const cats  = await dbGetAll('categories');
+  if (!venues.length) { list.innerHTML = '<div class="empty"><div class="empty-icon">🏪</div><div class="empty-text">Нет заведений</div></div>'; return; }
+  const cats = await dbGetAll('categories');
   list.innerHTML = venues.sort((a,b)=>(b.createdAt||'').localeCompare(a.createdAt||'')).map(v => {
     const cat = cats.find(c=>c.id===v.categoryId);
+    const statusBadge = {pending:'badge-moderation',approved:'badge-approved',rejected:'badge-rejected'}[status];
+    const statusText  = {pending:'Ожидает',approved:'Активно',rejected:'Отклонено'}[status];
     return `
       <div class="list-item" onclick="openSaVenue('${v.id}')">
         <div class="li-icon yellow" style="font-size:24px">${cat?.icon||'🏪'}</div>
@@ -172,7 +394,7 @@ async function loadVenuesByStatus(status, el) {
           <div class="li-sub">${cat?.name||'Без категории'} · ${v.address||'—'}</div>
           <div class="li-sub">${fmtDate(v.createdAt)}</div>
         </div>
-        <span class="badge badge-${status==='pending'?'moderation':status==='approved'?'approved':'rejected'}">${status==='pending'?'Ожидает':status==='approved'?'Активно':'Отклонено'}</span>
+        <span class="badge ${statusBadge}">${statusText}</span>
       </div>`;
   }).join('');
 }
@@ -180,20 +402,19 @@ async function loadVenuesByStatus(status, el) {
 async function openSaVenue(venueId) {
   const venue = await dbGet('venues', venueId);
   if (!venue) return;
-  const owner = await dbGet('users', venue.ownerId);
-  const cats  = await dbGetAll('categories');
-  const cat   = cats.find(c=>c.id===venue.categoryId);
+  const [owner, cats] = await Promise.all([dbGet('users', venue.ownerId), dbGetAll('categories')]);
+  const cat = cats.find(c=>c.id===venue.categoryId);
   const content = document.getElementById('sa-venue-detail');
   content.innerHTML = `
     <div class="sheet-title">${venue.name}</div>
-    <div class="card card-body" style="margin-bottom:12px;gap:5px;display:flex;flex-direction:column">
+    <div class="card card-body" style="margin-bottom:12px;gap:6px;display:flex;flex-direction:column">
       <div class="flex justify-between"><span class="text-dim">Категория</span><span>${cat?.icon||''} ${cat?.name||'—'}</span></div>
       <div class="flex justify-between"><span class="text-dim">Адрес</span><span style="text-align:right;max-width:60%">${venue.address||'—'}</span></div>
+      <div class="flex justify-between"><span class="text-dim">Город</span><span>${venue.cityName||'—'}</span></div>
       <div class="flex justify-between"><span class="text-dim">Владелец</span><span>${owner?.name||'—'}</span></div>
       <div class="flex justify-between"><span class="text-dim">Телефон</span><span>${owner?.phone||'—'}</span></div>
-      <div class="flex justify-between"><span class="text-dim">Статус</span><span class="badge badge-${venue.status==='pending'?'moderation':venue.status==='approved'?'approved':'rejected'}">${venue.status}</span></div>
-      <div class="flex justify-between"><span class="text-dim">Заблокировано</span><span>${venue.blocked?'Да':'Нет'}</span></div>
-      <div class="flex justify-between"><span class="text-dim">Описание</span><span style="text-align:right;max-width:60%;font-size:12px">${venue.description||'—'}</span></div>
+      <div class="flex justify-between"><span class="text-dim">Статус</span><span class="badge badge-${venue.status==='approved'?'approved':venue.status==='rejected'?'rejected':'moderation'}">${venue.status}</span></div>
+      <div class="flex justify-between"><span class="text-dim">Заблокировано</span><span>${venue.blocked?'<span style="color:var(--danger)">Да</span>':'Нет'}</span></div>
     </div>
     <div style="display:flex;flex-direction:column;gap:8px">
       ${venue.status==='pending'?`
@@ -207,7 +428,7 @@ async function openSaVenue(venueId) {
         </button>`:''}
       ${venue.status==='rejected'?`
         <button class="btn btn-outline btn-sm" onclick="saApproveVenue('${venueId}')">↩ Одобрить всё же</button>`:''}
-      <div class="field"><label>Заметка (только для вас)</label><textarea class="inp" id="sa-venue-note" rows="2" placeholder="Причина отклонения...">${venue.saNote||''}</textarea></div>
+      <div class="field"><label>Заметка</label><textarea class="inp" id="sa-venue-note" rows="2" placeholder="Причина...">${venue.saNote||''}</textarea></div>
       <button class="btn btn-ghost btn-sm" onclick="saveSaVenueNote('${venueId}')">💾 Сохранить заметку</button>
     </div>`;
   document.getElementById('venue-overlay').classList.add('open');
@@ -215,14 +436,14 @@ async function openSaVenue(venueId) {
 
 async function saApproveVenue(venueId) {
   await dbSet('venues', venueId, { status: 'approved', approvedAt: new Date().toISOString() });
-  await dbSet('admin_events', `venue_approved_${venueId}`, { type: 'venue_approved', venueId, ts: new Date().toISOString() });
+  await dbSet('admin_events', `venue_approved_${venueId}`, { type:'venue_approved', venueId, ts: new Date().toISOString() });
   closeVenueSheet(); tgHaptic('success'); showToast('Заведение одобрено', 'success');
   loadVenuesByStatus('pending'); loadPendingBadges();
 }
 
 async function saRejectVenue(venueId) {
   await dbSet('venues', venueId, { status: 'rejected', rejectedAt: new Date().toISOString() });
-  await dbSet('admin_events', `venue_rejected_${venueId}`, { type: 'venue_rejected', venueId, ts: new Date().toISOString() });
+  await dbSet('admin_events', `venue_rejected_${venueId}`, { type:'venue_rejected', venueId, ts: new Date().toISOString() });
   closeVenueSheet(); tgHaptic('light'); showToast('Заведение отклонено', 'info');
   loadVenuesByStatus('pending'); loadPendingBadges();
 }
@@ -230,7 +451,8 @@ async function saRejectVenue(venueId) {
 async function saToggleVenueBlock(venueId, currentlyBlocked) {
   if (!confirm(currentlyBlocked?'Разблокировать заведение?':'Заблокировать заведение?')) return;
   await dbSet('venues', venueId, { blocked: !currentlyBlocked });
-  closeVenueSheet(); tgHaptic('light'); showToast(currentlyBlocked?'Разблокировано':'Заблокировано', 'info');
+  closeVenueSheet(); tgHaptic('light');
+  showToast(currentlyBlocked?'Разблокировано':'Заблокировано', 'info');
   loadVenuesByStatus('approved');
 }
 
@@ -253,31 +475,37 @@ async function loadCouriersByStatus(status, el) {
   const list = document.getElementById('sa-couriers-list');
   list.innerHTML = '<div class="loader"><div class="spinner"></div></div>';
   const couriers = await dbQuery('couriers','status','==',status);
-  if (!couriers.length) { list.innerHTML='<div class="empty"><div class="empty-icon">🚴</div><div class="empty-text">Нет курьеров</div></div>'; return; }
-  list.innerHTML = couriers.sort((a,b)=>(b.createdAt||'').localeCompare(a.createdAt||'')).map(c => `
-    <div class="list-item" onclick="openSaCourier('${c.uid}')">
-      <div class="li-icon yellow">🚴</div>
-      <div class="li-body">
-        <div class="li-title">${c.name||'—'}</div>
-        <div class="li-sub">${c.phone||'—'} · ${fmtDate(c.createdAt)}</div>
-        <div class="li-sub">${c.onShift?'<span style="color:var(--success)">На смене</span>':'Офлайн'}</div>
-      </div>
-      <span class="badge badge-${status==='pending'?'moderation':status==='active'?'approved':'rejected'}">${status==='pending'?'Проверка':status==='active'?'Активен':'Заблокирован'}</span>
-    </div>`).join('');
+  if (!couriers.length) { list.innerHTML = '<div class="empty"><div class="empty-icon">🚴</div><div class="empty-text">Нет курьеров</div></div>'; return; }
+  list.innerHTML = couriers.sort((a,b)=>(b.createdAt||'').localeCompare(a.createdAt||'')).map(c => {
+    const rating = c.rating ? `⭐ ${Number(c.rating).toFixed(1)}` : '';
+    return `
+      <div class="list-item" onclick="openSaCourier('${c.uid||c.id}')">
+        <div class="li-icon yellow">🚴</div>
+        <div class="li-body">
+          <div class="li-title">${c.name||'—'} ${rating}</div>
+          <div class="li-sub">${c.phone||'—'} · ${fmtDate(c.createdAt)}</div>
+          <div class="li-sub">${c.onShift?'<span style="color:var(--success)">На смене</span>':'Офлайн'}</div>
+        </div>
+        <span class="badge badge-${status==='pending'?'moderation':status==='active'?'approved':'rejected'}">${status==='pending'?'Проверка':status==='active'?'Активен':'Заблокирован'}</span>
+      </div>`;
+  }).join('');
 }
 
 async function openSaCourier(courierUid) {
   const courier = await dbGet('couriers', courierUid);
   if (!courier) return;
-  const delivered = (await dbQuery('orders','courierUid','==',courierUid)).filter(o=>o.status==='delivered').length;
+  const deliveredOrders = (await dbQuery('orders','courierUid','==',courierUid)).filter(o=>o.status==='delivered');
+  const totalRev = deliveredOrders.reduce((s,o)=>s+(o.total||0),0);
   const content = document.getElementById('sa-courier-detail');
   content.innerHTML = `
     <div class="sheet-title">${courier.name||'Курьер'}</div>
-    <div class="card card-body" style="margin-bottom:12px;gap:5px;display:flex;flex-direction:column">
-      <div class="flex justify-between"><span class="text-dim">Телефон</span><span>${courier.phone||'—'}</span></div>
+    <div class="card card-body" style="margin-bottom:12px;gap:6px;display:flex;flex-direction:column">
+      <div class="flex justify-between"><span class="text-dim">Телефон</span><span style="font-family:monospace">${courier.phone||'—'}</span></div>
       <div class="flex justify-between"><span class="text-dim">Статус</span><span>${courier.status}</span></div>
-      <div class="flex justify-between"><span class="text-dim">На смене</span><span>${courier.onShift?'Да':'Нет'}</span></div>
-      <div class="flex justify-between"><span class="text-dim">Доставлено заказов</span><span class="font-bold">${delivered}</span></div>
+      <div class="flex justify-between"><span class="text-dim">На смене</span><span>${courier.onShift?'<span style="color:var(--success)">Да</span>':'Нет'}</span></div>
+      <div class="flex justify-between"><span class="text-dim">Рейтинг</span><span>${courier.rating?'⭐ '+Number(courier.rating).toFixed(1):'Нет оценок'}</span></div>
+      <div class="flex justify-between"><span class="text-dim">Доставлено</span><span class="font-bold">${deliveredOrders.length}</span></div>
+      <div class="flex justify-between"><span class="text-dim">Город</span><span>${courier.cityName||'—'}</span></div>
       <div class="flex justify-between"><span class="text-dim">Регистрация</span><span>${fmtDate(courier.createdAt)}</span></div>
     </div>
     <div style="display:flex;flex-direction:column;gap:8px">
@@ -286,10 +514,8 @@ async function openSaCourier(courierUid) {
           <button class="btn btn-danger btn-sm" onclick="saBlockCourier('${courierUid}')">🚫 Отклонить</button>
           <button class="btn btn-success btn-sm" onclick="saApproveCourier('${courierUid}')">✅ Одобрить</button>
         </div>`:''}
-      ${courier.status==='active'?`
-        <button class="btn btn-danger btn-sm" onclick="saBlockCourier('${courierUid}')">🚫 Заблокировать</button>`:''}
-      ${courier.status==='blocked'?`
-        <button class="btn btn-success btn-sm" onclick="saApproveCourier('${courierUid}')">🟢 Разблокировать</button>`:''}
+      ${courier.status==='active'?`<button class="btn btn-danger btn-sm" onclick="saBlockCourier('${courierUid}')">🚫 Заблокировать</button>`:''}
+      ${courier.status==='blocked'?`<button class="btn btn-success btn-sm" onclick="saApproveCourier('${courierUid}')">🟢 Разблокировать</button>`:''}
     </div>`;
   document.getElementById('courier-detail-overlay').classList.add('open');
 }
@@ -297,7 +523,7 @@ async function openSaCourier(courierUid) {
 async function saApproveCourier(uid) {
   await dbSet('couriers', uid, { status: 'active', approvedAt: new Date().toISOString() });
   await dbSet('users',   uid, { role: 'courier' });
-  await dbSet('admin_events', `courier_approved_${uid}`, { type: 'courier_approved', uid, ts: new Date().toISOString() });
+  await dbSet('admin_events', `courier_approved_${uid}`, { type:'courier_approved', uid, ts: new Date().toISOString() });
   closeCourierDetailSheet(); tgHaptic('success'); showToast('Курьер одобрен', 'success');
   loadCouriersByStatus('pending'); loadPendingBadges();
 }
@@ -306,7 +532,7 @@ async function saBlockCourier(uid) {
   if (!confirm('Заблокировать / отклонить курьера?')) return;
   await dbSet('couriers', uid, { status: 'blocked', blockedAt: new Date().toISOString(), onShift: false });
   await dbSet('users',   uid, { blocked: true });
-  await dbSet('admin_events', `courier_blocked_${uid}`, { type: 'courier_blocked', uid, ts: new Date().toISOString() });
+  await dbSet('admin_events', `courier_blocked_${uid}`, { type:'courier_blocked', uid, ts: new Date().toISOString() });
   closeCourierDetailSheet(); tgHaptic('light'); showToast('Курьер заблокирован', 'info');
   loadCouriersByStatus('pending'); loadPendingBadges();
 }
@@ -317,20 +543,83 @@ function closeCourierDetailSheet(e) {
 }
 
 // ══════════════════════════════════════════════════════════
+//  SETTINGS / STATS
+// ══════════════════════════════════════════════════════════
+async function loadSaSettings() {
+  // Load allergy toggle state
+  const cfg = await dbGet('settings', 'global');
+  document.getElementById('toggle-allergy').checked = cfg?.allergyEnabled !== false;
+
+  // Load stats
+  await loadSaStats();
+
+  // Load users
+  loadUsersByRole('client');
+}
+
+async function saveAllergyToggle(enabled) {
+  await dbSet('settings', 'global', { allergyEnabled: enabled });
+  tgHaptic('light');
+  showToast(enabled ? 'Система аллергий включена' : 'Система аллергий выключена', 'info');
+}
+
+function setSaPeriod(days, el) {
+  document.querySelectorAll('.period-tab').forEach(b=>b.classList.remove('active'));
+  el.classList.add('active');
+  _saStatsPeriod = days;
+  loadSaStats();
+}
+
+async function loadSaStats() {
+  const [venues, allOrders, users, couriers] = await Promise.all([
+    dbGetAll('venues'), dbGetAll('orders'), dbGetAll('users'), dbGetAll('couriers')
+  ]);
+
+  // Filter by period
+  let orders = allOrders;
+  if (_saStatsPeriod > 0) {
+    const cutoff = new Date(Date.now() - _saStatsPeriod * 86400000).toISOString();
+    orders = allOrders.filter(o => (o.createdAt||'') >= cutoff);
+  }
+
+  const revenue = orders.filter(o=>o.status==='delivered').reduce((s,o)=>s+(o.total||0),0);
+  const grid    = document.getElementById('sa-stats-grid');
+  grid.innerHTML = `
+    <div class="stat-card"><div class="stat-val">${venues.filter(v=>v.status==='approved').length}</div><div class="stat-lbl">Заведений</div></div>
+    <div class="stat-card"><div class="stat-val">${orders.filter(o=>o.status==='delivered').length}</div><div class="stat-lbl">Доставлено</div></div>
+    <div class="stat-card"><div class="stat-val">${users.filter(u=>u.role==='client').length}</div><div class="stat-lbl">Клиентов</div></div>
+    <div class="stat-card"><div class="stat-val text-primary">${fmtPrice(revenue)}</div><div class="stat-lbl">Оборот</div></div>`;
+
+  const venueStats = venues.filter(v=>v.status==='approved').map(v => {
+    const vo  = orders.filter(o=>o.venueId===v.id);
+    const del = vo.filter(o=>o.status==='delivered');
+    const rev = del.reduce((s,o)=>s+(o.total||0),0);
+    return { id: v.id, name: v.name, orders: vo.length, delivered: del.length, revenue: rev };
+  }).sort((a,b)=>b.revenue-a.revenue);
+
+  document.getElementById('sa-stats-venues').innerHTML = venueStats.filter(v=>v.orders>0).map(v=>`
+    <div class="list-item" style="cursor:default">
+      <div class="li-icon yellow">🏪</div>
+      <div class="li-body"><div class="li-title">${v.name}</div><div class="li-sub">${v.delivered} доставлено из ${v.orders}</div></div>
+      <div class="li-price">${fmtPrice(v.revenue)}</div>
+    </div>`).join('') || '<div class="empty" style="padding:30px 24px"><div class="empty-icon">📊</div><div class="empty-text">Нет данных за период</div></div>';
+}
+
+// ══════════════════════════════════════════════════════════
 //  USERS
 // ══════════════════════════════════════════════════════════
 async function loadUsersByRole(role, el) {
-  if (el) { document.querySelectorAll('#s-users .cat-tab').forEach(b=>b.classList.remove('active')); el.classList.add('active'); }
+  if (el) { document.querySelectorAll('#s-sa-settings .cat-tab').forEach(b=>b.classList.remove('active')); el.classList.add('active'); }
   const list = document.getElementById('sa-users-list');
   list.innerHTML = '<div class="loader"><div class="spinner"></div></div>';
   const users = await dbQuery('users','role','==',role);
-  if (!users.length) { list.innerHTML='<div class="empty"><div class="empty-icon">👤</div><div class="empty-text">Нет пользователей</div></div>'; return; }
+  if (!users.length) { list.innerHTML = '<div class="empty" style="padding:30px 24px"><div class="empty-icon">👤</div><div class="empty-text">Нет пользователей</div></div>'; return; }
   list.innerHTML = users.sort((a,b)=>(b.createdAt||'').localeCompare(a.createdAt||'')).map(u => `
     <div class="list-item" onclick="openSaUser('${u.uid||u.id}')">
       <div class="avatar" style="width:36px;height:36px;font-size:14px">${(u.name||'?')[0].toUpperCase()}</div>
       <div class="li-body">
         <div class="li-title">${u.name||'—'}${u.blocked?' <span style="color:var(--danger);font-size:11px">BLOCKED</span>':''}</div>
-        <div class="li-sub">${u.phone||'—'}</div>
+        <div class="li-sub">${u.phone||'—'} · ${u.cityName||'—'}</div>
       </div>
       <div class="chevron">›</div>
     </div>`).join('');
@@ -342,9 +631,10 @@ async function openSaUser(uid) {
   const content = document.getElementById('sa-user-detail');
   content.innerHTML = `
     <div class="sheet-title">${user.name||'—'}</div>
-    <div class="card card-body" style="margin-bottom:12px;gap:5px;display:flex;flex-direction:column">
-      <div class="flex justify-between"><span class="text-dim">Телефон</span><span>${user.phone||'—'}</span></div>
+    <div class="card card-body" style="margin-bottom:12px;gap:6px;display:flex;flex-direction:column">
+      <div class="flex justify-between"><span class="text-dim">Телефон</span><span style="font-family:monospace">${user.phone||'—'}</span></div>
       <div class="flex justify-between"><span class="text-dim">Роль</span><span>${user.role||'—'}</span></div>
+      <div class="flex justify-between"><span class="text-dim">Город</span><span>${user.cityName||'—'}</span></div>
       <div class="flex justify-between"><span class="text-dim">Статус</span><span>${user.blocked?'<span style="color:var(--danger)">Заблокирован</span>':'Активен'}</span></div>
       <div class="flex justify-between"><span class="text-dim">Регистрация</span><span>${fmtDate(user.createdAt)}</span></div>
     </div>
@@ -357,46 +647,11 @@ async function openSaUser(uid) {
 async function saToggleUserBlock(uid, currentlyBlocked) {
   if (!confirm(currentlyBlocked?'Разблокировать пользователя?':'Заблокировать пользователя?')) return;
   await dbSet('users', uid, { blocked: !currentlyBlocked });
-  closeUserSheet(); tgHaptic('light'); showToast(currentlyBlocked?'Разблокирован':'Заблокирован', 'info');
+  closeUserSheet(); tgHaptic('light');
+  showToast(currentlyBlocked?'Разблокирован':'Заблокирован', 'info');
 }
 
 function closeUserSheet(e) {
   if (e && e.target !== document.getElementById('user-overlay')) return;
   document.getElementById('user-overlay').classList.remove('open');
-}
-
-// ══════════════════════════════════════════════════════════
-//  STATS
-// ══════════════════════════════════════════════════════════
-async function loadSaStats() {
-  const [venues, orders, users, couriers] = await Promise.all([
-    dbGetAll('venues'), dbGetAll('orders'), dbGetAll('users'), dbGetAll('couriers')
-  ]);
-  const revenue  = orders.filter(o=>o.status==='delivered').reduce((s,o)=>s+(o.total||0),0);
-  const grid = document.getElementById('sa-stats-grid');
-  grid.innerHTML = `
-    <div class="stat-card"><div class="stat-val">${venues.filter(v=>v.status==='approved').length}</div><div class="stat-lbl">Заведений</div></div>
-    <div class="stat-card"><div class="stat-val">${orders.filter(o=>o.status==='delivered').length}</div><div class="stat-lbl">Доставлено</div></div>
-    <div class="stat-card"><div class="stat-val">${users.filter(u=>u.role==='client').length}</div><div class="stat-lbl">Клиентов</div></div>
-    <div class="stat-card"><div class="stat-val text-primary">${fmtPrice(revenue)}</div><div class="stat-lbl">Оборот</div></div>`;
-
-  const venueStats = venues.filter(v=>v.status==='approved').map(v => {
-    const vo  = orders.filter(o=>o.venueId===v.id);
-    const rev = vo.filter(o=>o.status==='delivered').reduce((s,o)=>s+(o.total||0),0);
-    return { name: v.name, orders: vo.length, delivered: vo.filter(o=>o.status==='delivered').length, revenue: rev };
-  }).sort((a,b)=>b.revenue-a.revenue);
-
-  document.getElementById('sa-stats-venues').innerHTML = venueStats.length ? `
-    <div class="section-title" style="margin:8px 0 6px">По заведениям</div>
-    ${venueStats.map(v=>`
-      <div class="list-item" style="cursor:default;margin-bottom:6px">
-        <div class="li-icon yellow">🏪</div>
-        <div class="li-body"><div class="li-title">${v.name}</div><div class="li-sub">${v.delivered} доставлено из ${v.orders}</div></div>
-        <div class="li-price">${fmtPrice(v.revenue)}</div>
-      </div>`).join('')}` : '';
-}
-
-function setNav(el) {
-  document.querySelectorAll('.nav-item').forEach(n => n.classList.remove('active'));
-  if (el) el.classList.add('active');
 }
