@@ -160,10 +160,119 @@
 </div>
 
 <!-- MAIN SCREENS + OVERLAYS (сокращённо, но с ключевыми элементами) -->
-<div id="s-menu" class="screen">...</div>
-<div id="s-orders" class="screen">...</div>
-<div id="s-stats" class="screen">...</div>
-<div id="s-settings" class="screen">...</div>
+<!-- MAIN — MENU TAB -->
+<div id="s-menu" class="screen">
+  <div class="page-hdr">
+    <h2>Меню</h2>
+    <div class="page-hdr-end"><button class="btn btn-primary btn-sm" onclick="openAddItem()">+ Добавить</button></div>
+  </div>
+  <div id="menu-cats-tabs" class="cat-tabs" style="padding-top:8px"></div>
+  <div id="menu-items-list" style="display:flex;flex-direction:column;gap:8px;padding:0 20px 16px"></div>
+</div>
+
+<!-- MAIN — ORDERS TAB -->
+<div id="s-orders" class="screen">
+  <div class="page-hdr"><h2>Заказы</h2></div>
+  <div class="cat-tabs" style="padding-top:8px">
+    <button class="cat-tab active" onclick="loadOrders('active',this)">Активные</button>
+    <button class="cat-tab" onclick="loadOrders('pending',this)">Ожидают</button>
+    <button class="cat-tab" onclick="loadOrders('history',this)">История</button>
+  </div>
+  <div id="admin-orders-list" style="display:flex;flex-direction:column;gap:10px;padding:0 20px 16px"></div>
+</div>
+
+<!-- MAIN — STATS TAB -->
+<div id="s-stats" class="screen">
+  <div class="page-hdr"><h2>Статистика</h2></div>
+  <div class="content" style="gap:12px">
+    <div class="stats-grid" id="stats-grid"></div>
+    <div id="stats-top-items"></div>
+    <div id="stats-operators"></div>
+    <div id="stats-couriers-stat"></div>
+  </div>
+</div>
+
+<!-- MAIN — SETTINGS TAB -->
+<div id="s-settings" class="screen">
+  <div class="page-hdr"><h2>Настройки</h2></div>
+  <div class="content" style="gap:14px">
+    <div class="section">
+      <div class="section-title">Заведение</div>
+      <div class="field"><label>Название</label><input class="inp" id="set-name" placeholder="Название"></div>
+      <div class="field"><label>Адрес</label><input class="inp" id="set-address" placeholder="Адрес"></div>
+      <div class="field"><label>Номер телефона</label><input class="inp" id="set-phone" placeholder="+7 (777) 000-00-00" type="tel" maxlength="30"></div>
+      <div class="field"><label>Описание</label><textarea class="inp" id="set-desc" rows="3"></textarea></div>
+      <div class="field"><label>Ссылка на обложку</label><input class="inp" id="set-cover" placeholder="https://..."></div>
+      <button class="btn btn-secondary btn-sm" onclick="saveVenueInfo()">💾 Сохранить</button>
+    </div>
+    <div class="section">
+      <div class="section-title">Часы работы</div>
+      <div class="inp-row">
+        <div class="field"><label>Открытие</label><input class="inp" id="set-open" type="time"></div>
+        <div class="field"><label>Закрытие</label><input class="inp" id="set-close" type="time"></div>
+      </div>
+      <button class="btn btn-secondary btn-sm" onclick="saveWorkHours()">💾 Сохранить часы</button>
+    </div>
+    <div class="section">
+      <div class="section-title">Доставка</div>
+      <div class="inp-row">
+        <div class="field"><label>Время доставки (мин)</label><input class="inp" id="set-delivery-time" type="number" min="5"></div>
+        <div class="field"><label>Цена доставки (₸)</label><input class="inp" id="set-delivery-price" type="number" min="0"></div>
+      </div>
+      <div class="inp-row">
+        <div class="field"><label>Время готовки (мин)</label><input class="inp" id="set-cooking-time" type="number" min="5"></div>
+        <div class="field"><label>Мин. сумма (₸)</label><input class="inp" id="set-min-order" type="number" min="0"></div>
+      </div>
+      <button class="btn btn-secondary btn-sm" onclick="saveDeliverySettings()">💾 Сохранить</button>
+    </div>
+    <div class="section">
+      <div class="section-title">Оператор</div>
+      <div id="current-operator-info" class="alert-box info" style="margin-bottom:10px">Оператор не назначен</div>
+      <div class="field">
+        <label>Телефон оператора</label>
+        <input class="inp" id="op-phone" type="tel" placeholder="+7 (777) 000-00-00">
+        <button class="btn btn-secondary btn-sm" style="margin-top:8px;width:100%" onclick="assignOperator()">Назначить оператора</button>
+      </div>
+      <button class="btn btn-ghost btn-sm" onclick="removeOperator()" id="remove-op-btn" style="display:none;margin-top:6px;color:var(--danger)">✕ Снять оператора</button>
+    </div>
+    <div class="section">
+      <div class="section-title">Постоянные курьеры</div>
+      <div id="perm-couriers-list" style="display:flex;flex-direction:column;gap:6px;margin-bottom:10px"></div>
+      <div class="field">
+        <label>Телефон курьера</label>
+        <input class="inp" id="courier-phone" type="tel" placeholder="+7 (777) 000-00-00">
+        <button class="btn btn-secondary btn-sm" style="margin-top:8px;width:100%" onclick="addPermCourier()">Добавить курьера</button>
+      </div>
+    </div>
+    <div class="section">
+      <div class="section-title">🚫 Чёрный список</div>
+      <div class="alert-box info" style="margin-bottom:10px;font-size:12px">Клиенты из ЧС не смогут оформить заказ в вашем заведении</div>
+      <div id="blacklist-items" style="display:flex;flex-direction:column;gap:6px;margin-bottom:10px"></div>
+      <div class="field">
+        <label>Телефон клиента</label>
+        <input class="inp" id="bl-phone" type="tel" placeholder="+7 (777) 000-00-00">
+        <button class="btn btn-danger btn-sm" style="margin-top:8px;width:100%" onclick="addToBlacklistByPhone()">+ Добавить в ЧС</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- BOTTOM NAV -->
+<div class="bottom-nav" id="main-nav" style="display:none">
+  <div class="nav-item active" id="nav-menu" onclick="adminNavTo('s-menu');setNav(this);loadMenuItems()">
+    <div class="nav-icon">🍽️</div><div class="nav-label">Меню</div>
+  </div>
+  <div class="nav-item" id="nav-orders" onclick="adminNavTo('s-orders');setNav(this);loadOrders('active')">
+    <div class="nav-icon">📋</div><div class="nav-label">Заказы</div>
+    <div class="nav-badge hidden" id="orders-badge">0</div>
+  </div>
+  <div class="nav-item" id="nav-stats" onclick="adminNavTo('s-stats');setNav(this);loadStats()">
+    <div class="nav-icon">📊</div><div class="nav-label">Статистика</div>
+  </div>
+  <div class="nav-item" id="nav-settings" onclick="adminNavTo('s-settings');setNav(this);loadSettingsScreen()">
+    <div class="nav-icon">⚙️</div><div class="nav-label">Настройки</div>
+  </div>
+</div>
 
 <!-- ITEM SHEET -->
 <div class="overlay" id="item-overlay" onclick="closeItemSheet(event)">
