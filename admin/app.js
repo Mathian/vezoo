@@ -51,15 +51,15 @@ window.addEventListener('DOMContentLoaded', async () => {
 
     const existing = await dbGet('users', STATE.uid);
     if (existing?.blocked) { _hideSplash(); showScreen('s-blocked'); return; }
-    if (!existing?.agreedAdmin) { showAgreement(); return; } // showAgreement сам скрывает splash
+    if (!existing?.agreedAdmin) { showAgreement(); return; }
 
     if (existing && !existing.name) {
-      const autoName = _getTgName() || 'Администратор';
+      const autoName = _getTgName() || existing.firstName || 'Администратор';
       await dbSet('users', STATE.uid, { name: autoName });
       existing.name = autoName;
     }
     STATE.user = existing; saveState();
-    showPinScreen(); // showPinScreen сам скрывает splash
+    showPinScreen();
   } catch (err) {
     console.error('[BOOT]', err);
     _hideSplash();
@@ -82,8 +82,9 @@ function saveState() {
 //  AGREEMENT
 // ══════════════════════════════════════════════════════════
 function showAgreement() {
-  document.getElementById('s-splash').style.display = 'none';
-  document.getElementById('s-agree').style.display  = 'flex';
+  const el = document.getElementById('s-agree');
+  if (el) el.style.display = '';   // снимаем inline display:none, дальше управляет showScreen
+  showScreen('s-agree');
 }
 
 async function submitAgree() {
@@ -121,9 +122,9 @@ async function onboardSubmit() { await checkVenueAndInit(); }
 //  PIN CODE
 // ══════════════════════════════════════════════════════════
 function showPinScreen() {
-  document.getElementById('s-splash').style.display = 'none';
-  document.getElementById('s-agree').style.display  = 'none';
-  document.getElementById('s-pin').style.display    = 'flex';
+  const pin = document.getElementById('s-pin');
+  if (pin) pin.style.display = '';   // снимаем inline display:none
+  showScreen('s-pin');
   _pinBuffer = '';
   updatePinDots();
   document.getElementById('pin-sub-text').textContent = 'Введите PIN-код';
@@ -155,7 +156,6 @@ function updatePinDots() {
 async function checkPin() {
   const ok = await verifyPin('admin', _pinBuffer);
   if (ok) {
-    document.getElementById('s-pin').style.display = 'none';
     await checkVenueAndInit();
   } else {
     tgHaptic('error');
