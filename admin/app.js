@@ -988,7 +988,7 @@ async function loadPermCouriers() {
   const links=await dbQuery('courier_venue_links','venueId','==',VENUE.id);
   const listEl=document.getElementById('perm-couriers-list');
   if (!links.length) { listEl.innerHTML='<div class="text-dim text-sm">Нет постоянных курьеров</div>'; return; }
-  const rows=await Promise.all(links.map(async l=>{ const c=await dbGet('couriers',l.uid); return {...l,courierName:c?.name||l.uid,phone:c?.phone||}; }));
+  const rows=await Promise.all(links.map(async l=>{ const c=await dbGet('couriers',l.uid); return {...l,courierName:c?.name||l.uid,phone:c?.phone||''}; }));
   listEl.innerHTML=rows.map(r=>`
     <div class="flex items-center gap-2">
       <div class="li-icon yellow" style="width:34px;height:34px;font-size:16px">🚴</div>
