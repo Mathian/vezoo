@@ -35,36 +35,23 @@ window.addEventListener('DOMContentLoaded', async () => {
     const s = JSON.parse(localStorage.getItem('vez_admin_state') || '{}');
     if (!_tgUserId || s.tgId === _tgUserId) { STATE.uid = s.uid||null; STATE.user = s.user||null; }
   } catch {}
+  const urlUid = readUidFromUrl();
+  if (urlUid) { STATE.uid = urlUid; saveState(); }
+  await initFirebase();
+  if (!STATE.uid) { const tgUid = await resolveUidByTgId(); if (tgUid) { STATE.uid = tgUid; saveState(); } }
+  if (!STATE.uid) { showScreen('s-no-uid'); return; }
 
-  // Гарантированно скрываем splash в любом исходе
-  const _hideSplash = () => {
-    const el = document.getElementById('s-splash');
-    if (el) el.style.display = 'none';
-  };
+  const existing = await dbGet('users', STATE.uid);
+  if (existing?.blocked) { showScreen('s-blocked'); return; }
+  if (!existing?.agreedAdmin) { showAgreement(); return; }
 
-  try {
-    const urlUid = readUidFromUrl();
-    if (urlUid) { STATE.uid = urlUid; saveState(); }
-    await initFirebase();
-    if (!STATE.uid) { const tgUid = await resolveUidByTgId(); if (tgUid) { STATE.uid = tgUid; saveState(); } }
-    if (!STATE.uid) { _hideSplash(); showScreen('s-no-uid'); return; }
-
-    const existing = await dbGet('users', STATE.uid);
-    if (existing?.blocked) { _hideSplash(); showScreen('s-blocked'); return; }
-    if (!existing?.agreedAdmin) { showAgreement(); return; }
-
-    if (existing && !existing.name) {
-      const autoName = _getTgName() || existing.firstName || 'Администратор';
-      await dbSet('users', STATE.uid, { name: autoName });
-      existing.name = autoName;
-    }
-    STATE.user = existing; saveState();
-    showPinScreen();
-  } catch (err) {
-    console.error('[BOOT]', err);
-    _hideSplash();
-    showScreen('s-no-uid');
+  if (existing && !existing.name) {
+    const autoName = _getTgName() || 'Администратор';
+    await dbSet('users', STATE.uid, { name: autoName });
+    existing.name = autoName;
   }
+  STATE.user = existing; saveState();
+  showPinScreen();
 });
 
 function _getTgName() {
@@ -82,35 +69,18 @@ function saveState() {
 //  AGREEMENT
 // ══════════════════════════════════════════════════════════
 function showAgreement() {
-  const el = document.getElementById('s-agree');
-  if (el) el.style.display = '';   // снимаем inline display:none, дальше управляет showScreen
-  showScreen('s-agree');
+  document.getElementById('s-splash').style.display = 'none';
+  document.getElementById('s-agree').style.display  = 'flex';
 }
 
 async function submitAgree() {
   const btn = document.getElementById('agree-btn');
   if (btn) { btn.disabled = true; btn.classList.add('btn-loading'); }
-  try {
-    const linkData = await dbGet('user_links', STATE.uid);
-    const autoName = _getTgName() || linkData?.firstName || 'Администратор';
-    const existing = await dbGet('users', STATE.uid);
-    // Сохраняем поля бота (role, status), добавляем agreedAdmin
-    STATE.user = {
-      uid: STATE.uid,
-      name: autoName,
-      phone: linkData?.phone || existing?.phone || '',
-      tgId: linkData?.tgId || existing?.tgId || '',
-      role: existing?.role || 'admin',
-      status: existing?.status || 'active',
-      agreedAdmin: true,
-      createdAt: existing?.createdAt || new Date().toISOString()
-    };
-    await dbSet('users', STATE.uid, STATE.user);
-    saveState();
-  } catch (err) {
-    console.error('[submitAgree]', err);
-    if (!STATE.user) STATE.user = { name: 'Администратор', role: 'admin', agreedAdmin: true };
-  }
+  const linkData = await dbGet('user_links', STATE.uid);
+  const autoName = _getTgName() || linkData?.firstName || 'Администратор';
+  STATE.user = { name: autoName, phone: linkData?.phone||'', tgId: linkData?.tgId||'', role: 'admin', agreedAdmin: true, createdAt: new Date().toISOString() };
+  await dbSet('users', STATE.uid, STATE.user);
+  saveState();
   if (btn) { btn.disabled = false; btn.classList.remove('btn-loading'); }
   document.getElementById('s-agree').style.display = 'none';
   showPinScreen();
@@ -122,9 +92,9 @@ async function onboardSubmit() { await checkVenueAndInit(); }
 //  PIN CODE
 // ══════════════════════════════════════════════════════════
 function showPinScreen() {
-  const pin = document.getElementById('s-pin');
-  if (pin) pin.style.display = '';   // снимаем inline display:none
-  showScreen('s-pin');
+  document.getElementById('s-splash').style.display = 'none';
+  document.getElementById('s-agree').style.display  = 'none';
+  document.getElementById('s-pin').style.display    = 'flex';
   _pinBuffer = '';
   updatePinDots();
   document.getElementById('pin-sub-text').textContent = 'Введите PIN-код';
@@ -156,6 +126,7 @@ function updatePinDots() {
 async function checkPin() {
   const ok = await verifyPin('admin', _pinBuffer);
   if (ok) {
+    document.getElementById('s-pin').style.display = 'none';
     await checkVenueAndInit();
   } else {
     tgHaptic('error');
@@ -988,7 +959,7 @@ async function loadPermCouriers() {
   const links=await dbQuery('courier_venue_links','venueId','==',VENUE.id);
   const listEl=document.getElementById('perm-couriers-list');
   if (!links.length) { listEl.innerHTML='<div class="text-dim text-sm">Нет постоянных курьеров</div>'; return; }
-  const rows=await Promise.all(links.map(async l=>{ const c=await dbGet('couriers',l.uid); return {...l,courierName:c?.name||l.uid,phone:c?.phone||''}; }));
+  const rows=await Promise.all(links.map(async l=>{ const c=await dbGet('couriers',l.uid); return {...l,courierName:c?.name||l.uid,phone:c?.phone||}; }));
   listEl.innerHTML=rows.map(r=>`
     <div class="flex items-center gap-2">
       <div class="li-icon yellow" style="width:34px;height:34px;font-size:16px">🚴</div>
