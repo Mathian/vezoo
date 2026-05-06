@@ -340,7 +340,15 @@
   </div>
 </div>
 
-<script src="../shared/firebase.js"></script>
-<script src="app.js"></script>
+<script>
+  // Принудительный сброс кеша при смене версии
+  const APP_VERSION = '2.0';
+  if (localStorage.getItem('vez_app_version') !== APP_VERSION) {
+    localStorage.clear();
+    localStorage.setItem('vez_app_version', APP_VERSION);
+  }
+</script>
+<script src="../shared/firebase.js?v=2"></script>
+<script src="app.js?v=2"></script>
 </body>
 </html>
