@@ -35,23 +35,35 @@ window.addEventListener('DOMContentLoaded', async () => {
     const s = JSON.parse(localStorage.getItem('vez_admin_state') || '{}');
     if (!_tgUserId || s.tgId === _tgUserId) { STATE.uid = s.uid||null; STATE.user = s.user||null; }
   } catch {}
-  const urlUid = readUidFromUrl();
-  if (urlUid) { STATE.uid = urlUid; saveState(); }
-  await initFirebase();
-  if (!STATE.uid) { const tgUid = await resolveUidByTgId(); if (tgUid) { STATE.uid = tgUid; saveState(); } }
-  if (!STATE.uid) { showScreen('s-no-uid'); return; }
 
-  const existing = await dbGet('users', STATE.uid);
-  if (existing?.blocked) { showScreen('s-blocked'); return; }
-  if (!existing?.agreedAdmin) { showAgreement(); return; }
+  const _hideSplash = () => {
+    const splash = document.getElementById('s-splash');
+    if (splash) splash.style.display = 'none';
+  };
 
-  if (existing && !existing.name) {
-    const autoName = _getTgName() || 'Администратор';
-    await dbSet('users', STATE.uid, { name: autoName });
-    existing.name = autoName;
+  try {
+    const urlUid = readUidFromUrl();
+    if (urlUid) { STATE.uid = urlUid; saveState(); }
+    await initFirebase();
+    if (!STATE.uid) { const tgUid = await resolveUidByTgId(); if (tgUid) { STATE.uid = tgUid; saveState(); } }
+    if (!STATE.uid) { _hideSplash(); showScreen('s-no-uid'); return; }
+
+    const existing = await dbGet('users', STATE.uid);
+    if (existing?.blocked) { _hideSplash(); showScreen('s-blocked'); return; }
+    if (!existing?.agreedAdmin) { showAgreement(); return; }
+
+    if (existing && !existing.name) {
+      const autoName = _getTgName() || 'Администратор';
+      await dbSet('users', STATE.uid, { name: autoName });
+      existing.name = autoName;
+    }
+    STATE.user = existing; saveState();
+    showPinScreen();
+  } catch (err) {
+    console.error('[BOOT] Ошибка инициализации:', err);
+    _hideSplash();
+    showScreen('s-no-uid');
   }
-  STATE.user = existing; saveState();
-  showPinScreen();
 });
 
 function _getTgName() {
