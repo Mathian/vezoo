@@ -36,9 +36,10 @@ window.addEventListener('DOMContentLoaded', async () => {
     if (!_tgUserId || s.tgId === _tgUserId) { STATE.uid = s.uid||null; STATE.user = s.user||null; }
   } catch {}
 
+  // Гарантированно скрываем splash в любом исходе
   const _hideSplash = () => {
-    const splash = document.getElementById('s-splash');
-    if (splash) splash.style.display = 'none';
+    const el = document.getElementById('s-splash');
+    if (el) el.style.display = 'none';
   };
 
   try {
@@ -50,7 +51,7 @@ window.addEventListener('DOMContentLoaded', async () => {
 
     const existing = await dbGet('users', STATE.uid);
     if (existing?.blocked) { _hideSplash(); showScreen('s-blocked'); return; }
-    if (!existing?.agreedAdmin) { showAgreement(); return; }
+    if (!existing?.agreedAdmin) { showAgreement(); return; } // showAgreement сам скрывает splash
 
     if (existing && !existing.name) {
       const autoName = _getTgName() || 'Администратор';
@@ -58,9 +59,9 @@ window.addEventListener('DOMContentLoaded', async () => {
       existing.name = autoName;
     }
     STATE.user = existing; saveState();
-    showPinScreen();
+    showPinScreen(); // showPinScreen сам скрывает splash
   } catch (err) {
-    console.error('[BOOT] Ошибка инициализации:', err);
+    console.error('[BOOT]', err);
     _hideSplash();
     showScreen('s-no-uid');
   }
@@ -88,11 +89,27 @@ function showAgreement() {
 async function submitAgree() {
   const btn = document.getElementById('agree-btn');
   if (btn) { btn.disabled = true; btn.classList.add('btn-loading'); }
-  const linkData = await dbGet('user_links', STATE.uid);
-  const autoName = _getTgName() || linkData?.firstName || 'Администратор';
-  STATE.user = { name: autoName, phone: linkData?.phone||'', tgId: linkData?.tgId||'', role: 'admin', agreedAdmin: true, createdAt: new Date().toISOString() };
-  await dbSet('users', STATE.uid, STATE.user);
-  saveState();
+  try {
+    const linkData = await dbGet('user_links', STATE.uid);
+    const autoName = _getTgName() || linkData?.firstName || 'Администратор';
+    const existing = await dbGet('users', STATE.uid);
+    // Сохраняем поля бота (role, status), добавляем agreedAdmin
+    STATE.user = {
+      uid: STATE.uid,
+      name: autoName,
+      phone: linkData?.phone || existing?.phone || '',
+      tgId: linkData?.tgId || existing?.tgId || '',
+      role: existing?.role || 'admin',
+      status: existing?.status || 'active',
+      agreedAdmin: true,
+      createdAt: existing?.createdAt || new Date().toISOString()
+    };
+    await dbSet('users', STATE.uid, STATE.user);
+    saveState();
+  } catch (err) {
+    console.error('[submitAgree]', err);
+    if (!STATE.user) STATE.user = { name: 'Администратор', role: 'admin', agreedAdmin: true };
+  }
   if (btn) { btn.disabled = false; btn.classList.remove('btn-loading'); }
   document.getElementById('s-agree').style.display = 'none';
   showPinScreen();
