@@ -334,10 +334,10 @@ function normPhone(raw) {
   if (!raw) return '';
   let d = raw.replace(/\D/g, '');
   if (!d) return '';
-  // Russian/Kazakh 8-prefix → 7
+  // Зеркалит C# NormalizePhone в Form1.cs:
+  // 8-prefix (11 цифр) → заменяем на 7
   if (d.length === 11 && d[0] === '8') d = '7' + d.slice(1);
-  // Strip leading country code duplicates
-  if (d.length === 10) d = '7' + d; // bare 10-digit
+  // Добавляем + (C# всегда добавляет + после фильтрации цифр)
   return '+' + d;
 }
 
