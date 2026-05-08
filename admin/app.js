@@ -484,7 +484,7 @@ function watchNewOrders() {
     const badge=document.getElementById('orders-badge');
     badge.textContent=pending; badge.classList.toggle('hidden',pending===0);
     if (_ordersTab==='active' && document.getElementById('s-orders').classList.contains('active'))
-      renderOrdersList(orders.filter(o=>['pending','accepted','cooking','searching_courier','courier_assigned','delivering'].includes(o.status)));
+      renderOrdersList(orders.filter(o=>['pending','accepted','cooking','searching_courier','courier_assigned','delivering','ready'].includes(o.status)));
   });
 }
 
@@ -495,11 +495,11 @@ async function loadOrders(tab,el) {
   list.innerHTML='<div class="loader"><div class="spinner"></div></div>';
   let orders=await dbQuery('orders','venueId','==',VENUE.id);
   if (tab==='active')
-    orders=orders.filter(o=>['pending','accepted','cooking','searching_courier','courier_assigned','delivering'].includes(o.status));
+    orders=orders.filter(o=>['pending','accepted','cooking','searching_courier','courier_assigned','delivering','ready'].includes(o.status));
   else if (tab==='pending')
     orders=orders.filter(o=>o.status==='pending');
   else {
-    orders=orders.filter(o=>['delivered','cancelled'].includes(o.status));
+    orders=orders.filter(o=>['delivered','cancelled','issued'].includes(o.status));
     orders=orders.sort((a,b)=>(b.createdAt||'').localeCompare(a.createdAt||'')).slice(0,80);
   }
   renderOrdersList(orders);
@@ -512,7 +512,7 @@ function renderOrdersList(orders) {
     <div class="order-card" onclick="openOrderDetail('${o.id}')" style="cursor:pointer">
       <div class="order-card-hdr">
         <div><div class="font-bold" style="font-size:13px">${o.clientName||'Клиент'}${o.isManual?` <span class="badge badge-accepted" style="font-size:10px">📞</span>`:''}</div><div class="order-id">${fmtDate(o.createdAt)} · #${(o.id||'').slice(-6)}</div></div>
-        <div style="text-align:right"><span class="${statusBadgeClass(o.status)}">${statusLabel(o.status)}</span><div style="font-weight:700;font-size:15px;color:var(--primary);margin-top:3px">${fmtPrice(o.total)}</div></div>
+        <div style="text-align:right"><span class="${statusBadgeClass(o.status)}">${statusLabel(o.status)}</span><div style="font-weight:700;font-size:15px;color:var(--primary);margin-top:3px">${fmtPrice((o.total||0)+(o.deliveryPrice||0))}</div></div>
       </div>
       <div class="order-card-body">
         <div class="text-sm text-dim">${(o.items||[]).map(i=>`${i.emoji||'🍽️'} ${i.name} ×${i.qty}`).join(', ')}</div>
@@ -527,7 +527,7 @@ async function openOrderDetail(orderId) {
   if (!order) return;
   const addr=order.address;
   const addrStr=typeof addr==='string'?addr:(addr?((`${addr.street||''} ${addr.house||''}${addr.apt?', кв.'+addr.apt:''}`).trim()||'—'):'—');
-  const callBtn=order.clientPhone?`<a href="tel:${normPhone(order.clientPhone)}" class="btn-call">📞 Позвонить клиенту</a>`:'';
+  const callBtn=order.clientPhone?`<button class="btn-call" onclick="callPhone('${normPhone(order.clientPhone)}')">📞 Позвонить клиенту</button>`:'';
   const content=document.getElementById('order-detail-content');
   content.innerHTML=`
     <div class="flex justify-between items-center" style="margin-bottom:12px">
@@ -549,6 +549,7 @@ async function openOrderDetail(orderId) {
       ${order.deliveryPrice?`<div class="flex justify-between"><span class="text-dim">Доставка</span><span>${fmtPrice(order.deliveryPrice)}</span></div>`:''}
       <div class="flex justify-between"><span class="font-bold">Итого</span><span class="font-bold text-primary">${fmtPrice(order.total+(order.deliveryPrice||0))}</span></div>
     </div>
+    ${renderOrderTimeline(order)}
     ${renderAdminOrderActions(order)}`;
   _openSheet('order-overlay');
 }
@@ -556,10 +557,17 @@ async function openOrderDetail(orderId) {
 function renderAdminOrderActions(order) {
   const blBtn=order.clientUid?`<button class="btn btn-ghost btn-sm" style="margin-top:8px;color:var(--danger)" onclick="adminBlacklistClient('${order.clientUid}','${(order.clientPhone||'').replace(/'/g,'')}')">🚫 В чёрный список</button>`:'';
   const cancelBtn=`<button class="btn btn-danger btn-sm" onclick="adminCancelOrder('${order.id}')">❌ Отменить</button>`;
+  const isPickup = order.deliveryType === 'pickup';
+  if (isPickup) {
+    if (order.status==='pending') return `<div class="btn-row">${cancelBtn}<button class="btn btn-success btn-sm" onclick="adminAcceptOrder('${order.id}')">✅ Принять</button></div>${blBtn}`;
+    if (order.status==='accepted'||order.status==='cooking') return `<div style="display:flex;flex-direction:column;gap:8px"><div class="alert-box info" style="font-size:13px">🏪 Самовывоз</div><div class="btn-row">${cancelBtn}<button class="btn btn-primary btn-sm" onclick="adminIssueOrder('${order.id}')">📦 Выдать клиенту</button></div></div>${blBtn}`;
+    if (order.status==='ready') return `<div class="alert-box success" style="margin-bottom:8px;font-size:13px">✅ Заказ готов к выдаче</div><button class="btn btn-primary" onclick="adminIssueOrder('${order.id}')">📦 Выдан клиенту</button>${blBtn}`;
+    return blBtn;
+  }
   if (order.status==='pending') return `<div class="btn-row">${cancelBtn}<button class="btn btn-success btn-sm" onclick="adminAcceptOrder('${order.id}')">✅ Принять</button></div>${blBtn}`;
   if (order.status==='accepted'||order.status==='cooking') return `<div style="display:flex;flex-direction:column;gap:8px"><div class="btn-row"><button class="btn btn-secondary btn-sm" onclick="adminSearchCourier('${order.id}')">🔍 Искать курьера</button><button class="btn btn-primary btn-sm" onclick="openHandoffFlow()">📦 Передать</button></div>${cancelBtn}</div>${blBtn}`;
   if (order.status==='searching_courier') return `<div style="display:flex;flex-direction:column;gap:8px"><div class="alert-box info" style="font-size:13px">⏳ Ждём курьера…</div><button class="btn btn-primary btn-sm" onclick="openHandoffFlow()">📦 Передать курьеру</button>${cancelBtn}</div>${blBtn}`;
-  if (order.status==='courier_assigned') return `<div style="display:flex;flex-direction:column;gap:8px"><div class="alert-box info" style="font-size:13px">🏃 <strong>${order.courierName||'Курьер'}</strong> едет в кафе</div><button class="btn btn-success btn-sm" onclick="adminHandOverCourier('${order.id}')">📦 Передать заказ курьеру</button>${cancelBtn}</div>${blBtn}`;
+  if (order.status==='courier_assigned') return `<div style="display:flex;flex-direction:column;gap:8px"><div class="alert-box info" style="font-size:13px">🏃 <strong>${order.courierName||'Курьер'}</strong> едет в кафе</div><button class="btn btn-success btn-sm" onclick="openHandoffFlow()">📦 Передать заказ курьеру</button>${cancelBtn}</div>${blBtn}`;
   if (order.status==='delivering') return `<div style="display:flex;flex-direction:column;gap:8px"><div class="alert-box success">🚴 Курьер: <strong>${order.courierName||''}</strong></div>${cancelBtn}</div>${blBtn}`;
   return blBtn;
 }
@@ -588,6 +596,18 @@ async function adminHandOverCourier(orderId) {
   const courierName=order?.courierName||'Курьер';
   await dbSet('orders',orderId,{status:'delivering',handedOverAt:new Date().toISOString(),clientNotification:{type:'delivering',seen:false,message:`Курьер ${courierName} везёт ваш заказ!`}});
   closeOrderSheet(); tgHaptic('success'); showToast(`Заказ передан курьеру ${courierName}`,'success');
+  await loadOrders(_ordersTab);
+}
+
+async function adminMarkReady(orderId) {
+  await dbSet('orders', orderId, { status:'ready', readyAt:new Date().toISOString(), clientNotification:{type:'ready',seen:false,message:'Ваш заказ готов! Приходите забирать.'} });
+  closeOrderSheet(); tgHaptic('success'); showToast('Заказ готов ✅','success');
+  await loadOrders(_ordersTab);
+}
+
+async function adminIssueOrder(orderId) {
+  await dbSet('orders', orderId, { status:'issued', issuedAt:new Date().toISOString(), opNotified:false, clientNotification:{type:'issued',seen:false,message:'Заказ выдан. Приятного аппетита!'} });
+  closeOrderSheet(); tgHaptic('success'); showToast('Заказ выдан клиенту 📦','success');
   await loadOrders(_ordersTab);
 }
 
@@ -654,7 +674,7 @@ async function findHandoffCourier() {
     <div class="handoff-order-row" id="ho_${o.id}" onclick="toggleHandoffOrder('${o.id}','${(o.courierUid||'')}')">
       <div style="flex:1">
         <div style="font-weight:600;font-size:14px">#${(o.id||'').slice(-6)} — ${o.clientName||'Клиент'}</div>
-        <div style="font-size:12px;color:var(--text-dim)">${statusLabel(o.status)} · ${fmtPrice(o.total)}</div>
+        <div style="font-size:12px;color:var(--text-dim)">${statusLabel(o.status)} · ${fmtPrice((o.total||0)+(o.deliveryPrice||0))}</div>
       </div>
       <div id="ho_chk_${o.id}" style="font-size:20px;color:var(--text-muted)">○</div>
     </div>`).join('');

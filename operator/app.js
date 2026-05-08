@@ -154,7 +154,7 @@ function watchOrders() {
   _ordersUnsub = onQuerySnap('orders', 'venueId', '==', VENUE.id, orders => {
     _allOrders = orders;
     const newOrders    = orders.filter(o=>o.status==='pending').sort((a,b)=>(b.createdAt||'').localeCompare(a.createdAt||''));
-    const activeOrders = orders.filter(o=>['accepted','cooking','searching_courier','courier_assigned','delivering'].includes(o.status)).sort((a,b)=>(b.createdAt||'').localeCompare(a.createdAt||''));
+    const activeOrders = orders.filter(o=>['accepted','cooking','searching_courier','courier_assigned','delivering','ready'].includes(o.status)).sort((a,b)=>(b.createdAt||'').localeCompare(a.createdAt||''));
     const badge = document.getElementById('new-badge');
     badge.textContent = newOrders.length; badge.classList.toggle('hidden', newOrders.length===0);
     document.getElementById('new-orders-alert').classList.toggle('hidden', newOrders.length===0);
@@ -162,8 +162,10 @@ function watchOrders() {
     else { if (_soundTimer) { clearInterval(_soundTimer); _soundTimer=null; } }
     if (document.getElementById('s-new-orders').classList.contains('active')) renderNewOrders(newOrders);
     if (document.getElementById('s-active-orders').classList.contains('active')) renderActiveOrders(activeOrders);
-    orders.filter(o=>o.status==='delivered'&&!o.opNotified).forEach(async o=>{
-      document.getElementById('notif-delivered-op-text').textContent=`Заказ #${(o.id||'').slice(-6)} успешно доставлен клиенту.`;
+    orders.filter(o=>(o.status==='delivered'||o.status==='issued')&&!o.opNotified).forEach(async o=>{
+      document.getElementById('notif-delivered-op-text').textContent = o.status==='issued'
+        ? `Заказ #${(o.id||'').slice(-6)} выдан клиенту.`
+        : `Заказ #${(o.id||'').slice(-6)} успешно доставлен клиенту.`;
       document.getElementById('notif-delivered-op').classList.add('open');
       await dbSet('orders',o.id,{opNotified:true});
     });
@@ -177,7 +179,7 @@ function navToNewOrders() {
 
 function navToActiveOrders() {
   showScreen('s-active-orders'); setNav(document.getElementById('nav-active'));
-  renderActiveOrders(_allOrders.filter(o=>['accepted','cooking','searching_courier','courier_assigned','delivering'].includes(o.status)).sort((a,b)=>(b.createdAt||'').localeCompare(a.createdAt||'')));
+  renderActiveOrders(_allOrders.filter(o=>['accepted','cooking','searching_courier','courier_assigned','delivering','ready'].includes(o.status)).sort((a,b)=>(b.createdAt||'').localeCompare(a.createdAt||'')));
 }
 
 // ══════════════════════════════════════════════════════════
@@ -203,7 +205,7 @@ function renderOpOrderCard(o) {
     <div class="order-card" onclick="openOrderDetail('${o.id}')" style="cursor:pointer;border-left:3px solid ${accentColors[o.status]||'var(--border)'}">
       <div class="order-card-hdr">
         <div><div class="font-bold" style="font-size:14px">${o.clientName||'Клиент'}${o.isManual?' <span class="badge badge-accepted" style="font-size:10px">📞</span>':''}</div><div class="order-id">${fmtDate(o.createdAt)} · #${(o.id||'').slice(-6)}</div></div>
-        <div style="text-align:right"><span class="${statusBadgeClass(o.status)}">${statusLabel(o.status)}</span><div style="font-weight:700;font-size:16px;color:var(--primary);margin-top:4px">${fmtPrice(o.total)}</div></div>
+        <div style="text-align:right"><span class="${statusBadgeClass(o.status)}">${statusLabel(o.status)}</span><div style="font-weight:700;font-size:16px;color:var(--primary);margin-top:4px">${fmtPrice((o.total||0)+(o.deliveryPrice||0))}</div></div>
       </div>
       <div class="order-card-body">
         <div class="text-sm text-dim">${(o.items||[]).map(i=>`${i.emoji||'🍽️'} ${i.name} ×${i.qty}`).join(', ')}</div>
@@ -220,14 +222,21 @@ async function openOrderDetail(orderId) {
   if (!order) return;
   const addr = order.address;
   const addrStr = typeof addr==='string' ? addr : (addr ? (`${addr.street||''} ${addr.house||''}${addr.apt?', кв.'+addr.apt:''}${addr.hasIntercom?` · 🔔 ${addr.intercomCode||'есть'}`:''}`).trim() : null);
-  const callBtn = order.clientPhone ? `<a href="tel:${normPhone(order.clientPhone)}" class="btn-call">📞 Позвонить клиенту</a>` : '';
+  const callBtn = order.clientPhone ? `<button class="btn-call" onclick="callPhone('${normPhone(order.clientPhone)}')">📞 Позвонить клиенту</button>` : '';
   const cancelBtn = `<button class="btn btn-danger btn-sm" onclick="opCancelOrder('${orderId}')">❌ Отменить</button>`;
+  const isPickup = order.deliveryType === 'pickup';
   let actions = '';
-  if (order.status==='pending') actions=`<div class="btn-row">${cancelBtn}<button class="btn btn-primary btn-sm" onclick="opAcceptOrder('${orderId}')">✅ Принять</button></div>`;
-  else if (order.status==='accepted'||order.status==='cooking') actions=`<div style="display:flex;flex-direction:column;gap:8px"><div class="btn-row"><button class="btn btn-secondary btn-sm" onclick="opSearchCourier('${orderId}')">🔍 Искать курьера</button><button class="btn btn-primary btn-sm" onclick="opOpenHandoff()">📦 Передать</button></div>${cancelBtn}</div>`;
-  else if (order.status==='searching_courier') actions=`<div class="alert-box info" style="margin-bottom:8px;font-size:13px">⏳ Ждём курьера…</div><div style="display:flex;flex-direction:column;gap:8px"><button class="btn btn-primary btn-sm" onclick="opOpenHandoff()">📦 Передать курьеру</button>${cancelBtn}</div>`;
-  else if (order.status==='courier_assigned') actions=`<div class="alert-box info" style="margin-bottom:8px;font-size:13px">🏃 <strong>${order.courierName||'Курьер'}</strong> едет в кафе</div><div style="display:flex;flex-direction:column;gap:8px"><button class="btn btn-success btn-sm" onclick="opHandOverCourier('${orderId}')">📦 Передать заказ курьеру</button>${cancelBtn}</div>`;
-  else if (order.status==='delivering') actions=`<div class="alert-box success" style="margin-bottom:8px">🚴 <strong>${order.courierName||'—'}</strong></div><div class="btn-row">${cancelBtn}<button class="btn btn-ghost btn-sm" onclick="opSearchCourier('${orderId}')">🔍 Найти нового</button></div>`;
+  if (isPickup) {
+    if (order.status==='pending') actions=`<div class="btn-row">${cancelBtn}<button class="btn btn-primary btn-sm" onclick="opAcceptOrder('${orderId}')">✅ Принять</button></div>`;
+    else if (order.status==='accepted'||order.status==='cooking') actions=`<div style="display:flex;flex-direction:column;gap:8px"><div class="alert-box info" style="font-size:13px">🏪 Самовывоз</div><div class="btn-row">${cancelBtn}<button class="btn btn-primary btn-sm" onclick="opIssueOrder('${orderId}')">📦 Выдать клиенту</button></div></div>`;
+    else if (order.status==='ready') actions=`<div class="alert-box success" style="margin-bottom:8px;font-size:13px">✅ Заказ готов к выдаче</div><button class="btn btn-primary" onclick="opIssueOrder('${orderId}')">📦 Выдан клиенту</button>`;
+  } else {
+    if (order.status==='pending') actions=`<div class="btn-row">${cancelBtn}<button class="btn btn-primary btn-sm" onclick="opAcceptOrder('${orderId}')">✅ Принять</button></div>`;
+    else if (order.status==='accepted'||order.status==='cooking') actions=`<div style="display:flex;flex-direction:column;gap:8px"><div class="btn-row"><button class="btn btn-secondary btn-sm" onclick="opSearchCourier('${orderId}')">🔍 Искать курьера</button><button class="btn btn-primary btn-sm" onclick="opOpenHandoff()">📦 Передать</button></div>${cancelBtn}</div>`;
+    else if (order.status==='searching_courier') actions=`<div class="alert-box info" style="margin-bottom:8px;font-size:13px">⏳ Ждём курьера…</div><div style="display:flex;flex-direction:column;gap:8px"><button class="btn btn-primary btn-sm" onclick="opOpenHandoff()">📦 Передать курьеру</button>${cancelBtn}</div>`;
+    else if (order.status==='courier_assigned') actions=`<div class="alert-box info" style="margin-bottom:8px;font-size:13px">🏃 <strong>${order.courierName||'Курьер'}</strong> едет в кафе</div><div style="display:flex;flex-direction:column;gap:8px"><button class="btn btn-success btn-sm" onclick="opOpenHandoff()">📦 Передать заказ курьеру</button>${cancelBtn}</div>`;
+    else if (order.status==='delivering') actions=`<div class="alert-box success" style="margin-bottom:8px">🚴 <strong>${order.courierName||'—'}</strong></div><div class="btn-row">${cancelBtn}<button class="btn btn-ghost btn-sm" onclick="opSearchCourier('${orderId}')">🔍 Найти нового</button></div>`;
+  }
 
   document.getElementById('op-order-detail').innerHTML = `
     <div class="flex justify-between items-center" style="margin-bottom:12px">
@@ -247,8 +256,9 @@ async function openOrderDetail(orderId) {
       ${(order.items||[]).map(it=>`<div class="flex justify-between"><span>${it.emoji||'🍽️'} ${it.name}${it.variantName?' ('+it.variantName+')':''} ×${it.qty}</span><span class="font-bold">${fmtPrice(it.price*it.qty)}</span></div>`).join('')}
       <div class="divider"></div>
       ${order.deliveryPrice?`<div class="flex justify-between"><span class="text-dim">Доставка</span><span>${fmtPrice(order.deliveryPrice)}</span></div>`:''}
-      <div class="flex justify-between"><span class="font-bold">Итого</span><span class="font-bold text-primary">${fmtPrice(order.total)}</span></div>
+      <div class="flex justify-between"><span class="font-bold">Итого</span><span class="font-bold text-primary">${fmtPrice((order.total||0)+(order.deliveryPrice||0))}</span></div>
     </div>
+    ${renderOrderTimeline(order)}
     <div style="display:flex;flex-direction:column;gap:8px">${actions}</div>`;
   _openSheet('order-overlay');
 }
@@ -275,6 +285,17 @@ async function opHandOverCourier(orderId) {
   const courierName=order?.courierName||'Курьер';
   await dbSet('orders',orderId,{status:'delivering',handedOverAt:new Date().toISOString(),clientNotification:{type:'delivering',seen:false,message:`Курьер ${courierName} везёт ваш заказ!`}});
   closeOrderSheet(); tgHaptic('success'); showToast(`Заказ передан курьеру ${courierName}`,'success');
+}
+
+async function opMarkReady(orderId) {
+  const cookMins = VENUE?.cookingTime || 20;
+  await dbSet('orders', orderId, { status:'ready', readyAt:new Date().toISOString(), clientNotification:{type:'ready',seen:false,message:'Ваш заказ готов! Приходите забирать.'} });
+  closeOrderSheet(); tgHaptic('success'); showToast('Заказ готов ✅','success');
+}
+
+async function opIssueOrder(orderId) {
+  await dbSet('orders', orderId, { status:'issued', issuedAt:new Date().toISOString(), opNotified:false, clientNotification:{type:'issued',seen:false,message:'Заказ выдан. Приятного аппетита!'} });
+  closeOrderSheet(); tgHaptic('success'); showToast('Заказ выдан клиенту 📦','success');
 }
 
 async function opOpenAssignCourier(orderId) {
@@ -341,7 +362,7 @@ async function opFindHandoffCourier() {
   document.getElementById('op-handoff-orders-section').style.display='';
   document.getElementById('op-handoff-orders-list').innerHTML=orders.map(o=>`
     <div class="handoff-order-row" id="oho_${o.id}" onclick="opToggleHandoffOrder('${o.id}','${o.courierUid||''}')">
-      <div style="flex:1"><div style="font-weight:600;font-size:14px">#${(o.id||'').slice(-6)} — ${o.clientName||'Клиент'}</div><div style="font-size:12px;color:var(--text-dim)">${statusLabel(o.status)} · ${fmtPrice(o.total)}</div></div>
+      <div style="flex:1"><div style="font-weight:600;font-size:14px">#${(o.id||'').slice(-6)} — ${o.clientName||'Клиент'}</div><div style="font-size:12px;color:var(--text-dim)">${statusLabel(o.status)} · ${fmtPrice((o.total||0)+(o.deliveryPrice||0))}</div></div>
       <div id="oho_chk_${o.id}" style="font-size:20px;color:var(--text-muted)">○</div>
     </div>`).join('');
 }
@@ -464,7 +485,7 @@ async function loadOpHistory() {
   const dateInput=document.getElementById('hist-date');
   const list=document.getElementById('op-history-list');
   list.innerHTML='<div class="loader"><div class="spinner"></div></div>';
-  let orders=(await dbQuery('orders','venueId','==',VENUE.id)).filter(o=>['delivered','cancelled'].includes(o.status));
+  let orders=(await dbQuery('orders','venueId','==',VENUE.id)).filter(o=>['delivered','cancelled','issued'].includes(o.status));
   if (dateInput.value) orders=orders.filter(o=>(o.createdAt||'').startsWith(dateInput.value));
   orders.sort((a,b)=>(b.createdAt||'').localeCompare(a.createdAt||''));
   if (!orders.length) { list.innerHTML=`<div class="empty"><div class="empty-icon">📋</div><div class="empty-text">Нет заказов за этот период</div></div>`; return; }

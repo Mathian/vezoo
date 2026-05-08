@@ -228,14 +228,16 @@ function statusLabel(st) {
   return {
     pending:'Ожидает', accepted:'Принят', cooking:'Готовится',
     searching_courier:'Ищем курьера', courier_assigned:'Курьер едет',
-    delivering:'Доставляется', delivered:'Доставлен', cancelled:'Отменён'
+    delivering:'Доставляется', delivered:'Доставлен', cancelled:'Отменён',
+    ready:'Готово', issued:'Выдан'
   }[st] || st;
 }
 function statusBadgeClass(st) {
   const map = {
     pending:'badge-pending', accepted:'badge-accepted', cooking:'badge-accepted',
     searching_courier:'badge-searching', courier_assigned:'badge-searching',
-    delivering:'badge-delivering', delivered:'badge-delivered', cancelled:'badge-cancelled'
+    delivering:'badge-delivering', delivered:'badge-delivered', cancelled:'badge-cancelled',
+    ready:'badge-accepted', issued:'badge-delivered'
   };
   return 'badge ' + (map[st] || 'badge-pending');
 }
@@ -339,6 +341,32 @@ function normPhone(raw) {
   // Strip leading country code duplicates
   if (d.length === 10) d = '7' + d; // bare 10-digit
   return '+' + d;
+}
+
+// ─────────────────────── Phone call helper (iOS Telegram fix) ───────────────────────
+function callPhone(phone) {
+  const tel = 'tel:' + phone;
+  if (tg?.openLink) tg.openLink(tel); else window.open(tel, '_self');
+}
+
+// ─────────────────────── Order timeline (for admin/operator history) ───────────────────────
+function renderOrderTimeline(order) {
+  const events = [
+    { label: 'Создан',            time: order.createdAt },
+    { label: 'Принят',            time: order.acceptedAt },
+    { label: 'Поиск курьера',     time: order.searchStartedAt },
+    { label: 'Курьер назначен',   time: order.assignedAt },
+    { label: 'Передан курьеру',   time: order.handedOverAt },
+    { label: 'Доставлен',         time: order.deliveredAt },
+    { label: 'Выдан клиенту',     time: order.issuedAt },
+    { label: 'Отменён',           time: order.cancelledAt },
+  ].filter(e => e.time);
+  if (!events.length) return '';
+  return `
+    <div class="section-title" style="margin:12px 0 6px">Хронология</div>
+    <div class="card card-body" style="gap:5px;display:flex;flex-direction:column">
+      ${events.map(e => `<div class="flex justify-between"><span class="text-dim text-sm">${e.label}</span><span style="font-size:12px;font-family:monospace">${fmtDate(e.time)}</span></div>`).join('')}
+    </div>`;
 }
 
 // ─────────────────────── QR helpers ───────────────────────

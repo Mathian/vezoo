@@ -494,7 +494,7 @@ function renderCartOverview() {
         <div class="flex justify-between items-center">
           <div style="display:flex;align-items:center;gap:8px">
             <span style="font-size:22px">${cat?.icon || '🏪'}</span>
-            <div><div class="font-bold">${venue?.name || venueId}</div><div class="text-dim text-sm">${totalQty} позиц. · ${fmtPrice(totPrc, _selectedCurrency)}</div></div>
+            <div class="font-bold">${venue?.name || venueId}</div>
           </div>
           <span class="${open ? 'venue-open' : 'venue-closed'}" style="font-size:12px">${open ? '● Открыто' : '● Закрыто'}</span>
         </div>
@@ -502,9 +502,12 @@ function renderCartOverview() {
           ${items.slice(0, 3).map(c => `<div class="flex justify-between" style="font-size:13px"><span>${c.emoji} ${c.name}</span><span class="text-dim">${c.qty} × ${fmtPrice(c.price, _selectedCurrency)}</span></div>`).join('')}
           ${items.length > 3 ? `<div class="text-dim text-sm">и ещё ${items.length - 3} позиц.</div>` : ''}
         </div>
-        <div class="divider" style="margin:0"></div>
+        <div class="flex justify-between items-center" style="padding-top:4px;border-top:1px solid var(--border)">
+          <span class="text-dim text-sm">Всего ${totalQty} позиций</span>
+          <span class="font-bold text-primary">${fmtPrice(totPrc, _selectedCurrency)}</span>
+        </div>
         <div class="btn-row">
-          <button class="btn btn-secondary btn-sm" onclick="openVenueFromCart('${venueId}')">✏️ Изменить</button>
+          <button class="btn btn-secondary btn-sm" onclick="openVenueFromCart('${venueId}')">➕ Добавить</button>
           <button class="btn btn-primary btn-sm" onclick="openCartFromOverview('${venueId}')">Оформить →</button>
         </div>
       </div>`;
@@ -691,7 +694,7 @@ function watchActiveOrders() {
   if (_ordersUnsub) { _ordersUnsub(); _ordersUnsub = null; }
   _ordersUnsub = onQuerySnap('orders', 'clientUid', '==', STATE.uid, orders => {
     _allClientOrders = orders;
-    ACTIVE_ORDERS = orders.filter(o => !['delivered', 'cancelled'].includes(o.status))
+    ACTIVE_ORDERS = orders.filter(o => !['delivered', 'cancelled', 'issued'].includes(o.status))
       .sort((a, b) => (b.createdAt || '').localeCompare(a.createdAt || ''));
 
     document.getElementById('order-nav-badge').classList.toggle('hidden', ACTIVE_ORDERS.length === 0);
@@ -713,7 +716,7 @@ function watchActiveOrders() {
 
 function _showClientNotification(order) {
   const type  = order.clientNotification?.type;
-  const notifMap = { accepted: 'notif-accepted', cancelled: 'notif-cancelled', delivering: 'notif-delivering', delivered: 'notif-delivered' };
+  const notifMap = { accepted: 'notif-accepted', ready: 'notif-accepted', cancelled: 'notif-cancelled', delivering: 'notif-delivering', delivered: 'notif-delivered', issued: 'notif-delivered' };
   const notifId  = notifMap[type];
   if (!notifId) return;
   if (type === 'accepted') {
@@ -724,6 +727,14 @@ function _showClientNotification(order) {
     if (el) el.textContent = order.deliveryType === 'pickup'
       ? `Заказ принят! Будет готов через ${ts}.`
       : `Заказ принят! Ожидайте доставку в течение ${ts}.`;
+  }
+  if (type === 'ready') {
+    const el = document.getElementById('notif-accepted-text');
+    if (el) el.textContent = order.clientNotification?.message || 'Ваш заказ готов! Приходите забирать.';
+  }
+  if (type === 'issued') {
+    const el = document.getElementById('notif-delivered-op-text') || document.getElementById('notif-accepted-text');
+    // Use delivered notification element for issued pickup
   }
   if (type === 'delivering') {
     const el = document.getElementById('notif-delivering-text');
@@ -808,10 +819,10 @@ function skipCourierRating() {
 function renderAllOrders() {
   const container = document.getElementById('orders-content');
   const active  = _allClientOrders
-    .filter(o => !['delivered', 'cancelled'].includes(o.status))
+    .filter(o => !['delivered', 'cancelled', 'issued'].includes(o.status))
     .sort((a, b) => (b.createdAt || '').localeCompare(a.createdAt || ''));
   const history = _allClientOrders
-    .filter(o => ['delivered', 'cancelled'].includes(o.status))
+    .filter(o => ['delivered', 'cancelled', 'issued'].includes(o.status))
     .sort((a, b) => (b.createdAt || '').localeCompare(a.createdAt || ''))
     .slice(0, 60);
 
@@ -834,12 +845,12 @@ function renderAllOrders() {
 
 function renderHistoryCard(o) {
   return `
-    <div class="order-card" style="border-left:3px solid ${o.status === 'delivered' ? 'var(--success)' : 'var(--danger)'}">
+    <div class="order-card" style="border-left:3px solid ${(o.status === 'delivered' || o.status === 'issued') ? 'var(--success)' : 'var(--danger)'}">
       <div class="order-card-hdr">
         <div><div class="font-bold" style="font-size:13px">📍 ${o.venueName || 'Заведение'}</div><div class="order-id">${fmtDate(o.createdAt)} · #${(o.id || '').slice(-6)}</div></div>
         <div style="text-align:right">
           <span class="${statusBadgeClass(o.status)}">${statusLabel(o.status)}</span>
-          <div class="order-total" style="font-size:15px;margin-top:3px">${fmtPrice(o.total, o.currency || _selectedCurrency)}</div>
+          <div class="order-total" style="font-size:15px;margin-top:3px">${fmtPrice((o.total||0)+(o.deliveryPrice||0), o.currency || _selectedCurrency)}</div>
           ${o.courierRating ? `<div style="font-size:12px;color:var(--text-dim)">Курьер: ${'★'.repeat(o.courierRating)}</div>` : ''}
         </div>
       </div>
@@ -852,10 +863,10 @@ function renderHistoryCard(o) {
 function renderOrderCard(o) {
   const isPickup = o.deliveryType === 'pickup';
   const steps = isPickup
-    ? [{ icon: '📋', label: 'Создан' }, { icon: '👨‍🍳', label: 'Готовится' }, { icon: '✅', label: 'Готов' }]
-    : [{ icon: '📋', label: 'Создан' }, { icon: '👨‍🍳', label: 'Готовится' }, { icon: '🚴', label: 'В пути' }, { icon: '✅', label: 'Доставлен' }];
+    ? [{ icon: '📋', label: 'Создан' }, { icon: '👨‍🍳', label: 'Готовится' }, { icon: '✅', label: 'Готово' }, { icon: '📦', label: 'Выдан' }]
+    : [{ icon: '📋', label: 'Создан' }, { icon: '👨‍🍳', label: 'Готовится' }, { icon: ['searching_courier','courier_assigned'].includes(o.status)?'⏳':'🚴', label: ['searching_courier','courier_assigned'].includes(o.status)?'Ожидает курьера':'В пути' }, { icon: '✅', label: 'Доставлен' }];
   const stepIdx = isPickup
-    ? { pending: 0, accepted: 0, cooking: 1, delivered: 2, cancelled: 0 }
+    ? { pending: 0, accepted: 0, cooking: 1, ready: 2, issued: 3, cancelled: 0 }
     : { pending: 0, accepted: 0, cooking: 1, searching_courier: 2, courier_assigned: 2, delivering: 2, delivered: 3, cancelled: 0 };
   const si = stepIdx[o.status] ?? 0;
   const track = o.status === 'cancelled'
@@ -882,8 +893,9 @@ function renderOrderCard(o) {
         <div class="divider" style="margin:6px 0"></div>
         <div class="flex justify-between"><span class="text-dim">Товары</span><span>${fmtPrice(o.total, cur)}</span></div>
         ${o.deliveryPrice ? `<div class="flex justify-between"><span class="text-dim">Доставка</span><span>${fmtPrice(o.deliveryPrice, cur)}</span></div>` : ''}
+        <div class="flex justify-between"><span class="font-bold">Итого</span><span class="font-bold text-primary">${fmtPrice((o.total||0)+(o.deliveryPrice||0), cur)}</span></div>
         <div class="flex justify-between"><span class="text-dim">Оплата</span><span>${o.payment === 'cash' ? '💵 Наличные' : '💳 Карта'}</span></div>
-        ${addr ? `<div class="flex justify-between"><span class="text-dim">Адрес</span><span style="text-align:right;max-width:58%;font-size:12px">${addr.street} ${addr.house}${addr.apt ? ', кв.' + addr.apt : ''}</span></div>` : ''}
+        ${addr ? `<div class="flex justify-between"><span class="text-dim">Адрес</span><span style="text-align:right;max-width:58%">${addr.street} ${addr.house}${addr.apt ? ', кв.' + addr.apt : ''}</span></div>` : ''}
         ${o.courierName ? `<div class="flex justify-between"><span class="text-dim">Курьер</span><span>${o.courierName}</span></div>` : ''}
       </div>
     </div>`;
