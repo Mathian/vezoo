@@ -154,7 +154,7 @@ function watchOrders() {
   _ordersUnsub = onQuerySnap('orders', 'venueId', '==', VENUE.id, orders => {
     _allOrders = orders;
     const newOrders    = orders.filter(o=>o.status==='pending').sort((a,b)=>(b.createdAt||'').localeCompare(a.createdAt||''));
-    const activeOrders = orders.filter(o=>['accepted','cooking','searching_courier','courier_assigned','delivering','ready'].includes(o.status)).sort((a,b)=>(b.createdAt||'').localeCompare(a.createdAt||''));
+    const activeOrders = orders.filter(o=>['accepted','cooking','searching_courier','courier_assigned','ready_for_courier','delivering','ready'].includes(o.status)).sort((a,b)=>(b.createdAt||'').localeCompare(a.createdAt||''));
     const badge = document.getElementById('new-badge');
     badge.textContent = newOrders.length; badge.classList.toggle('hidden', newOrders.length===0);
     document.getElementById('new-orders-alert').classList.toggle('hidden', newOrders.length===0);
@@ -162,6 +162,7 @@ function watchOrders() {
     else { if (_soundTimer) { clearInterval(_soundTimer); _soundTimer=null; } }
     if (document.getElementById('s-new-orders').classList.contains('active')) renderNewOrders(newOrders);
     if (document.getElementById('s-active-orders').classList.contains('active')) renderActiveOrders(activeOrders);
+
     orders.filter(o=>(o.status==='delivered'||o.status==='issued')&&!o.opNotified).forEach(async o=>{
       document.getElementById('notif-delivered-op-text').textContent = o.status==='issued'
         ? `Заказ #${(o.id||'').slice(-6)} выдан клиенту.`
@@ -179,7 +180,7 @@ function navToNewOrders() {
 
 function navToActiveOrders() {
   showScreen('s-active-orders'); setNav(document.getElementById('nav-active'));
-  renderActiveOrders(_allOrders.filter(o=>['accepted','cooking','searching_courier','courier_assigned','delivering','ready'].includes(o.status)).sort((a,b)=>(b.createdAt||'').localeCompare(a.createdAt||'')));
+  renderActiveOrders(_allOrders.filter(o=>['accepted','cooking','searching_courier','courier_assigned','ready_for_courier','delivering','ready'].includes(o.status)).sort((a,b)=>(b.createdAt||'').localeCompare(a.createdAt||'')));
 }
 
 // ══════════════════════════════════════════════════════════
@@ -232,8 +233,9 @@ async function openOrderDetail(orderId) {
     else if (order.status==='ready') actions=`<div class="alert-box success" style="margin-bottom:8px;font-size:13px">✅ Заказ готов к выдаче</div><button class="btn btn-primary" onclick="opIssueOrder('${orderId}')">📦 Выдан клиенту</button>`;
   } else {
     if (order.status==='pending') actions=`<div class="btn-row">${cancelBtn}<button class="btn btn-primary btn-sm" onclick="opAcceptOrder('${orderId}')">✅ Принять</button></div>`;
-    else if (order.status==='accepted'||order.status==='cooking') actions=`<div style="display:flex;flex-direction:column;gap:8px"><div class="btn-row"><button class="btn btn-secondary btn-sm" onclick="opSearchCourier('${orderId}')">🔍 Искать курьера</button><button class="btn btn-primary btn-sm" onclick="opOpenHandoff()">📦 Передать</button></div>${cancelBtn}</div>`;
-    else if (order.status==='searching_courier') actions=`<div class="alert-box info" style="margin-bottom:8px;font-size:13px">⏳ Ждём курьера…</div><div style="display:flex;flex-direction:column;gap:8px"><button class="btn btn-primary btn-sm" onclick="opOpenHandoff()">📦 Передать курьеру</button>${cancelBtn}</div>`;
+    else if (order.status==='accepted'||order.status==='cooking') actions=`<div style="display:flex;flex-direction:column;gap:8px"><button class="btn btn-success btn-sm" onclick="opMarkReadyForCourier('${orderId}')">✅ Заказ готов</button><div class="btn-row"><button class="btn btn-secondary btn-sm" onclick="opSearchCourier('${orderId}')">🔍 В общий пул</button><button class="btn btn-primary btn-sm" onclick="opOpenHandoff()">📦 Передать</button></div>${cancelBtn}</div>`;
+    else if (order.status==='ready_for_courier') actions=`<div class="alert-box success" style="margin-bottom:8px;font-size:13px">⚡ Заказ готов — ждём курьера кафе</div><div style="display:flex;flex-direction:column;gap:8px"><button class="btn btn-primary btn-sm" onclick="opOpenHandoff()">📦 Передать курьеру</button><button class="btn btn-secondary btn-sm" onclick="opSearchCourier('${orderId}')">🔍 Выставить в общий пул</button>${cancelBtn}</div>`;
+    else if (order.status==='searching_courier') actions=`<div class="alert-box info" style="margin-bottom:8px;font-size:13px">⏳ Ждём курьера из пула…</div><div style="display:flex;flex-direction:column;gap:8px"><button class="btn btn-primary btn-sm" onclick="opOpenHandoff()">📦 Передать курьеру</button>${cancelBtn}</div>`;
     else if (order.status==='courier_assigned') actions=`<div class="alert-box info" style="margin-bottom:8px;font-size:13px">🏃 <strong>${order.courierName||'Курьер'}</strong> едет в кафе</div><div style="display:flex;flex-direction:column;gap:8px"><button class="btn btn-success btn-sm" onclick="opOpenHandoff()">📦 Передать заказ курьеру</button>${cancelBtn}</div>`;
     else if (order.status==='delivering') actions=`<div class="alert-box success" style="margin-bottom:8px">🚴 <strong>${order.courierName||'—'}</strong></div><div class="btn-row">${cancelBtn}<button class="btn btn-ghost btn-sm" onclick="opSearchCourier('${orderId}')">🔍 Найти нового</button></div>`;
   }
@@ -288,9 +290,13 @@ async function opHandOverCourier(orderId) {
 }
 
 async function opMarkReady(orderId) {
-  const cookMins = VENUE?.cookingTime || 20;
   await dbSet('orders', orderId, { status:'ready', readyAt:new Date().toISOString(), clientNotification:{type:'ready',seen:false,message:'Ваш заказ готов! Приходите забирать.'} });
   closeOrderSheet(); tgHaptic('success'); showToast('Заказ готов ✅','success');
+}
+
+async function opMarkReadyForCourier(orderId) {
+  await dbSet('orders', orderId, { status:'ready_for_courier', readyForCourierAt:new Date().toISOString() });
+  closeOrderSheet(); tgHaptic('success'); showToast('Заказ помечен готовым — курьеры кафе видят его','success');
 }
 
 async function opIssueOrder(orderId) {
