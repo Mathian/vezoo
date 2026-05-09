@@ -13,7 +13,6 @@ let _assignOrderId = null;
 let _allOrders     = [];
 let _opHandoffCourier = null;
 let _opHandoffSelected = new Set();
-let _opMoCart = {};
 
 // ══════════════════════════════════════════════════════════
 //  BOOT
@@ -319,13 +318,13 @@ async function opOpenAssignCourier(orderId) {
   const available=allCouriers.filter(c=>c.status==='active'&&permUids.includes(c.uid));
   if (listEl) {
     if (!available.length) { listEl.innerHTML=`<div class="empty" style="padding:24px"><div class="empty-icon">🚴</div><div class="empty-text">Нет постоянных курьеров на смене.</div></div>`; return; }
-    listEl.innerHTML=available.map(c=>`<div class="list-item" onclick="opAssignCourier('${c.uid}','${(c.name||'Курьер').replace(/'/g,'')}')"><div class="li-icon yellow">🚴</div><div class="li-body"><div class="li-title">${c.name||'—'}</div><div class="li-sub">${c.phone||''}</div></div><div class="chevron">›</div></div>`).join('');
+    listEl.innerHTML=available.map(c=>`<div class="list-item" onclick="opAssignCourier('${c.uid}','${(c.name||'Курьер').replace(/'/g,'')}','${(c.phone||'').replace(/'/g,'')}')"><div class="li-icon yellow">🚴</div><div class="li-body"><div class="li-title">${c.name||'—'}</div><div class="li-sub">${c.phone||''}</div></div><div class="chevron">›</div></div>`).join('');
   }
 }
 
-async function opAssignCourier(courierUid,courierName) {
+async function opAssignCourier(courierUid,courierName,courierPhone) {
   if (!_assignOrderId) return;
-  await dbSet('orders',_assignOrderId,{status:'delivering',courierUid,courierName,assignedAt:new Date().toISOString(),clientNotification:{type:'delivering',seen:false,message:`Курьер ${courierName} везёт ваш заказ!`}});
+  await dbSet('orders',_assignOrderId,{status:'delivering',courierUid,courierName,courierPhone:courierPhone||'',assignedAt:new Date().toISOString(),clientNotification:{type:'delivering',seen:false,message:`Курьер ${courierName} везёт ваш заказ!`}});
   closeCourierSheet(); tgHaptic('success'); showToast(`Назначен курьер: ${courierName}`,'success');
 }
 
@@ -394,8 +393,9 @@ function opToggleHandoffOrder(orderId,existingCourierUid) {
 async function opConfirmHandoff() {
   if (!_opHandoffCourier||!_opHandoffSelected.size) { showToast('Выберите заказы','warning'); return; }
   const cName=_opHandoffCourier.name||'Курьер';
+  const cPhone=_opHandoffCourier.phone||'';
   for (const orderId of _opHandoffSelected) {
-    await dbSet('orders',orderId,{status:'delivering',courierUid:_opHandoffCourier.uid,courierName:cName,handedOverAt:new Date().toISOString(),clientNotification:{type:'delivering',seen:false,message:`Курьер ${cName} везёт ваш заказ!`}});
+    await dbSet('orders',orderId,{status:'delivering',courierUid:_opHandoffCourier.uid,courierName:cName,courierPhone:cPhone,handedOverAt:new Date().toISOString(),clientNotification:{type:'delivering',seen:false,message:`Курьер ${cName} везёт ваш заказ!`}});
   }
   closeCourierSheet(); tgHaptic('success'); showToast(`Передано курьеру ${cName}: ${_opHandoffSelected.size} заказов`,'success');
 }
@@ -404,50 +404,15 @@ async function opConfirmHandoff() {
 //  MANUAL ORDER
 // ══════════════════════════════════════════════════════════
 async function openOpManualOrder() {
-  _opMoCart={};
   document.getElementById('op-mo-phone').value='';
   document.getElementById('op-mo-name').value='';
-  document.getElementById('op-mo-address').value='';
+  document.getElementById('op-mo-street').value='';
+  document.getElementById('op-mo-house').value='';
+  document.getElementById('op-mo-apt').value='';
+  document.getElementById('op-mo-amount').value='';
+  document.getElementById('op-mo-comment').value='';
   document.getElementById('op-mo-autocomplete').style.display='none';
-  document.getElementById('op-mo-cart').innerHTML='';
-  document.getElementById('op-mo-total').textContent=fmtPrice(0);
-  if (!MENU_ITEMS_OP.length) MENU_ITEMS_OP=await dbQuery('menu_items','venueId','==',VENUE.id);
-  const cats=[...new Set(MENU_ITEMS_OP.map(i=>i.category).filter(Boolean))];
-  document.getElementById('op-mo-cats').innerHTML=['Все',...cats].map((c,i)=>`<button class="cat-tab${i===0?' active':''}" onclick="opMoFilter(this,'${c}')">${c}</button>`).join('');
-  opMoFilter(null,'Все');
   _openSheet('op-manual-overlay');
-}
-
-function opMoFilter(el,cat) {
-  if(el){document.querySelectorAll('#op-mo-cats .cat-tab').forEach(b=>b.classList.remove('active'));el.classList.add('active');}
-  const items=cat==='Все'?MENU_ITEMS_OP:MENU_ITEMS_OP.filter(i=>i.category===cat);
-  document.getElementById('op-mo-items').innerHTML=items.filter(i=>i.available!==false).map(item=>`
-    <div class="flex items-center gap-2" style="padding:6px 0;border-bottom:1px solid var(--border)">
-      <div style="flex:1"><div style="font-weight:600;font-size:13px">${item.emoji||'🍽️'} ${item.name}</div><div style="font-size:12px;color:var(--primary)">${fmtPrice(item.price)}</div></div>
-      <button class="btn btn-primary btn-xs" onclick="opMoAdd('${item.id}')">+</button>
-    </div>`).join('');
-}
-
-function opMoAdd(itemId) {
-  const item=MENU_ITEMS_OP.find(i=>i.id===itemId); if (!item) return;
-  const price=item.variants?.length?item.variants[0].price:item.price;
-  if (_opMoCart[itemId]) _opMoCart[itemId].qty++;
-  else _opMoCart[itemId]={...item,qty:1,unitPrice:price};
-  opMoRenderCart(); tgHaptic('light');
-}
-
-function opMoRemove(itemId) {
-  if (!_opMoCart[itemId]) return;
-  _opMoCart[itemId].qty--;
-  if (_opMoCart[itemId].qty<=0) delete _opMoCart[itemId];
-  opMoRenderCart();
-}
-
-function opMoRenderCart() {
-  const items=Object.values(_opMoCart);
-  const total=items.reduce((s,i)=>s+i.unitPrice*i.qty,0);
-  document.getElementById('op-mo-total').textContent=fmtPrice(total);
-  document.getElementById('op-mo-cart').innerHTML=items.map(it=>`<div class="manual-order-item"><span class="manual-order-name">${it.emoji||'🍽️'} ${it.name} ×${it.qty}</span><span class="manual-order-price">${fmtPrice(it.unitPrice*it.qty)}</span><button class="btn btn-icon" style="width:28px;height:28px;font-size:14px;background:var(--danger-soft);color:var(--danger);border:none;border-radius:8px;cursor:pointer" onclick="opMoRemove('${it.id}')">−</button></div>`).join('')||'<div class="text-dim text-sm">Ничего не добавлено</div>';
 }
 
 async function opMoPhoneInput(input) {
@@ -458,27 +423,40 @@ async function opMoPhoneInput(input) {
   const matches=links.filter(l=>normPhone(l.phone||'').includes(norm.replace('+',''))).slice(0,5);
   const dd=document.getElementById('op-mo-autocomplete');
   if (!matches.length) { dd.style.display='none'; return; }
-  dd.style.display=''; dd.innerHTML=matches.map(l=>`<div class="autocomplete-item" onclick="opMoSelectClient('${(l.phone||'').replace(/'/g,'')}','${(l.firstName||'').replace(/'/g,'')}')"><span style="font-family:monospace">${l.phone}</span> <span style="color:var(--text-dim)">${l.firstName||''}</span></div>`).join('');
+  dd.style.display=''; dd.innerHTML=matches.map(l=>`<div class="autocomplete-item" onclick="opMoSelectClient('${(l.phone||'').replace(/'/g,'')}','${(l.firstName||'').replace(/'/g,'')}','${(l.uid||'').replace(/'/g,'')}')"><span style="font-family:monospace">${l.phone}</span> <span style="color:var(--text-dim)">${l.firstName||''}</span></div>`).join('');
 }
 
-function opMoSelectClient(phone,name) {
+async function opMoSelectClient(phone, name, uid) {
   document.getElementById('op-mo-phone').value=phone;
   document.getElementById('op-mo-name').value=name||'';
   document.getElementById('op-mo-autocomplete').style.display='none';
+  if (uid) {
+    try {
+      const userData=await dbGet('users',uid);
+      const addr=userData?.savedAddress;
+      if (addr) {
+        document.getElementById('op-mo-street').value=addr.street||'';
+        document.getElementById('op-mo-house').value=addr.house||'';
+        document.getElementById('op-mo-apt').value=addr.apt||'';
+      }
+    } catch {}
+  }
 }
 
 async function submitOpManualOrder() {
   const phone=normPhone(document.getElementById('op-mo-phone').value.trim());
   const clientName=document.getElementById('op-mo-name').value.trim()||'Клиент (телефон)';
-  const address=document.getElementById('op-mo-address').value.trim();
+  const street=document.getElementById('op-mo-street').value.trim();
+  const house=document.getElementById('op-mo-house').value.trim();
+  const apt=document.getElementById('op-mo-apt').value.trim();
+  const amount=parseInt(document.getElementById('op-mo-amount').value)||0;
   const payment=document.getElementById('op-mo-payment').value;
+  const comment=document.getElementById('op-mo-comment').value.trim();
   if (!phone) { showToast('Введите телефон клиента','warning'); return; }
-  if (!address) { showToast('Введите адрес','warning'); return; }
-  const items=Object.values(_opMoCart);
-  if (!items.length) { showToast('Добавьте позиции','warning'); return; }
-  const total=items.reduce((s,i)=>s+i.unitPrice*i.qty,0);
+  if (!street||!house) { showToast('Введите улицу и дом','warning'); return; }
+  if (!amount) { showToast('Введите сумму заказа','warning'); return; }
   const ordId=genOrderId();
-  await dbSet('orders',ordId,{ id:ordId, venueId:VENUE.id, venueName:VENUE.name, clientPhone:phone, clientName, clientUid:'manual_'+genId(), address:{street:address}, payment, total, items:items.map(i=>({id:i.id,name:i.name,emoji:i.emoji||'🍽️',qty:i.qty,price:i.unitPrice})), status:'accepted', isManual:true, createdAt:new Date().toISOString(), acceptedAt:new Date().toISOString(), clientNotification:{type:'accepted',seen:false} });
+  await dbSet('orders',ordId,{ id:ordId, venueId:VENUE.id, venueName:VENUE.name, clientPhone:phone, clientName, clientUid:'manual_'+genId(), address:{street,house,apt}, payment, total:amount, items:[], comment, status:'accepted', isManual:true, createdAt:new Date().toISOString(), acceptedAt:new Date().toISOString(), clientNotification:{type:'accepted',seen:false} });
   closeOpManualOrder(); tgHaptic('success'); showToast('Заказ создан','success');
 }
 

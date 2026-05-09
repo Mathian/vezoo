@@ -345,10 +345,14 @@ function normPhone(raw) {
   return '+' + d;
 }
 
-// ─────────────────────── Phone call helper (iOS Telegram fix) ───────────────────────
+// ─────────────────────── Phone call helper ───────────────────────
 function callPhone(phone) {
-  const tel = 'tel:' + phone;
-  if (tg?.openLink) tg.openLink(tel); else window.open(tel, '_self');
+  const a = document.createElement('a');
+  a.href = 'tel:' + phone;
+  a.style.display = 'none';
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
 }
 
 // ─────────────────────── Order timeline (for admin/operator history) ───────────────────────

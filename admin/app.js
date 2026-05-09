@@ -716,8 +716,9 @@ function toggleHandoffOrder(orderId, existingCourierUid) {
 async function confirmHandoff() {
   if (!_handoffCourier || !_handoffSelectedOrders.size) { showToast('Выберите заказы для передачи','warning'); return; }
   const cName=_handoffCourier.name||'Курьер';
+  const cPhone=_handoffCourier.phone||'';
   for (const orderId of _handoffSelectedOrders) {
-    await dbSet('orders',orderId,{ status:'delivering', courierUid:_handoffCourier.uid, courierName:cName, handedOverAt:new Date().toISOString(), clientNotification:{type:'delivering',seen:false,message:`Курьер ${cName} везёт ваш заказ!`} });
+    await dbSet('orders',orderId,{ status:'delivering', courierUid:_handoffCourier.uid, courierName:cName, courierPhone:cPhone, handedOverAt:new Date().toISOString(), clientNotification:{type:'delivering',seen:false,message:`Курьер ${cName} везёт ваш заказ!`} });
   }
   closeCourierSheet(); tgHaptic('success');
   showToast(`Передано курьеру ${cName}: ${_handoffSelectedOrders.size} заказов`,'success');
@@ -736,99 +737,65 @@ function closeCourierSheet(e) {
 // ══════════════════════════════════════════════════════════
 //  MANUAL ORDER
 // ══════════════════════════════════════════════════════════
-let _moCart = {};
-
 async function openManualOrder() {
-  _moCart={};
   document.getElementById('mo-phone').value='';
   document.getElementById('mo-client-name').value='';
-  document.getElementById('mo-address').value='';
+  document.getElementById('mo-street').value='';
+  document.getElementById('mo-house').value='';
+  document.getElementById('mo-apt').value='';
+  document.getElementById('mo-amount').value='';
+  document.getElementById('mo-comment').value='';
   document.getElementById('mo-autocomplete').style.display='none';
-  document.getElementById('mo-selected-items').innerHTML='';
-  document.getElementById('mo-total').textContent=fmtPrice(0);
-
-  // Load menu for this venue
-  if (!MENU_ITEMS.length) MENU_ITEMS=await dbQuery('menu_items','venueId','==',VENUE.id);
-  const cats=[...new Set(MENU_ITEMS.map(i=>i.category).filter(Boolean))];
-  document.getElementById('mo-cats-tabs').innerHTML=
-    ['Все',...cats].map((c,i)=>`<button class="cat-tab${i===0?' active':''}" onclick="moFilterItems(this,'${c}')">${c}</button>`).join('');
-  moFilterItems(null,'Все');
   _openSheet('manual-order-overlay');
-}
-
-function moFilterItems(el,cat) {
-  if(el){document.querySelectorAll('#mo-cats-tabs .cat-tab').forEach(b=>b.classList.remove('active'));el.classList.add('active');}
-  const items=cat==='Все'?MENU_ITEMS:MENU_ITEMS.filter(i=>i.category===cat);
-  document.getElementById('mo-items-list').innerHTML=items.filter(i=>i.available!==false).map(item=>`
-    <div class="flex items-center gap-2" style="padding:6px 0;border-bottom:1px solid var(--border)">
-      <div style="flex:1"><div style="font-weight:600;font-size:13px">${item.emoji||'🍽️'} ${item.name}</div><div style="font-size:12px;color:var(--primary)">${item.variants?.length?item.variants.map(v=>`${v.name}: ${fmtPrice(v.price)}`).join(' / '):fmtPrice(item.price)}</div></div>
-      <button class="btn btn-primary btn-xs" onclick="moAddItem('${item.id}')">+</button>
-    </div>`).join('');
-}
-
-function moAddItem(itemId) {
-  const item=MENU_ITEMS.find(i=>i.id===itemId);
-  if (!item) return;
-  const price=item.variants?.length ? item.variants[0].price : item.price;
-  if (_moCart[itemId]) { _moCart[itemId].qty++; }
-  else { _moCart[itemId]={...item, qty:1, unitPrice:price}; }
-  moRenderCart(); tgHaptic('light');
-}
-
-function moRemoveItem(itemId) {
-  if (!_moCart[itemId]) return;
-  _moCart[itemId].qty--;
-  if (_moCart[itemId].qty<=0) delete _moCart[itemId];
-  moRenderCart();
-}
-
-function moRenderCart() {
-  const items=Object.values(_moCart);
-  const total=items.reduce((s,i)=>s+i.unitPrice*i.qty,0);
-  document.getElementById('mo-total').textContent=fmtPrice(total);
-  document.getElementById('mo-selected-items').innerHTML=items.map(it=>`
-    <div class="manual-order-item">
-      <span class="manual-order-name">${it.emoji||'🍽️'} ${it.name} ×${it.qty}</span>
-      <span class="manual-order-price">${fmtPrice(it.unitPrice*it.qty)}</span>
-      <button class="btn btn-icon" style="width:28px;height:28px;font-size:14px;background:var(--danger-soft);color:var(--danger);border:none;border-radius:8px;cursor:pointer" onclick="moRemoveItem('${it.id}')">−</button>
-    </div>`).join('')||'<div class="text-dim text-sm" style="padding:4px 0">Ничего не добавлено</div>';
 }
 
 async function moPhoneInput(input) {
   const val=input.value.trim();
   if (val.length<7) { document.getElementById('mo-autocomplete').style.display='none'; return; }
-  // Search known clients
   const norm=normPhone(val);
   const links=await dbGetAll('user_links');
   const matches=links.filter(l=>normPhone(l.phone||'').includes(norm.replace('+',''))).slice(0,5);
   const dd=document.getElementById('mo-autocomplete');
   if (!matches.length) { dd.style.display='none'; return; }
   dd.style.display='';
-  dd.innerHTML=matches.map(l=>`<div class="autocomplete-item" onclick="moSelectClient('${(l.phone||'').replace(/'/g,'')}','${(l.firstName||'').replace(/'/g,'')}')"><span style="font-family:monospace">${l.phone}</span> <span style="color:var(--text-dim)">${l.firstName||''} ${l.lastName||''}</span></div>`).join('');
+  dd.innerHTML=matches.map(l=>`<div class="autocomplete-item" onclick="moSelectClient('${(l.phone||'').replace(/'/g,'')}','${(l.firstName||'').replace(/'/g,'')}','${(l.uid||'').replace(/'/g,'')}')"><span style="font-family:monospace">${l.phone}</span> <span style="color:var(--text-dim)">${l.firstName||''} ${l.lastName||''}</span></div>`).join('');
 }
 
-function moSelectClient(phone, name) {
+async function moSelectClient(phone, name, uid) {
   document.getElementById('mo-phone').value=phone;
   document.getElementById('mo-client-name').value=name||'';
   document.getElementById('mo-autocomplete').style.display='none';
+  if (uid) {
+    try {
+      const userData=await dbGet('users',uid);
+      const addr=userData?.savedAddress;
+      if (addr) {
+        document.getElementById('mo-street').value=addr.street||'';
+        document.getElementById('mo-house').value=addr.house||'';
+        document.getElementById('mo-apt').value=addr.apt||'';
+      }
+    } catch {}
+  }
 }
 
 async function submitManualOrder() {
   const phone=normPhone(document.getElementById('mo-phone').value.trim());
   const clientName=document.getElementById('mo-client-name').value.trim()||'Клиент (телефон)';
-  const address=document.getElementById('mo-address').value.trim();
+  const street=document.getElementById('mo-street').value.trim();
+  const house=document.getElementById('mo-house').value.trim();
+  const apt=document.getElementById('mo-apt').value.trim();
+  const amount=parseInt(document.getElementById('mo-amount').value)||0;
   const payment=document.getElementById('mo-payment').value;
+  const comment=document.getElementById('mo-comment').value.trim();
   if (!phone) { showToast('Введите телефон клиента','warning'); return; }
-  if (!address) { showToast('Введите адрес','warning'); return; }
-  const items=Object.values(_moCart);
-  if (!items.length) { showToast('Добавьте хотя бы одну позицию','warning'); return; }
-  const total=items.reduce((s,i)=>s+i.unitPrice*i.qty,0);
+  if (!street||!house) { showToast('Введите улицу и дом','warning'); return; }
+  if (!amount) { showToast('Введите сумму заказа','warning'); return; }
   const ordId=genOrderId();
   await dbSet('orders',ordId,{
     id:ordId, venueId:VENUE.id, venueName:VENUE.name,
     clientPhone:phone, clientName, clientUid:'manual_'+genId(),
-    address:{street:address}, payment, total,
-    items:items.map(i=>({id:i.id,name:i.name,emoji:i.emoji||'🍽️',qty:i.qty,price:i.unitPrice})),
+    address:{street,house,apt}, payment, total:amount,
+    items:[], comment,
     status:'accepted', isManual:true,
     createdAt:new Date().toISOString(),
     acceptedAt:new Date().toISOString(),

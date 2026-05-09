@@ -194,21 +194,19 @@
         <div id="op-mo-autocomplete" class="autocomplete-dropdown" style="display:none"></div>
       </div>
       <div class="field"><label>Имя клиента</label><input class="inp" id="op-mo-name" placeholder="Имя"></div>
-      <div class="field"><label>Адрес доставки *</label><input class="inp" id="op-mo-address" placeholder="ул. Абая 10, кв. 5"></div>
-      <div class="section-title">Позиции заказа</div>
-      <div class="cat-tabs" id="op-mo-cats" style="padding:0 0 8px;margin:0"></div>
-      <div id="op-mo-items" style="display:flex;flex-direction:column;gap:6px;max-height:180px;overflow-y:auto"></div>
-      <div id="op-mo-cart" style="display:flex;flex-direction:column;gap:4px;min-height:20px"></div>
-      <div class="flex justify-between" style="padding:6px 0;border-top:1px solid var(--border)">
-        <span style="font-weight:600">Итого:</span>
-        <span class="text-primary font-bold" id="op-mo-total">0</span>
+      <div class="inp-row">
+        <div class="field"><label>Улица *</label><input class="inp" id="op-mo-street" placeholder="ул. Абая"></div>
+        <div class="field" style="max-width:88px"><label>Дом *</label><input class="inp" id="op-mo-house" placeholder="10"></div>
+        <div class="field" style="max-width:76px"><label>Кв.</label><input class="inp" id="op-mo-apt" placeholder="5" type="number" min="1"></div>
       </div>
+      <div class="field"><label>Сумма заказа *</label><input class="inp" id="op-mo-amount" type="number" placeholder="0" min="0"></div>
       <div class="field"><label>Оплата</label>
         <select class="inp" id="op-mo-payment">
           <option value="cash">💵 Наличные</option>
           <option value="card">💳 Карта</option>
         </select>
       </div>
+      <div class="field"><label>Комментарий</label><textarea class="inp" id="op-mo-comment" rows="2" placeholder="Пожелания к заказу..."></textarea></div>
       <div class="btn-row">
         <button class="btn btn-ghost" onclick="closeOpManualOrder()">Отмена</button>
         <button class="btn btn-primary" onclick="submitOpManualOrder()">Оформить</button>
