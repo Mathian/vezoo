@@ -1183,6 +1183,13 @@ function loadSettings2() {
   document.getElementById('diab-row').classList.toggle('checked', !!u.isDiabetic);
   document.getElementById('allergy-custom').value = (u.allergies || []).join(', ');
 
+  // Hide/show allergy section based on global setting
+  getAllergyEnabled().then(enabled => {
+    _allergyEnabled = enabled;
+    const sec = document.getElementById('allergy-section');
+    if (sec) sec.style.display = enabled ? '' : 'none';
+  });
+
   // Favourites
   const favList   = document.getElementById('favorites-list');
   const favVenues = VENUES.filter(v => FAVORITES.includes(v.id));

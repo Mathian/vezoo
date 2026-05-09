@@ -636,28 +636,65 @@ async function loadUsersByRole(role, el) {
   if (el) { document.querySelectorAll('#s-sa-settings .cat-tab').forEach(b=>b.classList.remove('active')); el.classList.add('active'); }
   const list = document.getElementById('sa-users-list');
   list.innerHTML = '<div class="loader"><div class="spinner"></div></div>';
-  const users = await dbQuery('users','role','==',role);
+
+  if (role === 'courier') {
+    const couriers = await dbGetAll('couriers');
+    if (!couriers.length) { list.innerHTML = '<div class="empty" style="padding:30px 24px"><div class="empty-icon">🚴</div><div class="empty-text">Нет курьеров</div></div>'; return; }
+    list.innerHTML = couriers.sort((a,b)=>(b.createdAt||'').localeCompare(a.createdAt||'')).map(c => `
+      <div class="list-item" onclick="openSaUser('${c.uid||c.id}')">
+        <div class="li-icon yellow" style="font-size:22px">🚴</div>
+        <div class="li-body">
+          <div class="li-title">${c.name||'—'}${c.status==='blocked'?' <span style="color:var(--danger);font-size:11px">BLOCKED</span>':''}</div>
+          <div class="li-sub">${c.phone||'—'} · <span style="color:${c.status==='active'?'var(--success)':c.status==='blocked'?'var(--danger)':'var(--warning)'}">${c.status==='active'?'Активен':c.status==='blocked'?'Заблокирован':'На проверке'}</span></div>
+        </div>
+        <div class="chevron">›</div>
+      </div>`).join('');
+    return;
+  }
+
+  // Load all users and filter by agreed* flags (catches multi-role accounts)
+  const allUsers = await dbGetAll('users', null, 'asc', 500);
+  const filterFn = {
+    client:   u => !!(u.agreedClient || u.role === 'client'),
+    admin:    u => !!(u.agreedAdmin  || u.role === 'admin'),
+    operator: u => !!(u.agreedOperator || (u.role === 'operator')),
+  }[role] || (() => false);
+  const users = allUsers.filter(filterFn);
+
   if (!users.length) { list.innerHTML = '<div class="empty" style="padding:30px 24px"><div class="empty-icon">👤</div><div class="empty-text">Нет пользователей</div></div>'; return; }
-  list.innerHTML = users.sort((a,b)=>(b.createdAt||'').localeCompare(a.createdAt||'')).map(u => `
-    <div class="list-item" onclick="openSaUser('${u.uid||u.id}')">
-      <div class="avatar" style="width:36px;height:36px;font-size:14px">${(u.name||'?')[0].toUpperCase()}</div>
-      <div class="li-body">
-        <div class="li-title">${u.name||'—'}${u.blocked?' <span style="color:var(--danger);font-size:11px">BLOCKED</span>':''}</div>
-        <div class="li-sub">${u.phone||'—'} · ${u.cityName||'—'}</div>
-      </div>
-      <div class="chevron">›</div>
-    </div>`).join('');
+  list.innerHTML = users.sort((a,b)=>(b.createdAt||'').localeCompare(a.createdAt||'')).map(u => {
+    const roleIcons = [];
+    if (u.agreedClient   || u.role==='client')     roleIcons.push('👤');
+    if (u.agreedAdmin    || u.role==='admin')       roleIcons.push('🏪');
+    if (u.agreedOperator || u.role==='operator')    roleIcons.push('🎧');
+    if (u.agreedSA       || u.role==='superadmin')  roleIcons.push('👑');
+    return `
+      <div class="list-item" onclick="openSaUser('${u.uid||u.id}')">
+        <div class="avatar" style="width:36px;height:36px;font-size:14px">${(u.name||'?')[0].toUpperCase()}</div>
+        <div class="li-body">
+          <div class="li-title">${u.name||'—'}${u.blocked?' <span style="color:var(--danger);font-size:11px">BLOCKED</span>':''}</div>
+          <div class="li-sub">${u.phone||'—'}${roleIcons.length?' · '+roleIcons.join(' '):''}</div>
+        </div>
+        <div class="chevron">›</div>
+      </div>`;
+  }).join('');
 }
 
 async function openSaUser(uid) {
-  const user = await dbGet('users', uid);
+  const [user, courierData] = await Promise.all([dbGet('users', uid), dbGet('couriers', uid)]);
   if (!user) return;
+  const roleIcons = [];
+  if (user.agreedClient   || user.role==='client')     roleIcons.push('👤 Клиент');
+  if (user.agreedAdmin    || user.role==='admin')       roleIcons.push('🏪 Администратор');
+  if (user.agreedOperator || user.role==='operator')    roleIcons.push('🎧 Оператор');
+  if (courierData) roleIcons.push(`🚴 Курьер (${courierData.status==='active'?'активен':courierData.status==='blocked'?'заблокирован':'на проверке'})`);
+  if (user.agreedSA || user.role==='superadmin')        roleIcons.push('👑 Суперадмин');
   const content = document.getElementById('sa-user-detail');
   content.innerHTML = `
     <div class="sheet-title">${user.name||'—'}</div>
     <div class="card card-body" style="margin-bottom:12px;gap:6px;display:flex;flex-direction:column">
       <div class="flex justify-between"><span class="text-dim">Телефон</span><span style="font-family:monospace">${user.phone||'—'}</span></div>
-      <div class="flex justify-between"><span class="text-dim">Роль</span><span>${user.role||'—'}</span></div>
+      <div class="flex justify-between"><span class="text-dim">Роли</span><span style="text-align:right;font-size:12px;max-width:60%">${roleIcons.join('<br>')||user.role||'—'}</span></div>
       <div class="flex justify-between"><span class="text-dim">Город</span><span>${user.cityName||'—'}</span></div>
       <div class="flex justify-between"><span class="text-dim">Статус</span><span>${user.blocked?'<span style="color:var(--danger)">Заблокирован</span>':'Активен'}</span></div>
       <div class="flex justify-between"><span class="text-dim">Регистрация</span><span>${fmtDate(user.createdAt)}</span></div>
@@ -671,8 +708,16 @@ async function openSaUser(uid) {
 async function saToggleUserBlock(uid, currentlyBlocked) {
   if (!confirm(currentlyBlocked?'Разблокировать пользователя?':'Заблокировать пользователя?')) return;
   await dbSet('users', uid, { blocked: !currentlyBlocked });
+  // If this user is also a courier, sync courier status
+  const courierData = await dbGet('couriers', uid);
+  if (courierData) {
+    await dbSet('couriers', uid, { status: currentlyBlocked ? 'active' : 'blocked' });
+  }
   closeUserSheet(); tgHaptic('light');
   showToast(currentlyBlocked?'Разблокирован':'Заблокирован', 'info');
+  // Refresh current user tab
+  const activeTab = document.querySelector('#s-sa-settings .cat-tab.active');
+  if (activeTab) activeTab.click();
 }
 
 function closeUserSheet(e) {
