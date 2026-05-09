@@ -228,6 +228,7 @@ function statusLabel(st) {
   return {
     pending:'Ожидает', accepted:'Принят', cooking:'Готовится',
     searching_courier:'Ищем курьера', courier_assigned:'Курьер едет',
+    ready_for_courier:'Ждёт курьера',
     delivering:'Доставляется', delivered:'Доставлен', cancelled:'Отменён',
     ready:'Готово', issued:'Выдан'
   }[st] || st;
@@ -236,6 +237,7 @@ function statusBadgeClass(st) {
   const map = {
     pending:'badge-pending', accepted:'badge-accepted', cooking:'badge-accepted',
     searching_courier:'badge-searching', courier_assigned:'badge-searching',
+    ready_for_courier:'badge-delivering',
     delivering:'badge-delivering', delivered:'badge-delivered', cancelled:'badge-cancelled',
     ready:'badge-accepted', issued:'badge-delivered'
   };

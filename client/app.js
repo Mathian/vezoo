@@ -614,7 +614,6 @@ function toggleIntercom() {
   _intercomChecked = !_intercomChecked;
   document.getElementById('intercom-box').textContent = _intercomChecked ? '✓' : '🔔';
   document.getElementById('intercom-row').classList.toggle('checked', _intercomChecked);
-  document.getElementById('intercom-code-wrap').classList.toggle('hidden', !_intercomChecked);
 }
 
 function selectDeliveryType(el) {
@@ -649,7 +648,6 @@ async function submitOrder() {
   const house    = document.getElementById('addr-house').value.trim();
   const apt      = document.getElementById('addr-apt').value.trim();
   const comment  = document.getElementById('order-comment').value.trim();
-  const code     = _intercomChecked ? document.getElementById('intercom-code').value.trim() : '';
   if (!isPickup && (!street || !house)) { showToast('Укажите улицу и дом', 'warning'); return; }
 
   const blEntry = await dbGet('venue_blacklist', venueId + '_' + STATE.uid);
@@ -667,7 +665,7 @@ async function submitOrder() {
     cityId: _selectedCityId || '', currency: _selectedCurrency,
     items: venueCart.map(c => ({ id: c.id, name: c.name, price: c.price, qty: c.qty, emoji: c.emoji, variantName: c.variantName || null })),
     total: venueCartTotal(venueId), deliveryPrice,
-    address: isPickup ? null : { street, house, apt, hasIntercom: _intercomChecked, intercomCode: code },
+    address: isPickup ? null : { street, house, apt, hasIntercom: _intercomChecked },
     payment: _paymentMethod, deliveryType: _deliveryType, comment,
     status: 'pending', createdAt: new Date().toISOString(),
     clientNotification: { type: '', seen: true }
@@ -845,7 +843,7 @@ function renderAllOrders() {
 
 function renderHistoryCard(o) {
   return `
-    <div class="order-card" style="border-left:3px solid ${(o.status === 'delivered' || o.status === 'issued') ? 'var(--success)' : 'var(--danger)'}">
+    <div class="order-card" style="cursor:pointer;border-left:3px solid ${(o.status === 'delivered' || o.status === 'issued') ? 'var(--success)' : 'var(--danger)'}" onclick="openHistoryOrder('${o.id}')">
       <div class="order-card-hdr">
         <div><div class="font-bold" style="font-size:13px">📍 ${o.venueName || 'Заведение'}</div><div class="order-id">${fmtDate(o.createdAt)} · #${(o.id || '').slice(-6)}</div></div>
         <div style="text-align:right">
@@ -856,8 +854,97 @@ function renderHistoryCard(o) {
       </div>
       <div class="order-card-body">
         <div class="text-sm text-dim">${(o.items || []).map(i => `${i.emoji || '🍽️'} ${i.name} ×${i.qty}`).join(', ')}</div>
+        <div class="text-xs text-dim" style="margin-top:4px">Нажмите для деталей →</div>
       </div>
     </div>`;
+}
+
+function openHistoryOrder(orderId) {
+  const o = _allClientOrders.find(x => x.id === orderId);
+  if (!o) return;
+  const cur = o.currency || _selectedCurrency;
+  const addr = o.address;
+  const content = document.getElementById('history-detail-content');
+  content.innerHTML = `
+    <div class="sheet-title">Заказ #${(o.id||'').slice(-6)}</div>
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px">
+      <span class="text-dim text-sm">${fmtDate(o.createdAt)}</span>
+      <span class="${statusBadgeClass(o.status)}">${statusLabel(o.status)}</span>
+    </div>
+    <div class="card card-body" style="margin-bottom:12px;gap:6px;display:flex;flex-direction:column">
+      <div class="flex justify-between"><span class="text-dim">Заведение</span><span class="font-bold">${o.venueName||'—'}</span></div>
+      ${addr?`<div class="flex justify-between"><span class="text-dim">Адрес</span><span style="text-align:right;max-width:60%">${addr.street} ${addr.house}${addr.apt?', кв.'+addr.apt:''}</span></div>`:'<div class="flex justify-between"><span class="text-dim">Получение</span><span>🏪 Самовывоз</span></div>'}
+      <div class="flex justify-between"><span class="text-dim">Оплата</span><span>${o.payment==='cash'?'💵 Наличные':'💳 Карта'}</span></div>
+    </div>
+    <div class="section-title" style="margin-bottom:6px">Состав</div>
+    <div class="card card-body" style="margin-bottom:12px;gap:4px;display:flex;flex-direction:column">
+      ${(o.items||[]).map(it=>`<div class="flex justify-between text-sm"><span>${it.emoji||'🍽️'} ${it.name}${it.variantName?' ('+it.variantName+')':''} ×${it.qty}</span><span>${fmtPrice(it.price*it.qty, cur)}</span></div>`).join('')}
+      <div class="divider" style="margin:4px 0"></div>
+      ${o.deliveryPrice?`<div class="flex justify-between text-sm"><span class="text-dim">Доставка</span><span>${fmtPrice(o.deliveryPrice, cur)}</span></div>`:''}
+      <div class="flex justify-between"><span class="font-bold">Итого</span><span class="font-bold text-primary">${fmtPrice((o.total||0)+(o.deliveryPrice||0), cur)}</span></div>
+    </div>
+    ${o.courierRating?`<div class="text-sm text-dim" style="margin-bottom:12px">Ваша оценка курьера: ${'★'.repeat(o.courierRating)}</div>`:''}
+    ${['delivered','issued'].includes(o.status)?`<button class="btn btn-primary" onclick="reorderFromHistory('${o.id}')">🔄 Заказать повторно</button>`:''}
+  `;
+  document.getElementById('history-detail-overlay').classList.add('open');
+  tg?.BackButton?.show();
+}
+
+function closeHistoryDetail(e) {
+  if (e && e.target !== document.getElementById('history-detail-overlay')) return;
+  document.getElementById('history-detail-overlay').classList.remove('open');
+  if (!document.querySelector('.overlay.open, .rating-overlay.open')) tg?.BackButton?.hide();
+}
+
+async function reorderFromHistory(orderId) {
+  const o = _allClientOrders.find(x => x.id === orderId);
+  if (!o) return;
+  const venue = VENUES.find(v => v.id === o.venueId);
+  if (!venue) { showToast('Заведение недоступно', 'warning'); return; }
+
+  const btn = document.querySelector('#history-detail-content .btn-primary');
+  if (btn) { btn.disabled = true; btn.textContent = 'Загружаем меню...'; }
+
+  const menuItems = (await dbQuery('menu_items', 'venueId', '==', o.venueId)).filter(i => i.available !== false);
+
+  CART[o.venueId] = [];
+  let addedCount = 0;
+  const unavailable = [];
+
+  for (const histItem of (o.items || [])) {
+    let menuItem = menuItems.find(m => m.id === histItem.id) || menuItems.find(m => m.name === histItem.name);
+    if (!menuItem) { unavailable.push(histItem.name); continue; }
+    let price = menuItem.price;
+    let cartKey = menuItem.id;
+    let name = menuItem.name;
+    if (histItem.variantName && menuItem.variants?.length) {
+      const variant = menuItem.variants.find(v => v.name === histItem.variantName);
+      if (variant) { price = variant.price; cartKey = `${menuItem.id}::${variant.name}`; name = `${menuItem.name} (${variant.name})`; }
+    }
+    CART[o.venueId].push({ cartKey, id: menuItem.id, variantName: histItem.variantName || null, name, price, qty: histItem.qty, emoji: menuItem.emoji || histItem.emoji || '🍽️' });
+    addedCount++;
+  }
+
+  if (!CART[o.venueId].length) {
+    delete CART[o.venueId];
+    if (btn) { btn.disabled = false; btn.textContent = '🔄 Заказать повторно'; }
+    showToast('Ни один товар недоступен в текущем меню', 'warning');
+    return;
+  }
+
+  _saveCart(); updateCartNavBadge();
+  CURRENT_VENUE = venue;
+  VENUE_MENU = menuItems;
+
+  document.getElementById('history-detail-overlay').classList.remove('open');
+  tg?.BackButton?.hide();
+
+  if (unavailable.length) showToast(`Добавлено ${addedCount} поз. Недоступно: ${unavailable.join(', ')}`, 'info');
+  else showToast(`${addedCount} позиций добавлено в корзину`, 'success');
+  tgHaptic('success');
+
+  navToCart();
+  setNav(document.getElementById('nav-cart'));
 }
 
 function renderOrderCard(o) {
@@ -897,8 +984,23 @@ function renderOrderCard(o) {
         <div class="flex justify-between"><span class="text-dim">Оплата</span><span>${o.payment === 'cash' ? '💵 Наличные' : '💳 Карта'}</span></div>
         ${addr ? `<div class="flex justify-between"><span class="text-dim">Адрес</span><span style="text-align:right;max-width:58%">${addr.street} ${addr.house}${addr.apt ? ', кв.' + addr.apt : ''}</span></div>` : ''}
         ${o.courierName ? `<div class="flex justify-between"><span class="text-dim">Курьер</span><span>${o.courierName}</span></div>` : ''}
+        ${o.status === 'pending' ? `<div style="margin-top:10px;text-align:right"><button class="btn btn-danger btn-sm" onclick="clientCancelOrder('${o.id}')">❌ Отменить заказ</button></div>` : ''}
       </div>
     </div>`;
+}
+
+async function clientCancelOrder(orderId) {
+  const doCancel = async () => {
+    await dbSet('orders', orderId, {
+      status: 'cancelled',
+      cancelledAt: new Date().toISOString(),
+      clientNotification: { type: 'cancelled', seen: true, message: 'Вы отменили заказ.' }
+    });
+    tgHaptic('light');
+    showToast('Заказ отменён', 'info');
+  };
+  if (tg?.showConfirm) tg.showConfirm('Отменить заказ?', ok => { if (ok) doCancel(); });
+  else if (confirm('Отменить заказ?')) await doCancel();
 }
 
 function startAllCountdowns() {

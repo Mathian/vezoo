@@ -18,6 +18,7 @@ let _acceptOrderIds   = [];
 let _acceptFromPool   = 'available'; // 'available' | 'venue'
 let _myHistory        = [];
 let _myHistPage       = 10;
+let _shownImportant   = new Set();
 
 // ══════════════════════════════════════════════════════════
 //  BOOT
@@ -258,7 +259,19 @@ function watchVenueOrders() {
   const myVenue = COURIER_DATA?.primaryVenueId;
   if (!myVenue) return;
   _venueUnsub = onQuerySnap('orders', 'venueId', '==', myVenue, orders => {
-    _venueOrders = orders.filter(o => o.status === 'searching_courier' && !o.courierUid);
+    _venueOrders = orders.filter(o =>
+      o.status === 'ready_for_courier' ||
+      (o.status === 'searching_courier' && !o.courierUid)
+    );
+    // Haptic + sound for newly ready orders
+    _venueOrders.filter(o => o.status === 'ready_for_courier').forEach(o => {
+      if (!_shownImportant.has(o.id)) {
+        _shownImportant.add(o.id);
+        tgHaptic('heavy');
+        playNewOrder();
+        showToast(`⚡ Заказ готов — ${o.venueName || 'заведение'}`, 'success');
+      }
+    });
     const cnt = _venueOrders.length;
     document.getElementById('venue-badge').textContent = cnt;
     document.getElementById('venue-badge').classList.toggle('hidden', cnt === 0);
@@ -277,16 +290,49 @@ function renderVenueOrders() {
     list.innerHTML = '<div class="empty"><div class="empty-icon">🚴</div><div class="empty-text">Включите смену, чтобы<br>видеть заказы</div></div>';
     return;
   }
-  if (!_venueOrders.length) {
-    list.innerHTML = `<div class="empty"><div class="empty-icon">✅</div><div class="empty-text">Нет ожидающих заказов</div></div>`;
+
+  const important = _venueOrders.filter(o => o.status === 'ready_for_courier');
+  const pool      = _venueOrders.filter(o => o.status === 'searching_courier' && !o.courierUid);
+
+  if (!important.length && !pool.length) {
+    list.innerHTML = '<div class="empty"><div class="empty-icon">✅</div><div class="empty-text">Нет ожидающих заказов</div></div>';
     return;
   }
-  const byVenue = {};
-  for (const o of _venueOrders) {
-    if (!byVenue[o.venueId]) byVenue[o.venueId] = [];
-    byVenue[o.venueId].push(o);
+
+  let html = '';
+  if (important.length) {
+    html += `<div class="section-title" style="padding:0 4px;margin-bottom:6px">⚡ Готовы к выдаче (${important.length})</div>`;
+    html += important.map(o => _importantOrderCard(o)).join('');
   }
-  list.innerHTML = Object.values(byVenue).map(g => _poolBundleCard(g, myVenue)).join('');
+  if (pool.length) {
+    if (important.length) html += `<div class="section-title" style="padding:0 4px;margin:12px 0 6px">📭 Из общего пула (${pool.length})</div>`;
+    const byVenue = {};
+    for (const o of pool) { if (!byVenue[o.venueId]) byVenue[o.venueId] = []; byVenue[o.venueId].push(o); }
+    html += Object.values(byVenue).map(g => _poolBundleCard(g, myVenue)).join('');
+  }
+  list.innerHTML = html;
+}
+
+function _importantOrderCard(order) {
+  const addr = order.address;
+  const addrStr = addr ? `${addr.street} ${addr.house}${addr.apt ? ', кв.' + addr.apt : ''}` : 'Самовывоз';
+  return `
+    <div class="delivery-card" style="border-left:3px solid var(--success)">
+      <div class="delivery-card-hdr">
+        <div>
+          <div class="font-bold" style="font-size:14px">⚡ ${order.venueName || 'Заведение'}</div>
+          <div class="text-xs text-dim">#${(order.id || '').slice(-6)} · ${fmtDate(order.createdAt)}</div>
+        </div>
+        <span class="${statusBadgeClass(order.status)}">${statusLabel(order.status)}</span>
+      </div>
+      <div class="delivery-card-body" style="font-size:13px">
+        <div>📍 ${addrStr}</div>
+        <div>💰 ${fmtPrice((order.total || 0) + (order.deliveryPrice || 0))} · ${order.payment === 'cash' ? 'Наличные' : 'Карта'}</div>
+      </div>
+      <div class="delivery-card-foot" style="font-size:12px;color:var(--text-dim);padding-top:4px">
+        ℹ️ Заказ готов — оператор передаст его лично при вашем приезде
+      </div>
+    </div>`;
 }
 
 function _poolBundleCard(orders, myVenueId) {
@@ -458,7 +504,7 @@ function watchMyOrders() {
       .filter(o => o.status === 'courier_assigned' || o.status === 'delivering')
       .sort((a, b) => (a.createdAt || '').localeCompare(b.createdAt || ''));
     _myHistory = orders
-      .filter(o => o.status === 'delivered')
+      .filter(o => o.status === 'delivered' && o.courierUid === STATE.uid)
       .sort((a, b) => (b.deliveredAt || b.createdAt || '').localeCompare(a.deliveredAt || a.createdAt || ''));
     const cnt = _myOrders.length;
     document.getElementById('my-badge').textContent = cnt;
@@ -544,9 +590,17 @@ async function openMyOrder(orderId) {
   if (!order) return;
   const addr = order.address;
   let venueAddr = '—';
-  try { venueAddr = (await dbGet('venues', order.venueId))?.address || '—'; } catch {}
+  let venuePhone = null;
+  try {
+    const venueData = await dbGet('venues', order.venueId);
+    venueAddr = venueData?.address || '—';
+    venuePhone = venueData?.phone || null;
+  } catch {}
   const callBtn = order.clientPhone
     ? `<button class="btn-call" onclick="callPhone('${normPhone(order.clientPhone)}')">📞 Позвонить клиенту</button>`
+    : '';
+  const callVenueBtn = venuePhone
+    ? `<button class="btn-call" onclick="callPhone('${normPhone(venuePhone)}')">📞 Позвонить оператору кафе</button>`
     : '';
   const content = document.getElementById('my-order-detail');
   content.innerHTML = `
@@ -569,6 +623,7 @@ async function openMyOrder(orderId) {
         </div>`).join('')}
     </div>
     ${callBtn}
+    ${callVenueBtn}
     ${order.status === 'courier_assigned'
       ? `<div class="alert-box info" style="text-align:center;font-size:14px;margin-bottom:12px">
            🏃 Едете в кафе за заказом.<br>

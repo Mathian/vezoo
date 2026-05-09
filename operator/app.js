@@ -224,6 +224,7 @@ async function openOrderDetail(orderId) {
   const addr = order.address;
   const addrStr = typeof addr==='string' ? addr : (addr ? (`${addr.street||''} ${addr.house||''}${addr.apt?', кв.'+addr.apt:''}${addr.hasIntercom?` · 🔔 ${addr.intercomCode||'есть'}`:''}`).trim() : null);
   const callBtn = order.clientPhone ? `<button class="btn-call" onclick="callPhone('${normPhone(order.clientPhone)}')">📞 Позвонить клиенту</button>` : '';
+  const callCourierBtn = order.courierPhone ? `<button class="btn-call" onclick="callPhone('${normPhone(order.courierPhone)}')">📞 Позвонить курьеру</button>` : '';
   const cancelBtn = `<button class="btn btn-danger btn-sm" onclick="opCancelOrder('${orderId}')">❌ Отменить</button>`;
   const isPickup = order.deliveryType === 'pickup';
   let actions = '';
@@ -249,6 +250,7 @@ async function openOrderDetail(orderId) {
       <div class="flex justify-between"><span class="text-dim">Клиент</span><span class="font-bold">${order.clientName||'—'}</span></div>
       <div class="flex justify-between"><span class="text-dim">Телефон</span><span style="font-family:monospace">${order.clientPhone||'—'}</span></div>
       ${callBtn?`<div>${callBtn}</div>`:''}
+      ${callCourierBtn?`<div>${callCourierBtn}</div>`:''}
       <div class="flex justify-between"><span class="text-dim">Оплата</span><span>${order.payment==='cash'?'💵 Наличные':'💳 Карта'}</span></div>
       ${addrStr?`<div class="flex justify-between"><span class="text-dim">Адрес</span><span style="text-align:right;max-width:60%">${addrStr}</span></div>`:'<div class="flex justify-between"><span class="text-dim">Получение</span><span>🏪 Самовывоз</span></div>'}
       ${order.comment?`<div class="flex justify-between"><span class="text-dim">Комментарий</span><span style="text-align:right;max-width:60%;font-size:12px">${order.comment}</span></div>`:''}

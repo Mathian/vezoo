@@ -484,7 +484,7 @@ function watchNewOrders() {
     const badge=document.getElementById('orders-badge');
     badge.textContent=pending; badge.classList.toggle('hidden',pending===0);
     if (_ordersTab==='active' && document.getElementById('s-orders').classList.contains('active'))
-      renderOrdersList(orders.filter(o=>['pending','accepted','cooking','searching_courier','courier_assigned','delivering','ready'].includes(o.status)));
+      renderOrdersList(orders.filter(o=>['pending','accepted','cooking','searching_courier','courier_assigned','ready_for_courier','delivering','ready'].includes(o.status)));
   });
 }
 
@@ -495,7 +495,7 @@ async function loadOrders(tab,el) {
   list.innerHTML='<div class="loader"><div class="spinner"></div></div>';
   let orders=await dbQuery('orders','venueId','==',VENUE.id);
   if (tab==='active')
-    orders=orders.filter(o=>['pending','accepted','cooking','searching_courier','courier_assigned','delivering','ready'].includes(o.status));
+    orders=orders.filter(o=>['pending','accepted','cooking','searching_courier','courier_assigned','ready_for_courier','delivering','ready'].includes(o.status));
   else if (tab==='pending')
     orders=orders.filter(o=>o.status==='pending');
   else {
@@ -528,6 +528,7 @@ async function openOrderDetail(orderId) {
   const addr=order.address;
   const addrStr=typeof addr==='string'?addr:(addr?((`${addr.street||''} ${addr.house||''}${addr.apt?', кв.'+addr.apt:''}`).trim()||'—'):'—');
   const callBtn=order.clientPhone?`<button class="btn-call" onclick="callPhone('${normPhone(order.clientPhone)}')">📞 Позвонить клиенту</button>`:'';
+  const callCourierBtn=order.courierPhone?`<button class="btn-call" onclick="callPhone('${normPhone(order.courierPhone)}')">📞 Позвонить курьеру</button>`:'';
   const content=document.getElementById('order-detail-content');
   content.innerHTML=`
     <div class="flex justify-between items-center" style="margin-bottom:12px">
@@ -538,6 +539,7 @@ async function openOrderDetail(orderId) {
       <div class="flex justify-between"><span class="text-dim">Клиент</span><span class="font-bold">${order.clientName||'—'}</span></div>
       <div class="flex justify-between"><span class="text-dim">Телефон</span><span style="font-family:monospace">${order.clientPhone||'—'}</span></div>
       ${callBtn?`<div>${callBtn}</div>`:''}
+      ${callCourierBtn?`<div>${callCourierBtn}</div>`:''}
       <div class="flex justify-between"><span class="text-dim">Оплата</span><span>${order.payment==='cash'?'💵 Наличные':'💳 Карта'}</span></div>
       <div class="flex justify-between"><span class="text-dim">Адрес</span><span style="text-align:right;max-width:60%">${addrStr}</span></div>
       ${order.comment?`<div class="flex justify-between"><span class="text-dim">Комментарий</span><span style="text-align:right;max-width:60%">${order.comment}</span></div>`:''}
@@ -565,8 +567,9 @@ function renderAdminOrderActions(order) {
     return blBtn;
   }
   if (order.status==='pending') return `<div class="btn-row">${cancelBtn}<button class="btn btn-success btn-sm" onclick="adminAcceptOrder('${order.id}')">✅ Принять</button></div>${blBtn}`;
-  if (order.status==='accepted'||order.status==='cooking') return `<div style="display:flex;flex-direction:column;gap:8px"><div class="btn-row"><button class="btn btn-secondary btn-sm" onclick="adminSearchCourier('${order.id}')">🔍 Искать курьера</button><button class="btn btn-primary btn-sm" onclick="openHandoffFlow()">📦 Передать</button></div>${cancelBtn}</div>${blBtn}`;
-  if (order.status==='searching_courier') return `<div style="display:flex;flex-direction:column;gap:8px"><div class="alert-box info" style="font-size:13px">⏳ Ждём курьера…</div><button class="btn btn-primary btn-sm" onclick="openHandoffFlow()">📦 Передать курьеру</button>${cancelBtn}</div>${blBtn}`;
+  if (order.status==='accepted'||order.status==='cooking') return `<div style="display:flex;flex-direction:column;gap:8px"><button class="btn btn-success btn-sm" onclick="adminMarkReadyForCourier('${order.id}')">✅ Заказ готов</button><div class="btn-row"><button class="btn btn-secondary btn-sm" onclick="adminSearchCourier('${order.id}')">🔍 В общий пул</button><button class="btn btn-primary btn-sm" onclick="openHandoffFlow()">📦 Передать</button></div>${cancelBtn}</div>${blBtn}`;
+  if (order.status==='ready_for_courier') return `<div style="display:flex;flex-direction:column;gap:8px"><div class="alert-box success" style="font-size:13px">⚡ Заказ готов — ждём курьера кафе</div><button class="btn btn-primary btn-sm" onclick="openHandoffFlow()">📦 Передать курьеру</button><button class="btn btn-secondary btn-sm" onclick="adminSearchCourier('${order.id}')">🔍 Выставить в общий пул</button>${cancelBtn}</div>${blBtn}`;
+  if (order.status==='searching_courier') return `<div style="display:flex;flex-direction:column;gap:8px"><div class="alert-box info" style="font-size:13px">⏳ Ждём курьера из пула…</div><button class="btn btn-primary btn-sm" onclick="openHandoffFlow()">📦 Передать курьеру</button>${cancelBtn}</div>${blBtn}`;
   if (order.status==='courier_assigned') return `<div style="display:flex;flex-direction:column;gap:8px"><div class="alert-box info" style="font-size:13px">🏃 <strong>${order.courierName||'Курьер'}</strong> едет в кафе</div><button class="btn btn-success btn-sm" onclick="openHandoffFlow()">📦 Передать заказ курьеру</button>${cancelBtn}</div>${blBtn}`;
   if (order.status==='delivering') return `<div style="display:flex;flex-direction:column;gap:8px"><div class="alert-box success">🚴 Курьер: <strong>${order.courierName||''}</strong></div>${cancelBtn}</div>${blBtn}`;
   return blBtn;
@@ -596,6 +599,12 @@ async function adminHandOverCourier(orderId) {
   const courierName=order?.courierName||'Курьер';
   await dbSet('orders',orderId,{status:'delivering',handedOverAt:new Date().toISOString(),clientNotification:{type:'delivering',seen:false,message:`Курьер ${courierName} везёт ваш заказ!`}});
   closeOrderSheet(); tgHaptic('success'); showToast(`Заказ передан курьеру ${courierName}`,'success');
+  await loadOrders(_ordersTab);
+}
+
+async function adminMarkReadyForCourier(orderId) {
+  await dbSet('orders', orderId, { status:'ready_for_courier', readyForCourierAt:new Date().toISOString() });
+  closeOrderSheet(); tgHaptic('success'); showToast('Заказ помечен готовым — курьеры кафе видят его','success');
   await loadOrders(_ordersTab);
 }
 

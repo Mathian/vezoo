@@ -158,7 +158,6 @@
         <div class="check-box" id="intercom-box">🔔</div>
         <span class="check-label">Есть домофон</span>
       </label>
-      <div class="field hidden" id="intercom-code-wrap"><label>Код домофона</label><input class="inp" id="intercom-code" placeholder="1234" type="text"></div>
     </div>
     <div class="alert-box info hidden" id="pickup-info">Вы заберёте заказ самостоятельно из заведения.</div>
     <div class="section">
@@ -320,6 +319,13 @@
   <div class="fs-notif-title">Заказ доставлен!</div>
   <div class="fs-notif-text">Приятного аппетита! Спасибо, что выбрали Vezoo.</div>
   <button class="btn btn-primary" onclick="onDeliveredClose()">Приятного аппетита! 😋</button>
+</div>
+
+<!-- HISTORY ORDER DETAIL -->
+<div class="overlay" id="history-detail-overlay" onclick="closeHistoryDetail(event)">
+  <div class="sheet">
+    <div id="history-detail-content"></div>
+  </div>
 </div>
 
 <script src="../shared/firebase.js"></script>
