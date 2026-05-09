@@ -249,6 +249,7 @@ async function openOrderDetail(orderId) {
     <div class="card card-body" style="margin-bottom:12px;gap:6px;display:flex;flex-direction:column">
       <div class="flex justify-between"><span class="text-dim">Клиент</span><span class="font-bold">${order.clientName||'—'}</span></div>
       <div class="flex justify-between"><span class="text-dim">Телефон</span><span style="font-family:monospace">${order.clientPhone||'—'}</span></div>
+      ${order.status==='cancelled'&&order.cancelledBy?`<div class="flex justify-between"><span class="text-dim">Отменил</span><span style="color:var(--danger)">${{client:'Клиент',operator:'Оператор',admin:'Администратор'}[order.cancelledBy]||'—'}</span></div>`:''}
       ${callBtn?`<div>${callBtn}</div>`:''}
       ${callCourierBtn?`<div>${callCourierBtn}</div>`:''}
       <div class="flex justify-between"><span class="text-dim">Оплата</span><span>${order.payment==='cash'?'💵 Наличные':'💳 Карта'}</span></div>
@@ -274,7 +275,7 @@ async function opAcceptOrder(orderId) {
 }
 
 async function opCancelOrder(orderId) {
-  const doCancel=async()=>{ await dbSet('orders',orderId,{status:'cancelled',cancelledAt:new Date().toISOString(),clientNotification:{type:'cancelled',seen:false,message:'Ваш заказ отменён оператором.'}}); closeOrderSheet(); tgHaptic('light'); showToast('Заказ отменён','info'); };
+  const doCancel=async()=>{ await dbSet('orders',orderId,{status:'cancelled',cancelledAt:new Date().toISOString(),cancelledBy:'operator',clientNotification:{type:'cancelled',seen:false,message:'Ваш заказ отменён оператором.'}}); closeOrderSheet(); tgHaptic('light'); showToast('Заказ отменён','info'); };
   if (tg?.showConfirm) tg.showConfirm('Отменить заказ?',ok=>{if(ok)doCancel();});
   else if (confirm('Отменить заказ?')) await doCancel();
 }
@@ -365,8 +366,8 @@ async function opFindHandoffCourier() {
   const foundEl=document.getElementById('op-handoff-found');
   foundEl.style.display='';
   foundEl.innerHTML=`<div class="handoff-courier-found"><div class="handoff-courier-avatar">🚴</div><div><div style="font-weight:700;font-size:15px">${courier.name||'Курьер'}</div><div style="font-size:13px;color:var(--text-dim)">${courier.phone||phone}</div><div style="font-size:12px;color:${courier.onShift?'var(--success)':'var(--text-muted)'}">${courier.onShift?'На смене':'Офлайн'}</div></div></div>`;
-  const orders=_allOrders.filter(o=>['accepted','cooking','searching_courier','courier_assigned'].includes(o.status));
-  if (!orders.length) { showToast('Нет активных заказов','info'); return; }
+  const orders=_allOrders.filter(o=>['accepted','cooking','searching_courier','courier_assigned','ready_for_courier'].includes(o.status) && o.deliveryType!=='pickup');
+  if (!orders.length) { showToast('Нет активных заказов для передачи','info'); return; }
   document.getElementById('op-handoff-orders-section').style.display='';
   document.getElementById('op-handoff-orders-list').innerHTML=orders.map(o=>`
     <div class="handoff-order-row" id="oho_${o.id}" onclick="opToggleHandoffOrder('${o.id}','${o.courierUid||''}')">

@@ -538,6 +538,7 @@ async function openOrderDetail(orderId) {
     <div class="card card-body" style="margin-bottom:12px;gap:6px;display:flex;flex-direction:column">
       <div class="flex justify-between"><span class="text-dim">Клиент</span><span class="font-bold">${order.clientName||'—'}</span></div>
       <div class="flex justify-between"><span class="text-dim">Телефон</span><span style="font-family:monospace">${order.clientPhone||'—'}</span></div>
+      ${order.status==='cancelled'&&order.cancelledBy?`<div class="flex justify-between"><span class="text-dim">Отменил</span><span style="color:var(--danger)">${{client:'Клиент',operator:'Оператор',admin:'Администратор'}[order.cancelledBy]||'—'}</span></div>`:''}
       ${callBtn?`<div>${callBtn}</div>`:''}
       ${callCourierBtn?`<div>${callCourierBtn}</div>`:''}
       <div class="flex justify-between"><span class="text-dim">Оплата</span><span>${order.payment==='cash'?'💵 Наличные':'💳 Карта'}</span></div>
@@ -572,6 +573,10 @@ function renderAdminOrderActions(order) {
   if (order.status==='searching_courier') return `<div style="display:flex;flex-direction:column;gap:8px"><div class="alert-box info" style="font-size:13px">⏳ Ждём курьера из пула…</div><button class="btn btn-primary btn-sm" onclick="openHandoffFlow()">📦 Передать курьеру</button>${cancelBtn}</div>${blBtn}`;
   if (order.status==='courier_assigned') return `<div style="display:flex;flex-direction:column;gap:8px"><div class="alert-box info" style="font-size:13px">🏃 <strong>${order.courierName||'Курьер'}</strong> едет в кафе</div><button class="btn btn-success btn-sm" onclick="openHandoffFlow()">📦 Передать заказ курьеру</button>${cancelBtn}</div>${blBtn}`;
   if (order.status==='delivering') return `<div style="display:flex;flex-direction:column;gap:8px"><div class="alert-box success">🚴 Курьер: <strong>${order.courierName||''}</strong></div>${cancelBtn}</div>${blBtn}`;
+  if (order.status==='cancelled') {
+    const byLabel = {client:'клиентом',operator:'оператором',admin:'администратором'}[order.cancelledBy]||'';
+    return `<div class="alert-box danger">❌ Заказ отменён${byLabel?' '+byLabel:''}</div>${blBtn}`;
+  }
   return blBtn;
 }
 
@@ -583,7 +588,7 @@ async function adminAcceptOrder(orderId) {
 }
 
 async function adminCancelOrder(orderId) {
-  const doCancel=async()=>{ await dbSet('orders',orderId,{status:'cancelled',cancelledAt:new Date().toISOString(),clientNotification:{type:'cancelled',seen:false}}); tgHaptic('light'); closeOrderSheet(); showToast('Заказ отменён','info'); await loadOrders(_ordersTab); };
+  const doCancel=async()=>{ await dbSet('orders',orderId,{status:'cancelled',cancelledAt:new Date().toISOString(),cancelledBy:'admin',clientNotification:{type:'cancelled',seen:false,message:'Ваш заказ отменён администратором.'}}); tgHaptic('light'); closeOrderSheet(); showToast('Заказ отменён','info'); await loadOrders(_ordersTab); };
   if (tg?.showConfirm) tg.showConfirm('Отменить заказ?',ok=>{if(ok)doCancel();});
   else if (confirm('Отменить заказ?')) await doCancel();
 }
@@ -672,9 +677,9 @@ async function findHandoffCourier() {
       </div>
     </div>`;
 
-  // Load active orders
+  // Load active delivery orders (exclude pickup)
   const orders=(await dbQuery('orders','venueId','==',VENUE.id))
-    .filter(o=>['accepted','cooking','searching_courier','courier_assigned'].includes(o.status));
+    .filter(o=>['accepted','cooking','searching_courier','courier_assigned','ready_for_courier'].includes(o.status) && o.deliveryType!=='pickup');
   if (!orders.length) { showToast('Нет активных заказов для передачи','info'); return; }
 
   document.getElementById('handoff-orders-section').style.display='';

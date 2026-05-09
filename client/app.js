@@ -883,6 +883,7 @@ function openHistoryOrder(orderId) {
       ${o.deliveryPrice?`<div class="flex justify-between text-sm"><span class="text-dim">Доставка</span><span>${fmtPrice(o.deliveryPrice, cur)}</span></div>`:''}
       <div class="flex justify-between"><span class="font-bold">Итого</span><span class="font-bold text-primary">${fmtPrice((o.total||0)+(o.deliveryPrice||0), cur)}</span></div>
     </div>
+    ${o.status==='cancelled'?`<div class="alert-box danger" style="margin-bottom:12px">❌ Заказ отменён ${{ client:'вами', operator:'оператором', admin:'администратором' }[o.cancelledBy]||''}</div>`:''}
     ${o.courierRating?`<div class="text-sm text-dim" style="margin-bottom:12px">Ваша оценка курьера: ${'★'.repeat(o.courierRating)}</div>`:''}
     ${['delivered','issued'].includes(o.status)?`<button class="btn btn-primary" onclick="reorderFromHistory('${o.id}')">🔄 Заказать повторно</button>`:''}
   `;
@@ -994,6 +995,7 @@ async function clientCancelOrder(orderId) {
     await dbSet('orders', orderId, {
       status: 'cancelled',
       cancelledAt: new Date().toISOString(),
+      cancelledBy: 'client',
       clientNotification: { type: 'cancelled', seen: true, message: 'Вы отменили заказ.' }
     });
     tgHaptic('light');
