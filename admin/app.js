@@ -21,7 +21,6 @@ let _ordersTab      = 'active';
 let _handoffCourier = null;
 let _handoffSelectedOrders = new Set();
 let _payMethods     = { cash: true, card: true };
-let _cvPayMethods   = { cash: true, card: true };
 
 // ══════════════════════════════════════════════════════════
 //  BOOT
@@ -85,8 +84,6 @@ async function submitAgree() {
   document.getElementById('s-agree').style.display = 'none';
   showPinScreen();
 }
-
-async function onboardSubmit() { await checkVenueAndInit(); }
 
 // ══════════════════════════════════════════════════════════
 //  PIN CODE
@@ -155,21 +152,63 @@ async function checkVenueAndInit() {
     dbGetAll('categories','order','asc'),
     getAllCities()
   ]);
-  const venues = await dbQuery('venues','ownerId','==',STATE.uid);
+
+  // Check for pending admin invite
+  const invite = await dbGet('admin_invites', STATE.uid);
+  if (invite && invite.status === 'pending') {
+    document.getElementById('admin-invite-venue-name').textContent = invite.venueName || 'Заведение';
+    document.getElementById('admin-invite-venue-addr').textContent = invite.venueAddress || '—';
+    showScreen('s-confirm-venue');
+    return;
+  }
+
+  // Check for assigned venue (new field: adminUid)
+  let venues = await dbQuery('venues', 'adminUid', '==', STATE.uid);
+  if (!venues.length) {
+    // Backward compat: check old ownerId field
+    venues = (await dbQuery('venues','ownerId','==',STATE.uid)).filter(v => v.status === 'approved');
+  }
   VENUE = venues[0] || null;
-  if (!VENUE) { showCreateVenueForm(); return; }
-  if (VENUE.status === 'pending')  { showScreen('s-pending');  return; }
-  if (VENUE.status === 'rejected') { showScreen('s-rejected'); return; }
+
+  if (!VENUE) { showNoVenueScreen(); return; }
+  if (VENUE.blocked) { showScreen('s-blocked'); return; }
   initMain();
 }
 
-async function checkVenueStatus() { await checkVenueAndInit(); }
+function showNoVenueScreen() {
+  const phone = STATE.user?.phone || '';
+  const qrData = encodeURIComponent(phone || STATE.uid);
+  document.getElementById('admin-waiting-qr').src = `https://api.qrserver.com/v1/create-qr-code/?size=160x160&data=${qrData}`;
+  document.getElementById('admin-waiting-phone').textContent = phone || '—';
+  showScreen('s-no-venue');
+}
 
-function showCreateVenueForm() {
-  const sel = document.getElementById('cv-cat');
-  sel.innerHTML = '<option value="">Выберите категорию...</option>' + ALL_CATS.map(c=>`<option value="${c.id}">${c.icon||''} ${c.name}</option>`).join('');
-  _populateCitySelect('cv-city', '');
-  showScreen('s-create-venue');
+async function checkAdminInvite() {
+  const invite = await dbGet('admin_invites', STATE.uid);
+  if (invite && invite.status === 'pending') {
+    document.getElementById('admin-invite-venue-name').textContent = invite.venueName || 'Заведение';
+    document.getElementById('admin-invite-venue-addr').textContent = invite.venueAddress || '—';
+    showScreen('s-confirm-venue');
+  } else {
+    showToast('Приглашений нет', 'info');
+  }
+}
+
+async function acceptAdminInvite() {
+  const btn = document.querySelector('#s-confirm-venue .btn-primary');
+  if (btn) { btn.disabled = true; btn.textContent = 'Принятие...'; }
+  const invite = await dbGet('admin_invites', STATE.uid);
+  if (!invite) { showToast('Приглашение не найдено', 'error'); return; }
+  await dbSet('venues', invite.venueId, { adminUid: STATE.uid, adminName: STATE.user?.name || '' });
+  await dbSet('admin_invites', STATE.uid, { status: 'accepted' });
+  tgHaptic('success');
+  await checkVenueAndInit();
+}
+
+async function declineAdminInvite() {
+  const invite = await dbGet('admin_invites', STATE.uid);
+  if (invite) await dbSet('admin_invites', STATE.uid, { status: 'declined' });
+  showNoVenueScreen();
 }
 
 function _populateCitySelect(selId, currentCityId) {
@@ -202,11 +241,9 @@ function previewCover(input, wrapId) {
   const reader = new FileReader();
   reader.onload = e => {
     const dataUrl = e.target.result;
-    if (wrapId === 'cv-cover-upload') _coverDataUrl = dataUrl;
-    else _setCoverDataUrl = dataUrl;
+    _setCoverDataUrl = dataUrl;
     const wrap = document.getElementById(wrapId);
-    const fileId = wrapId === 'cv-cover-upload' ? 'cv-cover-file' : 'set-cover-file';
-    wrap.innerHTML = `<img src="${dataUrl}" style="width:100%;height:100%;object-fit:cover;position:absolute;inset:0"><input type="file" id="${fileId}" accept="image/*" onchange="previewCover(this,'${wrapId}')" style="position:absolute;inset:0;opacity:0;cursor:pointer">`;
+    wrap.innerHTML = `<img src="${dataUrl}" style="width:100%;height:100%;object-fit:cover;position:absolute;inset:0"><input type="file" id="set-cover-file" accept="image/*" onchange="previewCover(this,'${wrapId}')" style="position:absolute;inset:0;opacity:0;cursor:pointer">`;
   };
   reader.readAsDataURL(file);
 }
@@ -214,50 +251,11 @@ function previewCover(input, wrapId) {
 function togglePayTag(btnId, method) {
   const btn = document.getElementById(btnId);
   if (!btn) return;
-  const store = btnId.startsWith('cv-') ? _cvPayMethods : _payMethods;
-  store[method] = !store[method];
-  btn.classList.toggle('active-cash', method === 'cash' && store[method]);
-  btn.classList.toggle('active-card', method === 'card' && store[method]);
-  if (!store[method]) btn.className = 'pay-tag';
+  _payMethods[method] = !_payMethods[method];
+  btn.classList.toggle('active-cash', method === 'cash' && _payMethods[method]);
+  btn.classList.toggle('active-card', method === 'card' && _payMethods[method]);
+  if (!_payMethods[method]) btn.className = 'pay-tag';
 }
-
-async function submitCreateVenue() {
-  const name    = document.getElementById('cv-name').value.trim();
-  const catId   = document.getElementById('cv-cat').value;
-  const desc    = document.getElementById('cv-desc').value.trim();
-  const cityId  = document.getElementById('cv-city').value;
-  const address = document.getElementById('cv-address').value.trim();
-  const phone   = normPhone(document.getElementById('cv-phone').value.trim());
-  const open    = document.getElementById('cv-work-open').value;
-  const close   = document.getElementById('cv-work-close').value;
-  const delTime = parseInt(document.getElementById('cv-delivery-time').value)||30;
-  const cookT   = parseInt(document.getElementById('cv-cooking-time').value)||20;
-  const minOrd  = parseInt(document.getElementById('cv-min-order').value)||0;
-  const coverUrl = document.getElementById('cv-cover-url').value.trim() || _coverDataUrl || '';
-  if (!name || !catId || !address) { showToast('Заполните обязательные поля', 'warning'); return; }
-
-  const city = ALL_CITIES.find(c => c.id === cityId);
-  const delPrice = city?.deliveryPrice ?? 1000;
-
-  const btn = document.getElementById('cv-btn');
-  btn.disabled = true; btn.textContent = 'Отправляем...';
-  const venueId = genId();
-  await dbSet('venues', venueId, {
-    id: venueId, name, categoryId: catId, description: desc, address, phone,
-    cityId: cityId||'', cityName: city?.name||'',
-    workOpen: open, workClose: close, deliveryTime: delTime, deliveryPrice: delPrice,
-    cookingTime: cookT, minOrder: minOrd, coverUrl,
-    paymentMethods: _cvPayMethods,
-    ownerId: STATE.uid, ownerName: STATE.user?.name||'',
-    status: 'pending', rating: 0, reviewCount: 0, blocked: false,
-    createdAt: new Date().toISOString()
-  });
-  tgHaptic('success');
-  showScreen('s-pending');
-  btn.disabled = false; btn.textContent = 'Отправить на модерацию';
-}
-
-function resetVenueAndCreate() { VENUE = null; showCreateVenueForm(); }
 
 // ══════════════════════════════════════════════════════════
 //  MAIN
@@ -855,32 +853,40 @@ async function loadStats() {
 // ══════════════════════════════════════════════════════════
 async function loadSettingsScreen() {
   if (!VENUE) return;
-  ALL_CITIES=await getAllCities();
-  document.getElementById('set-name').value    =VENUE.name||'';
-  document.getElementById('set-address').value =VENUE.address||'';
-  document.getElementById('set-phone').value   =VENUE.phone||'';
-  document.getElementById('set-desc').value    =VENUE.description||'';
-  document.getElementById('set-cover').value   =VENUE.coverUrl||'';
-  document.getElementById('set-open').value    =VENUE.workOpen||'09:00';
-  document.getElementById('set-close').value   =VENUE.workClose||'22:00';
-  document.getElementById('set-delivery-time').value =VENUE.deliveryTime||30;
-  document.getElementById('set-delivery-price').value=VENUE.deliveryPrice||0;
-  document.getElementById('set-cooking-time').value  =VENUE.cookingTime||20;
-  document.getElementById('set-min-order').value     =VENUE.minOrder||0;
+  ALL_CITIES = await getAllCities();
+
+  // QR code
+  const phone = STATE.user?.phone || '';
+  document.getElementById('admin-qr-img').src = `https://api.qrserver.com/v1/create-qr-code/?size=180x180&data=${encodeURIComponent(phone || STATE.uid)}`;
+  document.getElementById('admin-qr-phone').textContent = phone || '—';
+
+  document.getElementById('set-name').value    = VENUE.name||'';
+  document.getElementById('set-address').value = VENUE.address||'';
+  document.getElementById('set-phone').value   = VENUE.phone||'';
+  document.getElementById('set-desc').value    = VENUE.description||'';
+  document.getElementById('set-cover').value   = VENUE.coverUrl||'';
+  document.getElementById('set-open').value    = VENUE.workOpen||'09:00';
+  document.getElementById('set-close').value   = VENUE.workClose||'22:00';
+  document.getElementById('set-delivery-time').value = VENUE.deliveryTime||30;
+  document.getElementById('set-min-order').value     = VENUE.minOrder||0;
   _populateCitySelect('set-city', VENUE.cityId||'');
 
+  // Online orders toggle
+  const onlineToggle = document.getElementById('set-online-orders');
+  if (onlineToggle) onlineToggle.checked = VENUE.onlineOrdersEnabled !== false;
+
   // Payment methods
-  _payMethods={ cash: VENUE.paymentMethods?.cash!==false, card: VENUE.paymentMethods?.card!==false };
-  const cashBtn=document.getElementById('set-pay-cash'), cardBtn=document.getElementById('set-pay-card');
-  if (cashBtn) { cashBtn.className='pay-tag'+(_payMethods.cash?' active-cash':''); }
-  if (cardBtn) { cardBtn.className='pay-tag'+(_payMethods.card?' active-card':''); }
+  _payMethods = { cash: VENUE.paymentMethods?.cash!==false, card: VENUE.paymentMethods?.card!==false };
+  const cashBtn = document.getElementById('set-pay-cash'), cardBtn = document.getElementById('set-pay-card');
+  if (cashBtn) cashBtn.className = 'pay-tag' + (_payMethods.cash ? ' active-cash' : '');
+  if (cardBtn) cardBtn.className = 'pay-tag' + (_payMethods.card ? ' active-card' : '');
 
   // Operator
-  const op=VENUE.operatorUid?await dbGet('users',VENUE.operatorUid):null;
-  const opInfo=document.getElementById('current-operator-info');
-  const removeBtn=document.getElementById('remove-op-btn');
-  if (op) { opInfo.textContent=`Оператор: ${op.name||'—'} (${op.phone||'—'})`; opInfo.className='alert-box success'; removeBtn.style.display=''; }
-  else    { opInfo.textContent='Оператор не назначен'; opInfo.className='alert-box info'; removeBtn.style.display='none'; }
+  const op = VENUE.operatorUid ? await dbGet('users', VENUE.operatorUid) : null;
+  const opInfo = document.getElementById('current-operator-info');
+  const removeBtn = document.getElementById('remove-op-btn');
+  if (op) { opInfo.textContent = `Оператор: ${op.name||'—'} (${op.phone||'—'})`; opInfo.className = 'alert-box success'; removeBtn.style.display = ''; }
+  else    { opInfo.textContent = 'Оператор не назначен'; opInfo.className = 'alert-box info'; removeBtn.style.display = 'none'; }
 
   await loadPermCouriers();
   await loadBlacklist();
@@ -908,13 +914,19 @@ async function saveWorkHours() {
 }
 
 async function saveDeliverySettings() {
-  const delTime =parseInt(document.getElementById('set-delivery-time').value)||30;
-  const delPrice=parseInt(document.getElementById('set-delivery-price').value)||0;
-  const cookTime=parseInt(document.getElementById('set-cooking-time').value)||20;
-  const minOrd  =parseInt(document.getElementById('set-min-order').value)||0;
-  await dbSet('venues',VENUE.id,{deliveryTime:delTime,deliveryPrice:delPrice,cookingTime:cookTime,minOrder:minOrd,paymentMethods:_payMethods});
-  VENUE={...VENUE,deliveryTime:delTime,deliveryPrice:delPrice,cookingTime:cookTime,minOrder:minOrd,paymentMethods:_payMethods};
-  tgHaptic('success'); showToast('Настройки сохранены','success');
+  const delTime = parseInt(document.getElementById('set-delivery-time').value)||30;
+  const minOrd  = parseInt(document.getElementById('set-min-order').value)||0;
+  await dbSet('venues', VENUE.id, { deliveryTime: delTime, minOrder: minOrd, paymentMethods: _payMethods });
+  VENUE = { ...VENUE, deliveryTime: delTime, minOrder: minOrd, paymentMethods: _payMethods };
+  tgHaptic('success'); showToast('Настройки сохранены', 'success');
+}
+
+async function saveOnlineOrdersToggle(enabled) {
+  if (!VENUE) return;
+  await dbSet('venues', VENUE.id, { onlineOrdersEnabled: enabled });
+  VENUE = { ...VENUE, onlineOrdersEnabled: enabled };
+  tgHaptic('light');
+  showToast(enabled ? 'Онлайн заказы включены' : 'Онлайн заказы выключены', 'info');
 }
 
 function _normPhone(p) { return String(p||'').replace(/\D/g,''); }

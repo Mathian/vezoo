@@ -71,82 +71,36 @@
   </div>
 </div>
 
-<!-- ONBOARDING -->
-<div id="s-onboard" class="screen no-nav">
+<!-- NO VENUE — ожидание назначения -->
+<div id="s-no-venue" class="screen no-nav">
+  <div class="content" style="align-items:center;text-align:center;padding-top:40px;gap:18px">
+    <div style="font-size:48px">🏪</div>
+    <div style="font-weight:700;font-size:20px">Ожидание назначения</div>
+    <div style="background:white;border-radius:16px;padding:14px;display:inline-block;box-shadow:0 4px 24px rgba(0,0,0,.4)">
+      <img id="admin-waiting-qr" src="" alt="QR" style="width:160px;height:160px;display:block;border-radius:8px">
+    </div>
+    <div id="admin-waiting-phone" style="font-size:14px;color:var(--text-dim);font-family:monospace">—</div>
+    <p style="color:var(--text-dim);font-size:14px;max-width:280px;line-height:1.5">
+      Покажите QR-код или сообщите номер телефона суперадминистратору Vezoo.
+    </p>
+    <button class="btn btn-ghost btn-sm" onclick="checkAdminInvite()">🔄 Проверить приглашение</button>
+  </div>
+</div>
+
+<!-- CONFIRM VENUE INVITE -->
+<div id="s-confirm-venue" class="screen no-nav">
   <div class="content" style="padding-top:60px;gap:20px;max-width:480px;margin:0 auto">
-    <div class="logo" style="justify-content:center"><div class="logo-icon">🏪</div><div class="logo-text"><span>Vezoo</span> Admin</div></div>
-    <h2 style="text-align:center">Ваше имя</h2>
-    <div class="field"><label>Имя / Название компании</label><input class="inp" id="ob-name" placeholder="Введите имя" maxlength="50"></div>
-    <button class="btn btn-primary" id="ob-btn" onclick="onboardSubmit()">Продолжить →</button>
-  </div>
-</div>
-
-<!-- CREATE VENUE -->
-<div id="s-create-venue" class="screen no-nav">
-  <div class="page-hdr"><h2>Создать заведение</h2></div>
-  <div class="content" style="gap:14px">
-    <div class="alert-box info">Заведение пройдёт модерацию. После одобрения вы получите доступ к полному функционалу.</div>
-    <div class="section">
-      <div class="section-title">Основное</div>
-      <div class="field"><label>Название заведения *</label><input class="inp" id="cv-name" placeholder="Кафе «Уют»" maxlength="80"></div>
-      <div class="field"><label>Категория *</label><select class="inp" id="cv-cat"><option value="">Выберите категорию...</option></select></div>
-      <div class="field"><label>Описание</label><textarea class="inp" id="cv-desc" rows="3" placeholder="Расскажите о заведении..." maxlength="500"></textarea></div>
+    <div style="text-align:center;font-size:56px;margin-bottom:8px">🏪</div>
+    <h2 style="text-align:center">Приглашение</h2>
+    <div class="card card-body" id="admin-invite-venue-card">
+      <div class="font-bold" id="admin-invite-venue-name">Заведение</div>
+      <div class="text-dim text-sm mt-1" id="admin-invite-venue-addr">Адрес</div>
     </div>
-    <div class="section">
-      <div class="section-title">Расположение</div>
-      <div class="field"><label>Страна и город *</label><select class="inp" id="cv-city"><option value="">Выберите город...</option></select></div>
-      <div class="field"><label>Адрес заведения *</label><input class="inp" id="cv-address" placeholder="ул. Абая 10" maxlength="200"></div>
-      <div class="field"><label>Телефон заведения</label><input class="inp" id="cv-phone" placeholder="+7 (777) 000-00-00" type="tel" maxlength="30"></div>
+    <p class="text-dim" style="text-align:center;font-size:14px">Суперадминистратор приглашает вас управлять этим заведением.</p>
+    <div class="btn-row">
+      <button class="btn btn-ghost" onclick="declineAdminInvite()">Отклонить</button>
+      <button class="btn btn-primary" onclick="acceptAdminInvite()">Принять ✓</button>
     </div>
-    <div class="section">
-      <div class="section-title">Часы работы</div>
-      <div class="inp-row">
-        <div class="field"><label>Открытие</label><input class="inp" id="cv-work-open" type="time" value="09:00"></div>
-        <div class="field"><label>Закрытие</label><input class="inp" id="cv-work-close" type="time" value="22:00"></div>
-      </div>
-    </div>
-    <div class="section">
-      <div class="section-title">Доставка</div>
-      <div class="inp-row">
-        <div class="field"><label>Время доставки (мин)</label><input class="inp" id="cv-delivery-time" type="number" value="30" min="5" max="300"></div>
-        <div class="field"><label>Время готовки (мин)</label><input class="inp" id="cv-cooking-time" type="number" value="20" min="5" max="240"></div>
-      </div>
-      <div class="field"><label>Мин. сумма заказа</label><input class="inp" id="cv-min-order" type="number" value="0" min="0"></div>
-      <div class="section-title" style="margin-top:8px">Способы оплаты</div>
-      <div style="display:flex;gap:8px;margin-top:6px">
-        <button class="pay-tag active-cash" id="cv-pay-cash" onclick="togglePayTag('cv-pay-cash','cash')">💵 Наличные</button>
-        <button class="pay-tag active-card" id="cv-pay-card" onclick="togglePayTag('cv-pay-card','card')">💳 Карта</button>
-      </div>
-    </div>
-    <div class="section">
-      <div class="section-title">Обложка</div>
-      <div class="field"><label>Ссылка на фото</label><input class="inp" id="cv-cover-url" placeholder="https://..." type="url"></div>
-      <div class="img-upload" id="cv-cover-upload" onclick="document.getElementById('cv-cover-file').click()">
-        <input type="file" id="cv-cover-file" accept="image/*" onchange="previewCover(this,'cv-cover-upload')">
-        <span class="img-upload-txt">📷 Загрузить обложку</span>
-      </div>
-    </div>
-    <button class="btn btn-primary" id="cv-btn" onclick="submitCreateVenue()">Отправить на модерацию</button>
-  </div>
-</div>
-
-<!-- PENDING MODERATION -->
-<div id="s-pending" class="screen no-nav">
-  <div class="splash">
-    <div class="splash-logo">⏳</div>
-    <div class="splash-title">На модерации</div>
-    <div class="splash-sub">Ваше заведение проверяется.<br>Обычно это занимает до 24 часов.</div>
-    <button class="btn btn-ghost btn-sm" style="margin-top:16px" onclick="checkVenueStatus()">🔄 Проверить статус</button>
-  </div>
-</div>
-
-<!-- REJECTED -->
-<div id="s-rejected" class="screen no-nav">
-  <div class="splash">
-    <div class="splash-logo">❌</div>
-    <div class="splash-title">Заявка отклонена</div>
-    <div class="splash-sub">Заведение не прошло модерацию.<br>Свяжитесь с поддержкой Vezoo.</div>
-    <button class="btn btn-outline btn-sm" style="margin-top:16px" onclick="resetVenueAndCreate()">🔄 Создать заново</button>
   </div>
 </div>
 
@@ -190,6 +144,14 @@
   <div class="page-hdr"><h2>Настройки</h2></div>
   <div class="content" style="gap:14px">
     <div class="section">
+      <div class="section-title">Мой QR-код</div>
+      <div class="qr-container" id="admin-qr-container">
+        <img class="qr-code-img" id="admin-qr-img" src="" alt="QR">
+        <div class="qr-label">Код для передачи суперадминистратору</div>
+        <div class="qr-phone" id="admin-qr-phone">—</div>
+      </div>
+    </div>
+    <div class="section">
       <div class="section-title">Заведение</div>
       <div class="field"><label>Название</label><input class="inp" id="set-name" placeholder="Название"></div>
       <div class="field"><label>Город</label><select class="inp" id="set-city"><option value="">Выберите город...</option></select></div>
@@ -213,14 +175,15 @@
     </div>
     <div class="section">
       <div class="section-title">Доставка и оплата</div>
-      <div class="inp-row">
-        <div class="field"><label>Время доставки (мин)</label><input class="inp" id="set-delivery-time" type="number" min="5"></div>
-        <div class="field"><label>Цена доставки</label><input class="inp" id="set-delivery-price" type="number" min="0"></div>
+      <div class="toggle-row" style="margin-bottom:12px">
+        <div>
+          <div style="font-weight:600;font-size:14px">Принимать онлайн заказы</div>
+          <div style="font-size:12px;color:var(--text-dim);margin-top:2px">Клиенты видят заведение и могут делать заказы</div>
+        </div>
+        <label class="toggle"><input type="checkbox" id="set-online-orders" onchange="saveOnlineOrdersToggle(this.checked)"><span class="toggle-sl"></span></label>
       </div>
-      <div class="inp-row">
-        <div class="field"><label>Время готовки (мин)</label><input class="inp" id="set-cooking-time" type="number" min="5"></div>
-        <div class="field"><label>Мин. сумма</label><input class="inp" id="set-min-order" type="number" min="0"></div>
-      </div>
+      <div class="field"><label>Время доставки (мин)</label><input class="inp" id="set-delivery-time" type="number" min="5"></div>
+      <div class="field"><label>Мин. сумма заказа</label><input class="inp" id="set-min-order" type="number" min="0"></div>
       <div style="margin-top:8px">
         <div class="section-title" style="margin-bottom:6px">Способы оплаты</div>
         <div style="display:flex;gap:8px">

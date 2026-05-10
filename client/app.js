@@ -186,7 +186,7 @@ async function loadVenues() {
     dbGetAll('venues', 'name', 'asc'),
     dbGetAll('categories', 'order', 'asc')
   ]);
-  VENUES     = venues.filter(v => v.status === 'approved' && !v.blocked);
+  VENUES     = venues.filter(v => v.status === 'approved' && !v.blocked && v.onlineOrdersEnabled !== false);
   CATEGORIES = cats;
   // Filter by city if selected
   if (_selectedCityId) {

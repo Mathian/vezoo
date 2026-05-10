@@ -89,13 +89,11 @@
   <div id="geo-list" style="display:flex;flex-direction:column;gap:10px;padding:12px 20px 16px"></div>
 </div>
 
-<!-- VENUES MODERATION -->
+<!-- VENUES -->
 <div id="s-venues" class="screen">
-  <div class="page-hdr"><h2>Заведения</h2></div>
-  <div class="cat-tabs" style="padding-top:8px">
-    <button class="cat-tab active" onclick="loadVenuesByStatus('pending',this)">⏳ Модерация</button>
-    <button class="cat-tab" onclick="loadVenuesByStatus('approved',this)">✅ Активные</button>
-    <button class="cat-tab" onclick="loadVenuesByStatus('rejected',this)">❌ Отклонённые</button>
+  <div class="page-hdr">
+    <h2>Заведения</h2>
+    <div class="page-hdr-end"><button class="btn btn-primary btn-sm" onclick="openSaCreateVenue()">+ Добавить</button></div>
   </div>
   <div id="sa-venues-list" style="display:flex;flex-direction:column;gap:10px;padding:12px 20px 16px"></div>
 </div>
@@ -183,9 +181,8 @@
   <div class="nav-item" id="nav-geo" onclick="showScreen('s-geography');setNav(this);loadGeo()">
     <div class="nav-icon">🌍</div><div class="nav-label">Города</div>
   </div>
-  <div class="nav-item" id="nav-venues" onclick="showScreen('s-venues');setNav(this);loadVenuesByStatus('pending')">
+  <div class="nav-item" id="nav-venues" onclick="showScreen('s-venues');setNav(this);loadAllVenues()">
     <div class="nav-icon">🏪</div><div class="nav-label">Заведения</div>
-    <div class="nav-badge hidden" id="venues-badge">0</div>
   </div>
   <div class="nav-item" id="nav-couriers" onclick="showScreen('s-couriers');setNav(this);loadCouriersByStatus('pending')">
     <div class="nav-icon">🚴</div><div class="nav-label">Курьеры</div>
