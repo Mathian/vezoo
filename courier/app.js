@@ -662,7 +662,9 @@ async function courierReturn(orderId) {
     await dbSet('orders', orderId, {
       status: 'searching_courier',
       courierUid: null, courierName: null, courierPhone: null,
-      returnAt: new Date().toISOString()
+      returnAt: new Date().toISOString(),
+      returnedByUid: STATE.uid,
+      returnedByName: STATE.user?.name || ''
     });
     closeMyOrderSheet();
     tgHaptic('light'); showToast('Возврат оформлен', 'info');

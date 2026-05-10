@@ -94,24 +94,26 @@
   <div id="new-orders-list" style="display:flex;flex-direction:column;gap:10px;padding:12px 20px 16px"></div>
 </div>
 
-<!-- MAIN — ACTIVE ORDERS -->
+<!-- MAIN — ORDERS -->
 <div id="s-active-orders" class="screen">
-  <div class="page-hdr"><h2>Активные</h2></div>
-  <div id="active-orders-list" style="display:flex;flex-direction:column;gap:10px;padding:12px 20px 16px"></div>
-</div>
-
-<!-- MAIN — HISTORY -->
-<div id="s-op-history" class="screen">
-  <div class="page-hdr">
-    <h2>История</h2>
-    <div class="page-hdr-end"><input class="inp" id="hist-date" type="date" style="width:140px;padding:8px 10px;font-size:13px" onchange="loadOpHistory()"></div>
+  <div class="page-hdr"><h2>Заказы</h2></div>
+  <div class="cat-tabs" style="padding-top:8px">
+    <button class="cat-tab active" id="op-tab-active" onclick="opLoadOrders('active',this)">Активные</button>
+    <button class="cat-tab" id="op-tab-pending" onclick="opLoadOrders('pending',this)">Ожидают</button>
+    <button class="cat-tab" id="op-tab-history" onclick="opLoadOrders('history',this)">История</button>
   </div>
-  <div id="op-history-list" style="display:flex;flex-direction:column;gap:10px;padding:12px 20px 16px"></div>
+  <div id="op-hist-daterange" style="display:none;padding:8px 20px 0">
+    <div style="display:flex;gap:8px;align-items:flex-end">
+      <div class="field" style="flex:1;margin:0"><label style="font-size:11px;color:var(--text-dim)">От</label><input class="inp" id="op-hist-from" type="date" style="padding:6px 10px;font-size:13px" onchange="opLoadOrders('history')"></div>
+      <div class="field" style="flex:1;margin:0"><label style="font-size:11px;color:var(--text-dim)">До</label><input class="inp" id="op-hist-to" type="date" style="padding:6px 10px;font-size:13px" onchange="opLoadOrders('history')"></div>
+    </div>
+  </div>
+  <div id="op-orders-list" style="display:flex;flex-direction:column;gap:10px;padding:12px 20px 16px"></div>
 </div>
 
 <!-- MAIN — SETTINGS / QR -->
 <div id="s-op-settings" class="screen">
-  <div class="page-hdr"><h2>Профиль</h2></div>
+  <div class="page-hdr"><h2>Настройки</h2></div>
   <div class="content" style="gap:14px">
     <div class="section-title">Мой QR-код</div>
     <div class="qr-container" id="op-qr-container">
@@ -120,12 +122,21 @@
       <div class="qr-phone" id="op-qr-phone">—</div>
     </div>
 
-    <div class="section-title">Статистика (7 дней)</div>
+    <div class="section-title" style="margin-top:4px">Статистика — Сегодня</div>
     <div class="stats-grid" id="op-stats-grid"></div>
 
     <div class="section-title" style="margin-top:4px">Заведение</div>
     <div class="card card-body" id="op-venue-info" style="display:flex;flex-direction:column;gap:5px">
       <div class="text-dim text-sm">Загрузка...</div>
+    </div>
+
+    <div class="section-title" style="margin-top:4px">🚫 Чёрный список</div>
+    <div class="alert-box info" style="font-size:12px">Клиенты из ЧС не смогут оформить заказ</div>
+    <div id="op-blacklist-items" style="display:flex;flex-direction:column;gap:6px;margin-bottom:10px"></div>
+    <div class="field">
+      <label>Телефон клиента</label>
+      <input class="inp" id="op-bl-phone" type="tel" placeholder="+7 (777) 000-00-00">
+      <button class="btn btn-danger btn-sm" style="margin-top:8px;width:100%" onclick="opAddToBlacklist()">+ Добавить в ЧС</button>
     </div>
 
     <button class="btn btn-ghost btn-sm" style="color:var(--danger)" onclick="opLeaveVenue()">Отвязаться от заведения</button>
@@ -138,14 +149,11 @@
     <div class="nav-icon">🔔</div><div class="nav-label">Новые</div>
     <div class="nav-badge hidden" id="new-badge">0</div>
   </div>
-  <div class="nav-item" id="nav-active" onclick="navToActiveOrders()">
-    <div class="nav-icon">⚡</div><div class="nav-label">Активные</div>
-  </div>
-  <div class="nav-item" id="nav-hist" onclick="showScreen('s-op-history');setNav(this);loadOpHistory()">
-    <div class="nav-icon">📋</div><div class="nav-label">История</div>
+  <div class="nav-item" id="nav-active" onclick="navToOrders()">
+    <div class="nav-icon">📋</div><div class="nav-label">Заказы</div>
   </div>
   <div class="nav-item" id="nav-op-settings" onclick="showScreen('s-op-settings');setNav(this);loadOpSettings()">
-    <div class="nav-icon">👤</div><div class="nav-label">Профиль</div>
+    <div class="nav-icon">⚙️</div><div class="nav-label">Настройки</div>
   </div>
 </div>
 

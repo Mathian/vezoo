@@ -160,7 +160,15 @@ function watchOrders() {
     if (newOrders.length>0) { if (!_soundTimer) { playNewOrder(); _soundTimer=setInterval(playNewOrder,4000); } }
     else { if (_soundTimer) { clearInterval(_soundTimer); _soundTimer=null; } }
     if (document.getElementById('s-new-orders').classList.contains('active')) renderNewOrders(newOrders);
-    if (document.getElementById('s-active-orders').classList.contains('active')) renderActiveOrders(activeOrders);
+    if (document.getElementById('s-active-orders').classList.contains('active')) {
+      if (_opOrdersTab === 'active') {
+        const list = document.getElementById('op-orders-list');
+        if (list) list.innerHTML = activeOrders.map(o=>renderOpOrderCard(o)).join('') || `<div class="empty"><div class="empty-icon">⚡</div><div class="empty-text">Нет активных заказов</div></div>`;
+      } else if (_opOrdersTab === 'pending') {
+        const list = document.getElementById('op-orders-list');
+        if (list) list.innerHTML = newOrders.map(o=>renderOpOrderCard(o)).join('') || `<div class="empty"><div class="empty-icon">🔔</div><div class="empty-text">Нет новых заказов</div></div>`;
+      }
+    }
 
     orders.filter(o=>(o.status==='delivered'||o.status==='issued')&&!o.opNotified).forEach(async o=>{
       document.getElementById('notif-delivered-op-text').textContent = o.status==='issued'
@@ -177,9 +185,9 @@ function navToNewOrders() {
   renderNewOrders(_allOrders.filter(o=>o.status==='pending').sort((a,b)=>(b.createdAt||'').localeCompare(a.createdAt||'')));
 }
 
-function navToActiveOrders() {
+function navToOrders() {
   showScreen('s-active-orders'); setNav(document.getElementById('nav-active'));
-  renderActiveOrders(_allOrders.filter(o=>['accepted','cooking','searching_courier','courier_assigned','ready_for_courier','delivering','ready'].includes(o.status)).sort((a,b)=>(b.createdAt||'').localeCompare(a.createdAt||'')));
+  opLoadOrders('active');
 }
 
 // ══════════════════════════════════════════════════════════
@@ -191,9 +199,41 @@ function renderNewOrders(orders) {
   list.innerHTML = orders.map(o=>renderOpOrderCard(o)).join('');
 }
 
-function renderActiveOrders(orders) {
-  const list = document.getElementById('active-orders-list');
-  if (!orders.length) { list.innerHTML=`<div class="empty"><div class="empty-icon">⚡</div><div class="empty-text">Нет активных заказов</div></div>`; return; }
+let _opOrdersTab = 'active';
+
+async function opLoadOrders(tab, el) {
+  _opOrdersTab = tab || _opOrdersTab;
+  if (el) { document.querySelectorAll('#s-active-orders .cat-tab').forEach(b=>b.classList.remove('active')); el.classList.add('active'); }
+  // Show/hide date range
+  const rangeEl = document.getElementById('op-hist-daterange');
+  if (rangeEl) rangeEl.style.display = _opOrdersTab === 'history' ? '' : 'none';
+  // Set default dates for history
+  if (_opOrdersTab === 'history') {
+    const today = new Date().toISOString().slice(0,10);
+    const fromEl = document.getElementById('op-hist-from'), toEl = document.getElementById('op-hist-to');
+    if (fromEl && !fromEl.value) fromEl.value = today;
+    if (toEl && !toEl.value) toEl.value = today;
+  }
+
+  const list = document.getElementById('op-orders-list');
+  list.innerHTML = '<div class="loader"><div class="spinner"></div></div>';
+  let orders = _allOrders;
+  if (!orders.length) orders = await dbQuery('orders','venueId','==',VENUE.id);
+
+  if (_opOrdersTab === 'active') {
+    orders = orders.filter(o=>['accepted','cooking','searching_courier','courier_assigned','ready_for_courier','delivering','ready'].includes(o.status));
+  } else if (_opOrdersTab === 'pending') {
+    orders = orders.filter(o=>o.status==='pending');
+  } else {
+    orders = orders.filter(o=>['delivered','cancelled','issued'].includes(o.status));
+    const fromEl = document.getElementById('op-hist-from'), toEl = document.getElementById('op-hist-to');
+    const fromD = fromEl?.value, toD = toEl?.value;
+    const today = new Date().toISOString().slice(0,10);
+    const f = fromD || today, t = toD || today;
+    orders = orders.filter(o => { const d=(o.createdAt||'').slice(0,10); return d>=f && d<=t; });
+  }
+  orders.sort((a,b)=>(b.createdAt||'').localeCompare(a.createdAt||''));
+  if (!orders.length) { list.innerHTML=`<div class="empty"><div class="empty-icon">📋</div><div class="empty-text">Заказов нет</div></div>`; return; }
   list.innerHTML = orders.map(o=>renderOpOrderCard(o)).join('');
 }
 
@@ -250,6 +290,7 @@ async function openOrderDetail(orderId) {
       <div class="flex justify-between"><span class="text-dim">Телефон</span><span style="font-family:monospace">${order.clientPhone||'—'}</span></div>
       ${order.status==='cancelled'&&order.cancelledBy?`<div class="flex justify-between"><span class="text-dim">Отменил</span><span style="color:var(--danger)">${{client:'Клиент',operator:'Оператор',admin:'Администратор'}[order.cancelledBy]||'—'}</span></div>`:''}
       ${callBtn?`<div>${callBtn}</div>`:''}
+      ${(order.courierName||order.courierPhone)?`<div class="flex justify-between"><span class="text-dim">Курьер</span><span style="text-align:right;max-width:60%">${order.courierName||'—'}${order.courierPhone?' · '+order.courierPhone:''}</span></div>`:'' }
       ${callCourierBtn?`<div>${callCourierBtn}</div>`:''}
       <div class="flex justify-between"><span class="text-dim">Оплата</span><span>${order.payment==='cash'?'💵 Наличные':'💳 Карта'}</span></div>
       ${addrStr?`<div class="flex justify-between"><span class="text-dim">Адрес</span><span style="text-align:right;max-width:60%">${addrStr}</span></div>`:'<div class="flex justify-between"><span class="text-dim">Получение</span><span>🏪 Самовывоз</span></div>'}
@@ -468,45 +509,70 @@ function closeOpManualOrder(e) {
 // ══════════════════════════════════════════════════════════
 //  HISTORY
 // ══════════════════════════════════════════════════════════
-async function loadOpHistory() {
-  const dateInput=document.getElementById('hist-date');
-  const list=document.getElementById('op-history-list');
-  list.innerHTML='<div class="loader"><div class="spinner"></div></div>';
-  let orders=(await dbQuery('orders','venueId','==',VENUE.id)).filter(o=>['delivered','cancelled','issued'].includes(o.status));
-  if (dateInput.value) orders=orders.filter(o=>(o.createdAt||'').startsWith(dateInput.value));
-  orders.sort((a,b)=>(b.createdAt||'').localeCompare(a.createdAt||''));
-  if (!orders.length) { list.innerHTML=`<div class="empty"><div class="empty-icon">📋</div><div class="empty-text">Нет заказов за этот период</div></div>`; return; }
-  list.innerHTML=orders.map(o=>renderOpOrderCard(o)).join('');
-}
-
 // ══════════════════════════════════════════════════════════
 //  SETTINGS / QR / STATS
 // ══════════════════════════════════════════════════════════
 async function loadOpSettings() {
-  const user=STATE.user||{};
-  const phone=user.phone||'';
-  document.getElementById('op-qr-phone').textContent=phone||'—';
-  const qrImg=document.getElementById('op-qr-img');
-  if (phone) qrImg.src=getQrUrl(phone,180);
+  const user = STATE.user||{};
+  const phone = user.phone||'';
+  document.getElementById('op-qr-phone').textContent = phone||'—';
+  const qrImg = document.getElementById('op-qr-img');
+  if (phone) qrImg.src = getQrUrl(phone, 180);
 
   // Venue info
-  const vi=document.getElementById('op-venue-info');
-  vi.innerHTML=VENUE?`
+  const vi = document.getElementById('op-venue-info');
+  vi.innerHTML = VENUE ? `
     <div class="flex justify-between"><span class="text-dim">Заведение</span><span class="font-bold">${VENUE.name||'—'}</span></div>
     <div class="flex justify-between"><span class="text-dim">Адрес</span><span style="text-align:right;max-width:60%">${VENUE.address||'—'}</span></div>
     <div class="flex justify-between"><span class="text-dim">Телефон</span><span>${VENUE.phone||'—'}</span></div>
-  `:'<div class="text-dim text-sm">Нет данных</div>';
+  ` : '<div class="text-dim text-sm">Нет данных</div>';
 
-  // 7-day stats
-  const cutoff=new Date(Date.now()-7*86400000).toISOString();
-  const orders=(await dbQuery('orders','venueId','==',VENUE.id)).filter(o=>(o.createdAt||'')>=cutoff);
-  const done=orders.filter(o=>o.status==='delivered');
-  const revenue=done.reduce((s,o)=>s+(o.total||0),0);
+  // Today's stats
+  const today = new Date().toISOString().slice(0,10);
+  const allOrd = await dbQuery('orders','venueId','==',VENUE.id);
+  const todayOrd = allOrd.filter(o=>(o.createdAt||'').startsWith(today));
+  const todayOnline    = todayOrd.filter(o=>!o.isManual);
+  const todayDelivered = todayOrd.filter(o=>o.status==='delivered'||o.status==='issued');
+  const todayCancelled = todayOrd.filter(o=>o.status==='cancelled');
+  const todayReturns   = todayOrd.filter(o=>o.returnAt);
+  const todayDelSum    = todayDelivered.reduce((s,o)=>s+(o.total||0)+(o.deliveryPrice||0),0);
   document.getElementById('op-stats-grid').innerHTML=`
-    <div class="stat-card"><div class="stat-val">${orders.length}</div><div class="stat-lbl">Заказов (7д)</div></div>
-    <div class="stat-card"><div class="stat-val text-success">${done.length}</div><div class="stat-lbl">Доставлено</div></div>
-    <div class="stat-card"><div class="stat-val text-danger">${orders.filter(o=>o.status==='cancelled').length}</div><div class="stat-lbl">Отменено</div></div>
-    <div class="stat-card"><div class="stat-val text-primary">${fmtPrice(revenue)}</div><div class="stat-lbl">Выручка</div></div>`;
+    <div class="stat-card"><div class="stat-val">${todayOnline.length}</div><div class="stat-lbl">Заказы</div></div>
+    <div class="stat-card"><div class="stat-val text-success">${todayDelivered.length}</div><div class="stat-lbl">Доставлено</div></div>
+    <div class="stat-card"><div class="stat-val text-danger">${todayCancelled.length}</div><div class="stat-lbl">Отменено</div></div>
+    <div class="stat-card"><div class="stat-val text-warning">${todayReturns.length}</div><div class="stat-lbl">Возвраты</div></div>
+    <div class="stat-card" style="grid-column:span 2"><div class="stat-val text-primary">${fmtPrice(todayDelSum)}</div><div class="stat-lbl">Сумма доставок</div></div>`;
+
+  await opLoadBlacklist();
+}
+
+async function opAddToBlacklist() {
+  const phone = document.getElementById('op-bl-phone').value.trim();
+  if (!phone) { showToast('Введите телефон','warning'); return; }
+  const links = await dbGetAll('user_links');
+  const norm = normPhone(phone);
+  const link = links.find(l=>normPhone(l.phone||'')===norm);
+  if (!link) { showToast('Пользователь не найден','error'); return; }
+  await dbSet('venue_blacklist', VENUE.id+'_'+link.uid, { venueId:VENUE.id, clientUid:link.uid, clientPhone:link.phone, addedAt:new Date().toISOString(), adminUid:STATE.uid });
+  document.getElementById('op-bl-phone').value='';
+  tgHaptic('success'); showToast('Клиент добавлен в ЧС','success');
+  await opLoadBlacklist();
+}
+
+async function opLoadBlacklist() {
+  const items = await dbQuery('venue_blacklist','venueId','==',VENUE.id);
+  const listEl = document.getElementById('op-blacklist-items'); if (!listEl) return;
+  if (!items.length) { listEl.innerHTML='<div class="text-dim text-sm">Чёрный список пуст</div>'; return; }
+  listEl.innerHTML = items.map(b=>`
+    <div class="flex items-center gap-2">
+      <div style="flex:1"><div class="font-bold text-sm">${b.clientPhone||b.clientUid}</div><div class="text-xs text-dim">${fmtDate(b.addedAt)}</div></div>
+      <button class="btn btn-xs" style="background:var(--danger-soft);color:var(--danger);border:none;padding:4px 8px;border-radius:6px;cursor:pointer" onclick="opRemoveFromBlacklist('${b.venueId}_${b.clientUid}')">×</button>
+    </div>`).join('');
+}
+
+async function opRemoveFromBlacklist(blId) {
+  await dbDelete('venue_blacklist', blId);
+  showToast('Клиент удалён из ЧС','info'); await opLoadBlacklist();
 }
 
 // ══════════════════════════════════════════════════════════

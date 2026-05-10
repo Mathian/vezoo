@@ -486,19 +486,32 @@ function watchNewOrders() {
   });
 }
 
-async function loadOrders(tab,el) {
-  _ordersTab=tab;
+async function loadOrders(tab, el) {
+  _ordersTab = tab;
   if (el) { document.querySelectorAll('#s-orders .cat-tab').forEach(b=>b.classList.remove('active')); el.classList.add('active'); }
-  const list=document.getElementById('admin-orders-list');
-  list.innerHTML='<div class="loader"><div class="spinner"></div></div>';
-  let orders=await dbQuery('orders','venueId','==',VENUE.id);
-  if (tab==='active')
-    orders=orders.filter(o=>['pending','accepted','cooking','searching_courier','courier_assigned','ready_for_courier','delivering','ready'].includes(o.status));
-  else if (tab==='pending')
-    orders=orders.filter(o=>o.status==='pending');
+  // Show/hide date range for history
+  const rangeEl = document.getElementById('admin-hist-daterange');
+  if (rangeEl) rangeEl.style.display = tab === 'history' ? '' : 'none';
+  if (tab === 'history') {
+    const today = new Date().toISOString().slice(0,10);
+    const fromEl = document.getElementById('admin-hist-from'), toEl = document.getElementById('admin-hist-to');
+    if (fromEl && !fromEl.value) fromEl.value = today;
+    if (toEl   && !toEl.value)   toEl.value   = today;
+  }
+  const list = document.getElementById('admin-orders-list');
+  list.innerHTML = '<div class="loader"><div class="spinner"></div></div>';
+  let orders = await dbQuery('orders','venueId','==',VENUE.id);
+  if (tab === 'active')
+    orders = orders.filter(o=>['pending','accepted','cooking','searching_courier','courier_assigned','ready_for_courier','delivering','ready'].includes(o.status));
+  else if (tab === 'pending')
+    orders = orders.filter(o=>o.status==='pending');
   else {
-    orders=orders.filter(o=>['delivered','cancelled','issued'].includes(o.status));
-    orders=orders.sort((a,b)=>(b.createdAt||'').localeCompare(a.createdAt||'')).slice(0,80);
+    orders = orders.filter(o=>['delivered','cancelled','issued'].includes(o.status));
+    const fromEl = document.getElementById('admin-hist-from'), toEl = document.getElementById('admin-hist-to');
+    const today = new Date().toISOString().slice(0,10);
+    const f = fromEl?.value || today, t = toEl?.value || today;
+    orders = orders.filter(o => { const d=(o.createdAt||'').slice(0,10); return d>=f && d<=t; });
+    orders = orders.sort((a,b)=>(b.createdAt||'').localeCompare(a.createdAt||''));
   }
   renderOrdersList(orders);
 }
@@ -538,6 +551,7 @@ async function openOrderDetail(orderId) {
       <div class="flex justify-between"><span class="text-dim">Телефон</span><span style="font-family:monospace">${order.clientPhone||'—'}</span></div>
       ${order.status==='cancelled'&&order.cancelledBy?`<div class="flex justify-between"><span class="text-dim">Отменил</span><span style="color:var(--danger)">${{client:'Клиент',operator:'Оператор',admin:'Администратор'}[order.cancelledBy]||'—'}</span></div>`:''}
       ${callBtn?`<div>${callBtn}</div>`:''}
+      ${(order.courierName||order.courierPhone)?`<div class="flex justify-between"><span class="text-dim">Курьер</span><span style="text-align:right;max-width:60%">${order.courierName||'—'}${order.courierPhone?' · '+order.courierPhone:''}</span></div>`:'' }
       ${callCourierBtn?`<div>${callCourierBtn}</div>`:''}
       <div class="flex justify-between"><span class="text-dim">Оплата</span><span>${order.payment==='cash'?'💵 Наличные':'💳 Карта'}</span></div>
       <div class="flex justify-between"><span class="text-dim">Адрес</span><span style="text-align:right;max-width:60%">${addrStr}</span></div>
@@ -833,19 +847,129 @@ function scanQrCourier() {
 //  STATS
 // ══════════════════════════════════════════════════════════
 async function loadStats() {
-  const orders=await dbQuery('orders','venueId','==',VENUE.id);
-  const done=orders.filter(o=>o.status==='delivered');
-  const revenue=done.reduce((s,o)=>s+(o.total||0),0);
-  document.getElementById('stats-grid').innerHTML=`
-    <div class="stat-card"><div class="stat-val">${orders.length}</div><div class="stat-lbl">Всего заказов</div></div>
-    <div class="stat-card"><div class="stat-val text-success">${done.length}</div><div class="stat-lbl">Доставлено</div></div>
-    <div class="stat-card"><div class="stat-val text-danger">${orders.filter(o=>o.status==='cancelled').length}</div><div class="stat-lbl">Отменено</div></div>
-    <div class="stat-card"><div class="stat-val text-primary">${fmtPrice(revenue)}</div><div class="stat-lbl">Выручка</div></div>`;
-  const itemFreq={};
-  done.forEach(o=>(o.items||[]).forEach(it=>{itemFreq[it.name]=(itemFreq[it.name]||0)+it.qty;}));
-  const topItems=Object.entries(itemFreq).sort((a,b)=>b[1]-a[1]).slice(0,5);
-  document.getElementById('stats-top-items').innerHTML=topItems.length
-    ?`<div class="section-title" style="margin-bottom:6px">Топ блюд</div>${topItems.map(([name,qty])=>`<div class="list-item" style="cursor:default"><div class="li-body"><div class="li-title">${name}</div></div><div class="li-price">${qty} шт</div></div>`).join('')}`:'';
+  const today = new Date().toISOString().slice(0,10);
+  const allOrd = await dbQuery('orders','venueId','==',VENUE.id);
+  const todayOrd    = allOrd.filter(o=>(o.createdAt||'').startsWith(today));
+  const todayOnline    = todayOrd.filter(o=>!o.isManual);
+  const todayDelivered = todayOrd.filter(o=>o.status==='delivered'||o.status==='issued');
+  const todayCancelled = todayOrd.filter(o=>o.status==='cancelled');
+  const todayReturns   = todayOrd.filter(o=>o.returnAt);
+  const todayDelSum    = todayDelivered.reduce((s,o)=>s+(o.total||0)+(o.deliveryPrice||0),0);
+  document.getElementById('stats-today-grid').innerHTML=`
+    <div class="stat-card"><div class="stat-val">${todayOnline.length}</div><div class="stat-lbl">Заказы</div></div>
+    <div class="stat-card"><div class="stat-val text-success">${todayDelivered.length}</div><div class="stat-lbl">Доставлено</div></div>
+    <div class="stat-card"><div class="stat-val text-danger">${todayCancelled.length}</div><div class="stat-lbl">Отменено</div></div>
+    <div class="stat-card"><div class="stat-val text-warning">${todayReturns.length}</div><div class="stat-lbl">Возвраты</div></div>
+    <div class="stat-card" style="grid-column:span 2"><div class="stat-val text-primary">${fmtPrice(todayDelSum)}</div><div class="stat-lbl">Сумма доставок</div></div>`;
+
+  // TOP-10 positions today
+  const itemFreq = {};
+  for (const o of todayDelivered) {
+    for (const it of (o.items||[])) {
+      const key = `${it.category||''}||${it.name}||${it.variantName||''}`;
+      if (!itemFreq[key]) itemFreq[key] = { category:it.category||'', name:it.name, variant:it.variantName||'', count:0 };
+      itemFreq[key].count += it.qty||1;
+    }
+  }
+  const top10 = Object.values(itemFreq).sort((a,b)=>b.count-a.count).slice(0,10);
+  const topEl = document.getElementById('stats-top-items');
+  topEl.innerHTML = top10.length
+    ? top10.map(it => {
+        const label = (it.category ? it.category+' ' : '') + it.name + (it.variant?' ('+it.variant+')':'');
+        return `<div class="list-item" style="cursor:default"><div class="li-body"><div class="li-title">${label}</div></div><div class="li-price">${it.count} шт</div></div>`;
+      }).join('')
+    : '<div class="text-dim text-sm" style="padding:8px 0">Нет данных за сегодня</div>';
+}
+
+async function generateAdminReport() {
+  const fromDate = document.getElementById('rep-date-from')?.value;
+  const toDate   = document.getElementById('rep-date-to')?.value;
+  if (!fromDate || !toDate) { showToast('Выберите период','warning'); return; }
+  const btn = document.querySelector('[onclick="generateAdminReport()"]');
+  if (btn) { btn.disabled=true; btn.textContent='⏳ Формирую...'; }
+  try {
+    const allOrders = await dbQuery('orders','venueId','==',VENUE.id);
+    const orders = allOrders.filter(o=>{ const d=(o.createdAt||'').slice(0,10); return d>=fromDate && d<=toDate; });
+
+    // Permanent couriers
+    const permLinks = await dbQuery('courier_venue_links','venueId','==',VENUE.id);
+    const permUids  = new Set(permLinks.filter(l=>l.status==='confirmed').map(l=>l.uid));
+
+    const onlineOrd   = orders.filter(o=>!o.isManual);
+    const manualOrd   = orders.filter(o=>o.isManual);
+    const cancelled   = orders.filter(o=>o.status==='cancelled');
+    const cancelCl    = cancelled.filter(o=>o.cancelledBy==='client');
+    const cancelVen   = cancelled.filter(o=>o.cancelledBy==='admin'||o.cancelledBy==='operator');
+    const returns     = orders.filter(o=>o.returnAt);
+    const delivered   = orders.filter(o=>o.status==='delivered'||o.status==='issued');
+    const delivPool   = delivered.filter(o=>o.courierUid&&!permUids.has(o.courierUid));
+    const delivPerm   = delivered.filter(o=>o.courierUid&&permUids.has(o.courierUid));
+    const delivSum    = delivered.reduce((s,o)=>s+(o.total||0)+(o.deliveryPrice||0),0);
+
+    // Per courier
+    const courierMap = {};
+    for (const o of delivered) {
+      if (!o.courierUid) continue;
+      if (!courierMap[o.courierUid]) courierMap[o.courierUid]={ name:o.courierName||'—', phone:o.courierPhone||'', delivered:0, returns:0 };
+      courierMap[o.courierUid].delivered++;
+    }
+    for (const o of returns) {
+      const uid = o.returnedByUid; if (!uid) continue;
+      if (!courierMap[uid]) courierMap[uid]={ name:o.returnedByName||'—', phone:o.courierPhone||'', delivered:0, returns:0 };
+      courierMap[uid].returns++;
+    }
+
+    // TOP-10
+    const itemFreq = {};
+    for (const o of delivered) {
+      for (const it of (o.items||[])) {
+        const key=`${it.category||''}||${it.name}||${it.variantName||''}`;
+        if (!itemFreq[key]) itemFreq[key]={ category:it.category||'', name:it.name, variant:it.variantName||'', count:0 };
+        itemFreq[key].count += it.qty||1;
+      }
+    }
+    const top10 = Object.values(itemFreq).sort((a,b)=>b.count-a.count).slice(0,10);
+
+    const fmt = d => d.split('-').reverse().join('.');
+    let rep = `Период: ${fmt(fromDate)} – ${fmt(toDate)}\n\n`;
+    rep += `Заказы Vezoo: ${onlineOrd.length}\n`;
+    rep += `Созданные заведением: ${manualOrd.length}\n`;
+    rep += `Отменённые заказы: ${cancelled.length}\n`;
+    rep += `-Отменённые клиентами: ${cancelCl.length}\n`;
+    rep += `-Отменённые заведением: ${cancelVen.length}\n`;
+    rep += `Возвраты курьерами: ${returns.length}\n\n`;
+    rep += `Доставлено: ${delivered.length}\n`;
+    rep += `-Через поиск курьера: ${delivPool.length}\n`;
+    rep += `-Постоянными курьерами: ${delivPerm.length}\n`;
+    rep += `Сумма доставок: ${fmtPrice(delivSum)}\n`;
+    const entries = Object.entries(courierMap);
+    if (entries.length) {
+      rep += '\n';
+      for (const [,c] of entries) {
+        rep += `\n${c.name} (${c.phone||'—'}):\n`;
+        rep += `-Доставлено: ${c.delivered}\n`;
+        rep += `-Возвраты: ${c.returns}\n`;
+      }
+    }
+    if (top10.length) {
+      rep += '\nТОП-10 позиций:\n';
+      for (const it of top10) {
+        const lbl = (it.category?it.category+' ':'')+it.name+(it.variant?' ('+it.variant+')':'');
+        rep += `-${lbl} – ${it.count}\n`;
+      }
+    }
+    document.getElementById('admin-report-text').textContent = rep;
+    const out = document.getElementById('admin-report-output');
+    out.style.display = 'flex';
+  } finally {
+    if (btn) { btn.disabled=false; btn.textContent='📊 Сформировать отчёт'; }
+  }
+}
+
+function copyAdminReport() {
+  const text = document.getElementById('admin-report-text')?.textContent||'';
+  if (navigator.clipboard) navigator.clipboard.writeText(text).then(()=>showToast('Скопировано','success'));
+  else { showToast('Скопировано','success'); }
 }
 
 // ══════════════════════════════════════════════════════════

@@ -143,7 +143,6 @@ async function _showCitySelect() {
     html += cities.map(city => `
       <div class="city-item" onclick="selectCity('${city.id}','${(city.name||'').replace(/'/g,"\\'")}','${country?.currency||'₸'}')">
         <span class="font-bold">${city.name}</span>
-        <span class="text-dim text-sm">Доставка от ${fmtPrice(city.deliveryPrice || 0, country?.currency || '₸')}</span>
       </div>`).join('');
   }
   document.getElementById('city-select-list').innerHTML = html;
