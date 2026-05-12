@@ -34,9 +34,16 @@ window.addEventListener('DOMContentLoaded', async () => {
     const s = JSON.parse(localStorage.getItem('vez_admin_state') || '{}');
     if (!_tgUserId || s.tgId === _tgUserId) { STATE.uid = s.uid||null; STATE.user = s.user||null; }
   } catch {}
-  const urlUid = readUidFromUrl();
-  if (urlUid) { STATE.uid = urlUid; saveState(); }
+  const _urlToken = readUidFromUrl();
   await initFirebase();
+  if (_urlToken) {
+    const _res = await resolveLoginToken(_urlToken);
+    if (_res.uid) {
+      if (_res.clearStorage) _clearVezCache();
+      STATE.uid = _res.uid;
+      saveState();
+    }
+  }
   if (!STATE.uid) { const tgUid = await resolveUidByTgId(); if (tgUid) { STATE.uid = tgUid; saveState(); } }
   if (!STATE.uid) { showScreen('s-no-uid'); return; }
 
@@ -121,6 +128,14 @@ function updatePinDots() {
 }
 
 async function checkPin() {
+  // Rate limit: 5 attempts per minute
+  try { await checkRateLimit('pin_admin_' + STATE.uid, 5, 60000); }
+  catch (e) {
+    tgHaptic('error');
+    document.getElementById('pin-sub-text').textContent = e.message;
+    setTimeout(() => { _pinBuffer = ''; updatePinDots(); document.getElementById('pin-sub-text').textContent = 'Введите PIN-код'; }, 2000);
+    return;
+  }
   const ok = await verifyPin('admin', _pinBuffer);
   if (ok) {
     document.getElementById('s-pin').style.display = 'none';
@@ -671,6 +686,8 @@ function handoffScanQr() {
 async function findHandoffCourier() {
   const phone=normPhone(document.getElementById('handoff-phone').value.trim());
   if (!phone) { showToast('Введите номер телефона','warning'); return; }
+  try { await checkRateLimit('qr_assign_' + STATE.uid, 1, 3000); }
+  catch (e) { showToast(e.message, 'warning'); return; }
   const links=await dbGetAll('user_links');
   const link=links.find(l=>normPhone(l.phone)===phone);
   if (!link) { showToast('Курьер не найден','error'); return; }
@@ -885,6 +902,9 @@ async function generateAdminReport() {
   const fromDate = document.getElementById('rep-date-from')?.value;
   const toDate   = document.getElementById('rep-date-to')?.value;
   if (!fromDate || !toDate) { showToast('Выберите период','warning'); return; }
+  // Rate limit: 1 report per 30 seconds
+  try { await checkRateLimit('report_' + STATE.uid, 1, 30000); }
+  catch (e) { showToast(e.message, 'warning'); return; }
   const btn = document.querySelector('[onclick="generateAdminReport()"]');
   if (btn) { btn.disabled=true; btn.textContent='⏳ Формирую...'; }
   try {

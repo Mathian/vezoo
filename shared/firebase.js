@@ -244,6 +244,11 @@ function statusBadgeClass(st) {
   return 'badge ' + (map[st] || 'badge-pending');
 }
 
+// ── XSS escape ──
+function escHtml(s) {
+  return String(s ?? '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;').replace(/'/g,'&#39;');
+}
+
 // ── Stars ──
 function renderStars(n, interactive = false, onClick = null) {
   const full = Math.round(n || 0);
@@ -279,18 +284,18 @@ async function resolveUidByTgId() {
 
 // ─────────────────────── State helpers ───────────────────────
 function readUidFromUrl() {
-  // 1. Telegram WebApp start_param (передаётся через ?startapp= или бот /start uid_xxx)
+  // 1. Telegram WebApp start_param — may be a one-time login token or legacy uid
   const startParam = tg?.initDataUnsafe?.start_param || '';
-  if (startParam && startParam.startsWith('u_') && startParam.length > 5) {
+  if (startParam && startParam.length > 5) {
     return startParam;
   }
-  // 2. Telegram WebApp передаёт параметры через tgWebAppStartParam в hash
+  // 2. tgWebAppStartParam in hash
   try {
     const hash = new URLSearchParams(location.hash.replace('#', ''));
     const hashUid = hash.get('tgWebAppStartParam') || hash.get('uid');
     if (hashUid && hashUid.length > 5) return hashUid;
   } catch {}
-  // 3. Прямой ?uid= в URL (fallback для тестирования в браузере)
+  // 3. Direct ?uid= in URL (fallback for browser testing)
   const p = new URLSearchParams(location.search);
   const uid = p.get('uid') || p.get('tgWebAppStartParam');
   if (uid && uid.length > 5) {
@@ -298,6 +303,42 @@ function readUidFromUrl() {
     return uid;
   }
   return null;
+}
+
+// Resolve one-time login token → { uid, clearStorage }
+// Bot writes user_links/{token} = { uid: realUid, used: false, expiresAt: Date.now()+300000 }
+// Bot also keeps user_links/{realUid} = { phone, firstName } for agreement lookup (unchanged)
+async function resolveLoginToken(token) {
+  if (!token || !_fbR) return { uid: token, clearStorage: false };
+  try {
+    const linkDoc = await dbGet('user_links', token);
+    if (linkDoc && linkDoc.uid) {
+      // One-time token document found
+      const realUid   = linkDoc.uid;
+      const isUsed    = linkDoc.used === true;
+      const isExpired = linkDoc.expiresAt && linkDoc.expiresAt < Date.now();
+      if (!isUsed && !isExpired) {
+        // First login — mark used, signal cache clear
+        await dbSet('user_links', token, { used: true });
+        return { uid: realUid, clearStorage: true };
+      }
+      // Already used or expired — return uid without cache clear
+      return { uid: realUid, clearStorage: false };
+    }
+    // Not a token document → legacy: token IS the uid
+    return { uid: token, clearStorage: false };
+  } catch {
+    return { uid: token, clearStorage: false };
+  }
+}
+
+// Clear all cached Firestore documents (vez_ prefix) from localStorage
+function _clearVezCache() {
+  try {
+    Object.keys(localStorage)
+      .filter(k => k.startsWith(PFX))
+      .forEach(k => localStorage.removeItem(k));
+  } catch {}
 }
 
 // ─────────────────────── Heartbeat ───────────────────────
@@ -422,16 +463,29 @@ async function getDeliveryPriceForCity(cityId) {
 // ─────────────────────── PIN helpers ───────────────────────
 const PIN_DEFAULTS = { admin:'0000', operator:'0000', master:'0000', superadmin:'0000' };
 
+// SHA-256 hash with fixed salt (WebCrypto API — built-in, no external lib)
+async function _hashPin(pin) {
+  const data = new TextEncoder().encode('vezoo_salt_v1:' + pin);
+  const buf  = await crypto.subtle.digest('SHA-256', data);
+  return Array.from(new Uint8Array(buf)).map(b => b.toString(16).padStart(2,'0')).join('');
+}
+
 async function verifyPin(role, entered) {
   try {
-    const cfg = await dbGet('settings', 'pins');
+    const cfg    = await dbGet('settings', 'pins');
     const stored = cfg?.[role] || PIN_DEFAULTS[role] || '0000';
+    if (stored.length === 64) {
+      // Stored as SHA-256 hash
+      return (await _hashPin(entered)) === stored;
+    }
+    // Legacy plaintext (until PIN is re-saved via settings)
     return entered === stored;
   } catch { return entered === '0000'; }
 }
 
 async function savePin(role, newPin) {
-  await dbSet('settings', 'pins', { [role]: newPin });
+  const hashed = await _hashPin(newPin);
+  await dbSet('settings', 'pins', { [role]: hashed });
 }
 
 async function getPinForRole(role) {
@@ -458,6 +512,26 @@ function checkAllergyConflict(itemIngredients, userProfile) {
   if (!prefs.length) return false;
   const lower = itemIngredients.map(x => x.toLowerCase());
   return prefs.some(p => lower.some(i => i.includes(p.toLowerCase())));
+}
+
+// ─────────────────────── Rate limiting ───────────────────────
+// key — unique string (e.g. 'pin_UID', 'order_UID', 'review_UID')
+// maxCount — allowed calls in window
+// windowMs  — rolling window in milliseconds
+// Throws Error with message if limit exceeded, resolves normally otherwise.
+async function checkRateLimit(key, maxCount, windowMs) {
+  const docId = '_rl_' + key.replace(/[^a-z0-9]/gi, '_');
+  const now   = Date.now();
+  const snap  = await dbGet('_rate_limits', docId);
+  if (snap && snap.resetAt > now && snap.count >= maxCount) {
+    const secsLeft = Math.ceil((snap.resetAt - now) / 1000);
+    throw new Error(`Слишком много попыток. Подождите ${secsLeft} сек.`);
+  }
+  if (!snap || snap.resetAt <= now) {
+    await dbSet('_rate_limits', docId, { count: 1, resetAt: now + windowMs });
+  } else {
+    await dbSet('_rate_limits', docId, { count: snap.count + 1, resetAt: snap.resetAt });
+  }
 }
 
 // ─────────────────────── Agreement checkbox ───────────────────────

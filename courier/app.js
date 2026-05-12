@@ -38,11 +38,17 @@ window.addEventListener('DOMContentLoaded', async () => {
     }
   } catch {}
 
-  const urlUid = readUidFromUrl();
-  if (urlUid) { STATE.uid = urlUid; _saveState(); }
-
+  const _urlToken = readUidFromUrl();
   await initFirebase();
 
+  if (_urlToken) {
+    const _res = await resolveLoginToken(_urlToken);
+    if (_res.uid) {
+      if (_res.clearStorage) _clearVezCache();
+      STATE.uid = _res.uid;
+      _saveState();
+    }
+  }
   if (!STATE.uid) {
     const tgUid = await resolveUidByTgId();
     if (tgUid) { STATE.uid = tgUid; _saveState(); }

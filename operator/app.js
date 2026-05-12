@@ -26,9 +26,16 @@ window.addEventListener('DOMContentLoaded', async () => {
     const s = JSON.parse(localStorage.getItem('vez_op_state') || '{}');
     if (!tgUserId || s.tgId === tgUserId) { STATE.uid = s.uid||null; STATE.user = s.user||null; }
   } catch {}
-  const urlUid = readUidFromUrl();
-  if (urlUid) { STATE.uid = urlUid; saveState(); }
+  const _urlToken = readUidFromUrl();
   await initFirebase();
+  if (_urlToken) {
+    const _res = await resolveLoginToken(_urlToken);
+    if (_res.uid) {
+      if (_res.clearStorage) _clearVezCache();
+      STATE.uid = _res.uid;
+      saveState();
+    }
+  }
   if (!STATE.uid) { const tgUid = await resolveUidByTgId(); if (tgUid) { STATE.uid = tgUid; saveState(); } }
   if (!STATE.uid) { showScreen('s-no-uid'); return; }
   const existing = await dbGet('users', STATE.uid);
@@ -397,6 +404,8 @@ function opHandoffScanQr() {
 async function opFindHandoffCourier() {
   const phone=normPhone(document.getElementById('op-handoff-phone').value.trim());
   if (!phone) { showToast('Введите номер телефона','warning'); return; }
+  try { await checkRateLimit('qr_assign_' + STATE.uid, 1, 3000); }
+  catch (e) { showToast(e.message, 'warning'); return; }
   const links=await dbGetAll('user_links');
   const link=links.find(l=>normPhone(l.phone||'')===phone);
   if (!link) { showToast('Курьер не найден','error'); return; }

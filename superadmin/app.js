@@ -34,10 +34,16 @@ window.addEventListener('DOMContentLoaded', async () => {
     if (!_tgUserId || s.tgId === _tgUserId) { STATE.uid = s.uid||null; STATE.user = s.user||null; }
   } catch {}
 
-  const urlUid = readUidFromUrl();
-  if (urlUid) { STATE.uid = urlUid; saveState(); }
-
+  const _urlToken = readUidFromUrl();
   await initFirebase();
+  if (_urlToken) {
+    const _res = await resolveLoginToken(_urlToken);
+    if (_res.uid) {
+      if (_res.clearStorage) _clearVezCache();
+      STATE.uid = _res.uid;
+      saveState();
+    }
+  }
   if (!STATE.uid) { const tgUid = await resolveUidByTgId(); if (tgUid) { STATE.uid = tgUid; saveState(); } }
   if (!STATE.uid) { showScreen('s-no-uid'); return; }
 
@@ -112,6 +118,14 @@ function updatePinDots() {
 }
 
 async function checkPin() {
+  // Rate limit: 5 attempts per minute
+  try { await checkRateLimit('pin_sa_' + STATE.uid, 5, 60000); }
+  catch (e) {
+    tgHaptic('error');
+    document.getElementById('pin-sub-text').textContent = e.message;
+    setTimeout(() => { _pinBuffer = ''; updatePinDots(); document.getElementById('pin-sub-text').textContent = 'Введите PIN-код'; }, 2000);
+    return;
+  }
   const ok = await verifyPin('superadmin', _pinBuffer);
   if (ok) {
     document.getElementById('s-pin').style.display = 'none';
@@ -678,6 +692,8 @@ async function saToggleVenueBlock(venueId, currentlyBlocked) {
 async function saAssignAdminToVenue(venueId) {
   const phone = document.getElementById('sa-ven-admin-phone')?.value.trim();
   if (!phone) { showToast('Введите телефон', 'warning'); return; }
+  try { await checkRateLimit('qr_assign_' + STATE.uid, 1, 3000); }
+  catch (e) { showToast(e.message, 'warning'); return; }
   const links = await dbGetAll('user_links');
   const link  = links.find(l => normPhone(l.phone||'') === normPhone(phone));
   if (!link)  { showToast('Пользователь не найден', 'error'); return; }
@@ -716,6 +732,8 @@ function saScanQrAdmin(venueId) {
 async function saAssignOpToVenue(venueId) {
   const phone = document.getElementById('sa-ven-op-phone')?.value.trim();
   if (!phone) { showToast('Введите телефон', 'warning'); return; }
+  try { await checkRateLimit('qr_assign_' + STATE.uid, 1, 3000); }
+  catch (e) { showToast(e.message, 'warning'); return; }
   const links = await dbGetAll('user_links');
   const link  = links.find(l => normPhone(l.phone||'') === normPhone(phone));
   if (!link)  { showToast('Пользователь не найден', 'error'); return; }
@@ -757,6 +775,8 @@ function saScanQrOpForVenue(venueId) {
 async function saAddCourierToVenue(venueId) {
   const phone = document.getElementById('sa-ven-courier-phone')?.value.trim();
   if (!phone) { showToast('Введите телефон', 'warning'); return; }
+  try { await checkRateLimit('qr_assign_' + STATE.uid, 1, 3000); }
+  catch (e) { showToast(e.message, 'warning'); return; }
   const links = await dbGetAll('user_links');
   const link  = links.find(l => normPhone(l.phone||'') === normPhone(phone));
   if (!link)  { showToast('Пользователь не найден', 'error'); return; }

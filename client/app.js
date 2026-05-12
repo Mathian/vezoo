@@ -51,11 +51,17 @@ window.addEventListener('DOMContentLoaded', async () => {
     FAVORITES = JSON.parse(localStorage.getItem('vez_favorites') || '[]');
   } catch {}
 
-  const urlUid = readUidFromUrl();
-  if (urlUid) { STATE.uid = urlUid; _saveClientState(); }
-
+  const _urlToken = readUidFromUrl();
   await initFirebase();
 
+  if (_urlToken) {
+    const _res = await resolveLoginToken(_urlToken);
+    if (_res.uid) {
+      if (_res.clearStorage) _clearVezCache();
+      STATE.uid = _res.uid;
+      _saveClientState();
+    }
+  }
   if (!STATE.uid) {
     const tgUid = await resolveUidByTgId();
     if (tgUid) { STATE.uid = tgUid; _saveClientState(); }
@@ -327,7 +333,7 @@ async function loadVenueMenu(venueId) {
   VENUE_MENU = (await dbQuery('menu_items', 'venueId', '==', venueId)).filter(i => i.available !== false);
   const menuCats = ['Все', ...new Set(VENUE_MENU.map(i => i.category).filter(Boolean))];
   document.getElementById('venue-cat-tabs').innerHTML = menuCats.map((c, i) =>
-    `<button class="cat-tab${i === 0 ? ' active' : ''}" onclick="filterVenueMenu(this,'${c}')">${c}</button>`
+    `<button class="cat-tab${i === 0 ? ' active' : ''}" onclick="filterVenueMenu(this,decodeURIComponent('${encodeURIComponent(c)}'))">${escHtml(c)}</button>`
   ).join('');
   renderVenueMenuGrid(null);
 }
@@ -641,6 +647,10 @@ async function submitOrder() {
   const venueCart = CART[venueId] || [];
   if (!venueCart.length)           { showToast('Корзина пуста', 'warning'); return; }
   if (!isVenueOpen(CURRENT_VENUE)) { showToast('Заведение сейчас закрыто', 'warning'); return; }
+
+  // Rate limit: 2 orders per minute
+  try { await checkRateLimit('order_' + STATE.uid, 2, 60000); }
+  catch (e) { showToast(e.message, 'warning'); return; }
 
   const isPickup = _deliveryType === 'pickup';
   const street   = document.getElementById('addr-street').value.trim();
@@ -1083,11 +1093,11 @@ async function renderReviews() {
   listEl.innerHTML = allReviews.map(r => `
     <div class="review-card" style="margin-bottom:10px">
       <div class="flex items-center gap-2">
-        <div class="avatar" style="width:32px;height:32px;font-size:13px">${(r.userName || '?')[0].toUpperCase()}</div>
-        <div class="review-user">${r.userName || 'Пользователь'}</div>
+        <div class="avatar" style="width:32px;height:32px;font-size:13px">${escHtml((r.userName || '?')[0].toUpperCase())}</div>
+        <div class="review-user">${escHtml(r.userName || 'Пользователь')}</div>
         <div class="star-row" style="margin-left:auto">${renderStars(r.stars)}</div>
       </div>
-      <div class="review-text">${r.text || ''}</div>
+      <div class="review-text">${escHtml(r.text || '')}</div>
       <div class="review-date">${fmtDate(r.updatedAt || r.createdAt)}</div>
     </div>`).join('');
 }
@@ -1103,6 +1113,9 @@ function selectReviewStar(n) {
 }
 async function submitReview() {
   if (_reviewStarsSel < 1) { showToast('Выберите оценку', 'warning'); return; }
+  // Rate limit: 1 review per minute
+  try { await checkRateLimit('review_' + STATE.uid, 1, 60000); }
+  catch (e) { showToast(e.message, 'warning'); return; }
   const text = document.getElementById('review-text')?.value.trim() || '';
   const venueId = _currentReviewVenueId;
   await dbSet('reviews', `${venueId}_${STATE.uid}`, {
@@ -1136,6 +1149,9 @@ async function editReview() {
 }
 async function submitEditReview() {
   if (_reviewStarsSel < 1) { showToast('Выберите оценку', 'warning'); return; }
+  // Same rate limit bucket as new review
+  try { await checkRateLimit('review_' + STATE.uid, 1, 60000); }
+  catch (e) { showToast(e.message, 'warning'); return; }
   const text = document.getElementById('review-text')?.value.trim() || '';
   await dbSet('reviews', `${_currentReviewVenueId}_${STATE.uid}`, { stars: _reviewStarsSel, text, updatedAt: new Date().toISOString() });
   await _updateVenueRating(_currentReviewVenueId);
