@@ -58,7 +58,7 @@ window.addEventListener('DOMContentLoaded', async () => {
   const existing = await dbGet('users', STATE.uid);
   if (existing?.blocked) { showScreen('s-blocked'); return; }
 
-  if (!existing?.agreedCourier) {
+  if (!existing?.agreedCourier && !STATE.user?.agreedCourier) {
     document.getElementById('s-agree').style.display = 'flex';
     return;
   }

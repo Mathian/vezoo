@@ -49,14 +49,14 @@ window.addEventListener('DOMContentLoaded', async () => {
 
   const existing = await dbGet('users', STATE.uid);
   if (existing?.blocked) { showScreen('s-blocked'); return; }
-  if (!existing?.agreedAdmin) { showAgreement(); return; }
+  if (!existing?.agreedAdmin && !STATE.user?.agreedAdmin) { showAgreement(); return; }
 
   if (existing && !existing.name) {
     const autoName = _getTgName() || 'Администратор';
     await dbSet('users', STATE.uid, { name: autoName });
     existing.name = autoName;
   }
-  STATE.user = existing; saveState();
+  STATE.user = existing || STATE.user; saveState();
   showPinScreen();
 });
 

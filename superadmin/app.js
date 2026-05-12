@@ -47,17 +47,15 @@ window.addEventListener('DOMContentLoaded', async () => {
   if (!STATE.uid) { const tgUid = await resolveUidByTgId(); if (tgUid) { STATE.uid = tgUid; saveState(); } }
   if (!STATE.uid) { showScreen('s-no-uid'); return; }
 
-  try { localStorage.removeItem('vez_users_' + STATE.uid); } catch {}
-  await dbSet('users', STATE.uid, { role: 'superadmin' });
   const existing = await dbGet('users', STATE.uid);
 
-  if (!existing?.agreedSA) {
-    STATE.user = existing || { uid: STATE.uid, role: 'superadmin' };
+  if (!existing?.agreedSA && !STATE.user?.agreedSA) {
+    STATE.user = existing || {};
     saveState();
     showAgreement();
     return;
   }
-  STATE.user = existing; saveState();
+  STATE.user = existing || STATE.user; saveState();
   showPinScreen();
 });
 
@@ -75,8 +73,8 @@ function showAgreement() {
 }
 
 async function submitAgree() {
-  await dbSet('users', STATE.uid, { agreedSA: true });
-  STATE.user = { ...STATE.user, agreedSA: true }; saveState();
+  await dbSet('users', STATE.uid, { agreedSA: true, role: 'superadmin' });
+  STATE.user = { ...STATE.user, agreedSA: true, role: 'superadmin' }; saveState();
   document.getElementById('s-agree').style.display = 'none';
   showPinScreen();
 }

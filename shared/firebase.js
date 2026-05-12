@@ -312,8 +312,8 @@ async function resolveLoginToken(token) {
   if (!token || !_fbR) return { uid: token, clearStorage: false };
   try {
     const linkDoc = await dbGet('user_links', token);
-    if (linkDoc && linkDoc.uid) {
-      // One-time token document found
+    if (linkDoc && linkDoc.uid && linkDoc.uid !== token) {
+      // True one-time token: doc uid ≠ token (token is a UUID, uid is the real user uid)
       const realUid   = linkDoc.uid;
       const isUsed    = linkDoc.used === true;
       const isExpired = linkDoc.expiresAt && linkDoc.expiresAt < Date.now();
@@ -325,7 +325,7 @@ async function resolveLoginToken(token) {
       // Already used or expired — return uid without cache clear
       return { uid: realUid, clearStorage: false };
     }
-    // Not a token document → legacy: token IS the uid
+    // Legacy format: token IS the uid (doc uid == token, or no uid field)
     return { uid: token, clearStorage: false };
   } catch {
     return { uid: token, clearStorage: false };
