@@ -466,15 +466,19 @@ async function openOpManualOrder() {
   _openSheet('op-manual-overlay');
 }
 
+let _opMoDebounce = null;
 async function opMoPhoneInput(input) {
   const val=input.value.trim();
   if (val.length<7) { document.getElementById('op-mo-autocomplete').style.display='none'; return; }
-  const norm=normPhone(val);
-  const links=await dbGetAll('user_links');
-  const matches=links.filter(l=>normPhone(l.phone||'').includes(norm.replace('+',''))).slice(0,5);
-  const dd=document.getElementById('op-mo-autocomplete');
-  if (!matches.length) { dd.style.display='none'; return; }
-  dd.style.display=''; dd.innerHTML=matches.map(l=>`<div class="autocomplete-item" onclick="opMoSelectClient(decodeURIComponent('${encodeURIComponent(l.phone||'')}'),decodeURIComponent('${encodeURIComponent(l.firstName||'')}'),decodeURIComponent('${encodeURIComponent(l.uid||'')}'))"><span style="font-family:monospace">${escHtml(l.phone||'')}</span> <span style="color:var(--text-dim)">${escHtml(l.firstName||'')}</span></div>`).join('');
+  clearTimeout(_opMoDebounce);
+  _opMoDebounce = setTimeout(async () => {
+    const norm=normPhone(val);
+    const links=await dbGetAll('user_links');
+    const matches=links.filter(l=>normPhone(l.phone||'').includes(norm.replace('+',''))).slice(0,5);
+    const dd=document.getElementById('op-mo-autocomplete');
+    if (!matches.length) { dd.style.display='none'; return; }
+    dd.style.display=''; dd.innerHTML=matches.map(l=>`<div class="autocomplete-item" onclick="opMoSelectClient(decodeURIComponent('${encodeURIComponent(l.phone||'')}'),decodeURIComponent('${encodeURIComponent(l.firstName||'')}'),decodeURIComponent('${encodeURIComponent(l.uid||'')}'))"><span style="font-family:monospace">${escHtml(l.phone||'')}</span> <span style="color:var(--text-dim)">${escHtml(l.firstName||'')}</span></div>`).join('');
+  }, 300);
 }
 
 async function opMoSelectClient(phone, name, uid) {

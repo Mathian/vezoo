@@ -790,9 +790,12 @@ async function openManualOrder() {
   _openSheet('manual-order-overlay');
 }
 
+let _moDebounce = null;
 async function moPhoneInput(input) {
   const val=input.value.trim();
   if (val.length<7) { document.getElementById('mo-autocomplete').style.display='none'; return; }
+  clearTimeout(_moDebounce);
+  _moDebounce = setTimeout(async () => {
   const norm=normPhone(val);
   const links=await dbGetAll('user_links');
   const matches=links.filter(l=>normPhone(l.phone||'').includes(norm.replace('+',''))).slice(0,5);
@@ -800,6 +803,7 @@ async function moPhoneInput(input) {
   if (!matches.length) { dd.style.display='none'; return; }
   dd.style.display='';
   dd.innerHTML=matches.map(l=>`<div class="autocomplete-item" onclick="moSelectClient(decodeURIComponent('${encodeURIComponent(l.phone||'')}'),decodeURIComponent('${encodeURIComponent(l.firstName||'')}'),decodeURIComponent('${encodeURIComponent(l.uid||'')}'))"><span style="font-family:monospace">${escHtml(l.phone||'')}</span> <span style="color:var(--text-dim)">${escHtml(l.firstName||'')} ${escHtml(l.lastName||'')}</span></div>`).join('');
+  }, 300);
 }
 
 async function moSelectClient(phone, name, uid) {
