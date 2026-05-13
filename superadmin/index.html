@@ -1,0 +1,253 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1.0,maximum-scale=1.0,user-scalable=no">
+<title>Vezoo — Суперадмин</title>
+<script src="https://www.gstatic.com/firebasejs/9.22.0/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/9.22.0/firebase-firestore-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/9.22.0/firebase-auth-compat.js"></script>
+<script src="https://telegram.org/js/telegram-web-app.js"></script>
+<link rel="stylesheet" href="../shared/style.css">
+</head>
+<body>
+
+<!-- SPLASH -->
+<div id="s-splash" class="screen active no-nav">
+  <div class="splash">
+    <div class="splash-logo">👑</div>
+    <div class="splash-title"><span>Vezoo</span> SA</div>
+    <div class="splash-dots"><div class="splash-dot"></div><div class="splash-dot"></div><div class="splash-dot"></div></div>
+  </div>
+</div>
+
+<!-- ERROR SCREENS -->
+<div id="s-no-uid"  class="screen no-nav"><div class="splash"><div class="splash-logo">🤖</div><div class="splash-title">Нужен бот</div><div class="splash-sub">Откройте через Telegram-бот суперадмина Vezoo.</div></div></div>
+<div id="s-blocked" class="screen no-nav"><div class="splash"><div class="splash-logo">🚫</div><div class="splash-title">Нет доступа</div><div class="splash-sub">Вы не являетесь суперадминистратором.</div></div></div>
+
+<!-- PIN SCREEN -->
+<div id="s-pin" class="pin-screen" style="display:none">
+  <div class="pin-logo">👑</div>
+  <div class="pin-title">Vezoo SuperAdmin</div>
+  <div class="pin-sub" id="pin-sub-text">Введите PIN-код</div>
+  <div class="pin-dots">
+    <div class="pin-dot" id="pd0"></div>
+    <div class="pin-dot" id="pd1"></div>
+    <div class="pin-dot" id="pd2"></div>
+    <div class="pin-dot" id="pd3"></div>
+  </div>
+  <div class="pin-pad">
+    <button class="pin-btn" onclick="pinInput('1')">1</button>
+    <button class="pin-btn" onclick="pinInput('2')">2</button>
+    <button class="pin-btn" onclick="pinInput('3')">3</button>
+    <button class="pin-btn" onclick="pinInput('4')">4</button>
+    <button class="pin-btn" onclick="pinInput('5')">5</button>
+    <button class="pin-btn" onclick="pinInput('6')">6</button>
+    <button class="pin-btn" onclick="pinInput('7')">7</button>
+    <button class="pin-btn" onclick="pinInput('8')">8</button>
+    <button class="pin-btn" onclick="pinInput('9')">9</button>
+    <button class="pin-btn empty"></button>
+    <button class="pin-btn" onclick="pinInput('0')">0</button>
+    <button class="pin-btn del" onclick="pinDelete()">⌫</button>
+  </div>
+</div>
+
+<!-- AGREEMENT -->
+<div id="s-agree" class="agree-screen" style="display:none">
+  <div class="page-hdr" style="position:static">
+    <div class="logo"><div class="logo-icon">👑</div><div class="logo-text"><span>Vezoo</span> SuperAdmin</div></div>
+  </div>
+  <div class="agree-screen-body">
+    <h2 style="text-align:center;font-size:17px">Пользовательское соглашение</h2>
+    <div class="agree-doc" id="agree-doc-content"></div>
+    <label class="check-row" id="agree-check-row" onclick="toggleAgreeCheck()">
+      <input type="checkbox" id="agree-cb" style="display:none">
+      <div class="check-box" id="agree-box"></div>
+      <span class="check-label">Я прочитал(а) и принимаю условия Соглашения</span>
+    </label>
+  </div>
+  <div class="agree-screen-foot">
+    <button class="btn btn-primary" id="agree-btn" onclick="submitAgree()" disabled>Войти в панель →</button>
+  </div>
+</div>
+
+<!-- CATEGORIES -->
+<div id="s-categories" class="screen">
+  <div class="page-hdr">
+    <h2>Категории</h2>
+    <div class="page-hdr-end"><button class="btn btn-primary btn-sm" onclick="openAddCategory()">+ Добавить</button></div>
+  </div>
+  <div id="categories-list" style="display:flex;flex-direction:column;gap:8px;padding:12px 20px 16px"></div>
+</div>
+
+<!-- GEOGRAPHY -->
+<div id="s-geography" class="screen">
+  <div class="page-hdr">
+    <h2>География</h2>
+    <div class="page-hdr-end"><button class="btn btn-primary btn-sm" onclick="openAddCountry()">+ Страна</button></div>
+  </div>
+  <div id="geo-list" style="display:flex;flex-direction:column;gap:10px;padding:12px 20px 16px"></div>
+</div>
+
+<!-- VENUES -->
+<div id="s-venues" class="screen">
+  <div class="page-hdr">
+    <h2>Заведения</h2>
+    <div class="page-hdr-end"><button class="btn btn-primary btn-sm" onclick="openSaCreateVenue()">+ Добавить</button></div>
+  </div>
+  <div id="sa-venues-list" style="display:flex;flex-direction:column;gap:10px;padding:12px 20px 16px"></div>
+</div>
+
+<!-- COURIERS MODERATION -->
+<div id="s-couriers" class="screen">
+  <div class="page-hdr"><h2>Курьеры</h2></div>
+  <div class="cat-tabs" style="padding-top:8px">
+    <button class="cat-tab active" onclick="loadCouriersByStatus('pending',this)">⏳ На проверке</button>
+    <button class="cat-tab" onclick="loadCouriersByStatus('active',this)">✅ Активные</button>
+    <button class="cat-tab" onclick="loadCouriersByStatus('blocked',this)">🚫 Заблокированные</button>
+  </div>
+  <div id="sa-couriers-list" style="display:flex;flex-direction:column;gap:10px;padding:12px 20px 16px"></div>
+</div>
+
+<!-- SETTINGS / STATS -->
+<div id="s-sa-settings" class="screen">
+  <div class="page-hdr"><h2>Настройки</h2></div>
+  <div class="content" style="gap:14px">
+
+    <!-- Global stats -->
+    <div class="section-title">Общая статистика</div>
+    <div class="stats-grid" id="sa-stats-grid"></div>
+
+    <!-- Stats by venue -->
+    <div class="section-title" style="margin-top:4px">По заведениям</div>
+    <div class="stats-period-tabs">
+      <button class="period-tab active" onclick="setSaPeriod(7,this)">7 дней</button>
+      <button class="period-tab" onclick="setSaPeriod(30,this)">30 дней</button>
+      <button class="period-tab" onclick="setSaPeriod(90,this)">90 дней</button>
+      <button class="period-tab" onclick="setSaPeriod(0,this)">Всё время</button>
+    </div>
+    <div class="card card-body" style="flex-direction:row;gap:10px;align-items:center;padding:10px 14px">
+      <div style="flex:1;display:flex;flex-direction:column;gap:4px">
+        <label style="font-size:11px;color:var(--text-dim)">Начало</label>
+        <input class="inp" type="date" id="sa-date-from" style="padding:6px 10px;font-size:13px" onchange="loadSaStatsCustom()">
+      </div>
+      <div style="color:var(--text-dim);font-size:18px;padding-top:16px">—</div>
+      <div style="flex:1;display:flex;flex-direction:column;gap:4px">
+        <label style="font-size:11px;color:var(--text-dim)">Конец</label>
+        <input class="inp" type="date" id="sa-date-to" style="padding:6px 10px;font-size:13px" onchange="loadSaStatsCustom()">
+      </div>
+    </div>
+    <div id="sa-stats-venues" style="display:flex;flex-direction:column;gap:8px"></div>
+
+<!-- PIN change -->
+    <div class="card card-body" style="display:flex;flex-direction:column;gap:10px">
+      <div style="font-weight:600;font-size:14px">Сменить PIN суперадмина</div>
+      <div class="field"><label>Новый PIN (4 цифры)</label><input class="inp" id="new-pin-input" type="number" inputmode="numeric" maxlength="4" placeholder="0000" style="letter-spacing:8px;font-size:20px;text-align:center"></div>
+      <button class="btn btn-outline btn-sm" onclick="changePinSa()">Сохранить PIN</button>
+    </div>
+
+    <!-- Users quick stats -->
+    <div class="section-title">Пользователи</div>
+    <div id="sa-users-quick" style="display:flex;flex-direction:column;gap:8px">
+      <div class="cat-tabs" style="padding:0 0 8px">
+        <button class="cat-tab active" onclick="loadUsersByRole('client',this)">👤 Клиенты</button>
+        <button class="cat-tab" onclick="loadUsersByRole('admin',this)">🏪 Админы</button>
+        <button class="cat-tab" onclick="loadUsersByRole('operator',this)">🎧 Операторы</button>
+        <button class="cat-tab" onclick="loadUsersByRole('courier',this)">🚴 Курьеры</button>
+      </div>
+      <div id="sa-users-list" style="display:flex;flex-direction:column;gap:8px"></div>
+    </div>
+  </div>
+</div>
+
+<!-- BOTTOM NAV -->
+<div class="bottom-nav" id="main-nav" style="display:none">
+  <div class="nav-item active" id="nav-cats" onclick="showScreen('s-categories');setNav(this);loadCategories()">
+    <div class="nav-icon">📂</div><div class="nav-label">Категории</div>
+  </div>
+  <div class="nav-item" id="nav-geo" onclick="showScreen('s-geography');setNav(this);loadGeo()">
+    <div class="nav-icon">🌍</div><div class="nav-label">Города</div>
+  </div>
+  <div class="nav-item" id="nav-venues" onclick="showScreen('s-venues');setNav(this);loadAllVenues()">
+    <div class="nav-icon">🏪</div><div class="nav-label">Заведения</div>
+  </div>
+  <div class="nav-item" id="nav-couriers" onclick="showScreen('s-couriers');setNav(this);loadCouriersByStatus('pending')">
+    <div class="nav-icon">🚴</div><div class="nav-label">Курьеры</div>
+    <div class="nav-badge hidden" id="couriers-badge">0</div>
+  </div>
+  <div class="nav-item" id="nav-sastats" onclick="showScreen('s-sa-settings');setNav(this);loadSaSettings()">
+    <div class="nav-icon">⚙️</div><div class="nav-label">Настройки</div>
+  </div>
+</div>
+
+<!-- CATEGORY SHEET -->
+<div class="overlay" id="cat-overlay" onclick="closeCatSheet(event)">
+  <div class="sheet">
+    <div class="sheet-handle"></div>
+    <div class="sheet-title" id="cat-sheet-title">Новая категория</div>
+    <div style="display:flex;flex-direction:column;gap:12px">
+      <div class="field"><label>Название *</label><input class="inp" id="cat-name" placeholder="Еда" maxlength="40"></div>
+      <div class="field"><label>Иконка (эмодзи)</label><input class="inp" id="cat-icon" placeholder="🍕" maxlength="4" style="font-size:24px;text-align:center"></div>
+      <div class="field"><label>Порядок сортировки</label><input class="inp" id="cat-order" type="number" value="10" min="1"></div>
+      <div class="btn-row">
+        <button class="btn btn-ghost" onclick="closeCatSheet()">Отмена</button>
+        <button class="btn btn-primary" onclick="saveCategory()">Сохранить</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- COUNTRY SHEET -->
+<div class="overlay" id="country-overlay" onclick="closeCountrySheet(event)">
+  <div class="sheet">
+    <div class="sheet-handle"></div>
+    <div class="sheet-title" id="country-sheet-title">Новая страна</div>
+    <div style="display:flex;flex-direction:column;gap:12px">
+      <div class="field"><label>Название страны *</label><input class="inp" id="country-name" placeholder="Казахстан" maxlength="60"></div>
+      <div class="field"><label>Символ валюты *</label><input class="inp" id="country-currency" placeholder="₸" maxlength="5" style="font-size:22px;text-align:center"></div>
+      <div class="btn-row">
+        <button class="btn btn-ghost" onclick="closeCountrySheet()">Отмена</button>
+        <button class="btn btn-primary" onclick="saveCountry()">Сохранить</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- CITY SHEET -->
+<div class="overlay" id="city-overlay" onclick="closeCitySheet(event)">
+  <div class="sheet">
+    <div class="sheet-handle"></div>
+    <div class="sheet-title" id="city-sheet-title">Новый город</div>
+    <div style="display:flex;flex-direction:column;gap:12px">
+      <div class="field"><label>Название города *</label><input class="inp" id="city-name" placeholder="Алматы" maxlength="60"></div>
+      <div class="field"><label>Цена доставки (в валюте страны)</label><input class="inp" id="city-delivery-price" type="number" value="1000" min="0"></div>
+      <input type="hidden" id="city-country-id">
+      <div class="btn-row">
+        <button class="btn btn-ghost" onclick="closeCitySheet()">Отмена</button>
+        <button class="btn btn-primary" onclick="saveCity()">Сохранить</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- VENUE DETAIL SHEET -->
+<div class="overlay" id="venue-overlay" onclick="closeVenueSheet(event)">
+  <div class="sheet"><div class="sheet-handle"></div><div id="sa-venue-detail"></div></div>
+</div>
+
+<!-- COURIER DETAIL SHEET -->
+<div class="overlay" id="courier-detail-overlay" onclick="closeCourierDetailSheet(event)">
+  <div class="sheet"><div class="sheet-handle"></div><div id="sa-courier-detail"></div></div>
+</div>
+
+<!-- USER DETAIL SHEET -->
+<div class="overlay" id="user-overlay" onclick="closeUserSheet(event)">
+  <div class="sheet"><div class="sheet-handle"></div><div id="sa-user-detail"></div></div>
+</div>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
+<script src="../shared/firebase.js"></script>
+<script src="../shared/agreement.js"></script>
+<script src="app.js"></script>
+</body>
+</html>

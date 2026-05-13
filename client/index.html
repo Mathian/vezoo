@@ -1,0 +1,273 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1.0,maximum-scale=1.0,user-scalable=no">
+<title>Vezoo — Доставка</title>
+<script src="https://www.gstatic.com/firebasejs/9.22.0/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/9.22.0/firebase-firestore-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/9.22.0/firebase-auth-compat.js"></script>
+<script src="https://telegram.org/js/telegram-web-app.js"></script>
+<link rel="stylesheet" href="../shared/style.css">
+</head>
+<body>
+
+<!-- SPLASH -->
+<div id="s-splash" class="screen active no-nav">
+  <div class="splash">
+    <div class="splash-logo">🚀</div>
+    <div class="splash-title"><span>Vezoo</span></div>
+    <div class="splash-sub">Агрегатор доставки</div>
+    <div class="splash-dots"><div class="splash-dot"></div><div class="splash-dot"></div><div class="splash-dot"></div></div>
+  </div>
+</div>
+
+<!-- ERROR SCREENS -->
+<div id="s-blocked" class="screen no-nav">
+  <div class="splash"><div class="splash-logo">🚫</div><div class="splash-title">Доступ закрыт</div><div class="splash-sub">Ваш аккаунт заблокирован.<br>Обратитесь в поддержку.</div></div>
+</div>
+<div id="s-no-uid" class="screen no-nav">
+  <div class="splash"><div class="splash-logo">🤖</div><div class="splash-title">Нужен бот</div><div class="splash-sub">Откройте приложение<br>через Telegram-бота Vezoo.</div></div>
+</div>
+
+<!-- AGREEMENT -->
+<div id="s-agree" class="agree-screen" style="display:none">
+  <div class="page-hdr" style="position:static">
+    <div class="logo"><div class="logo-icon">🚀</div><div class="logo-text"><span>Vezoo</span></div></div>
+  </div>
+  <div class="agree-screen-body">
+    <div class="logo" style="justify-content:center;margin-bottom:4px"><div class="logo-icon">🚀</div><div class="logo-text"><span>Vezoo</span></div></div>
+    <h2 style="text-align:center;font-size:17px">Пользовательское соглашение</h2>
+    <div class="agree-doc" id="agree-doc-content"></div>
+    <label class="check-row" id="agree-check-row" onclick="toggleAgreeCheck()">
+      <input type="checkbox" id="agree-cb" style="display:none">
+      <div class="check-box" id="agree-box"></div>
+      <span class="check-label">Я прочитал(а) и принимаю условия Соглашения</span>
+    </label>
+  </div>
+  <div class="agree-screen-foot">
+    <button class="btn btn-primary" id="agree-btn" onclick="submitAgree()" disabled>Продолжить →</button>
+  </div>
+</div>
+
+<!-- CITY SELECT -->
+<div id="s-city-select" class="screen no-nav">
+  <div class="content" style="padding-top:60px;gap:20px;max-width:480px;margin:0 auto">
+    <div class="logo" style="justify-content:center"><div class="logo-icon">🚀</div><div class="logo-text"><span>Vezoo</span></div></div>
+    <h2 style="text-align:center">Выберите город</h2>
+    <p class="text-dim" style="text-align:center;font-size:14px">Мы покажем заведения рядом с вами</p>
+    <div id="city-select-list" style="display:flex;flex-direction:column;gap:8px"></div>
+    <div class="loader" id="city-select-loader"><div class="spinner"></div></div>
+  </div>
+</div>
+
+<!-- HOME — Список заведений -->
+<div id="s-home" class="screen">
+  <div class="page-hdr">
+    <div class="logo">
+      <div class="logo-icon">🚀</div>
+      <div class="logo-text"><span>Vezoo</span></div>
+    </div>
+    <div class="page-hdr-end" style="display:flex;align-items:center;gap:8px;flex:1;justify-content:flex-end;min-width:0;overflow:hidden">
+      <button onclick="openCityChange()" id="city-btn" title="Город">📍—</button>
+      <button class="btn-icon btn-ghost" onclick="toggleFavFilter()" id="fav-filter-btn" title="Избранное" style="flex-shrink:0">🤍</button>
+    </div>
+  </div>
+  <div id="home-cat-tabs" class="cat-tabs" style="padding-top:12px"></div>
+  <div id="home-venues" style="display:flex;flex-direction:column;gap:12px;padding:0 20px 16px"></div>
+</div>
+
+<!-- VENUE DETAIL -->
+<div id="s-venue" class="screen">
+  <div style="position:relative">
+    <div class="venue-cover" id="venue-cover-el">
+      <span id="venue-cover-emoji">🏪</span>
+      <img id="venue-cover-img" src="" alt="" style="display:none">
+      <div class="venue-cover-overlay"></div>
+    </div>
+    <button class="back-btn" onclick="backToHome()" style="position:absolute;top:14px;left:16px;z-index:10">←</button>
+    <button class="venue-fav" id="venue-fav-btn" onclick="toggleCurrentVenueFav()" style="position:absolute;top:14px;right:16px;z-index:10">🤍</button>
+  </div>
+  <div class="content" style="padding-top:14px;gap:10px">
+    <div class="flex justify-between items-center">
+      <h2 id="venue-name-el">Заведение</h2>
+      <span id="venue-open-el" class="venue-open">● Открыто</span>
+    </div>
+    <div class="flex items-center gap-2" style="flex-wrap:wrap" id="venue-meta-el"></div>
+<div class="alert-box info hidden" id="venue-closed-banner">Заведение сейчас закрыто. Заказы не принимаются.</div>
+  </div>
+  <!-- Menu -->
+  <div id="venue-cat-tabs" class="cat-tabs"></div>
+  <div class="menu-grid" id="venue-menu-grid"></div>
+  <div style="height:80px"></div>
+  <!-- Cart FAB -->
+  <button class="cart-fab hidden" id="cart-fab" onclick="openCart()">
+    <span id="cart-fab-count">0 поз.</span>
+    <span id="cart-fab-total">0 ₸</span>
+  </button>
+</div>
+
+
+<!-- CART OVERVIEW -->
+<div id="s-cart-overview" class="screen">
+  <div class="page-hdr"><h2>Корзина</h2></div>
+  <div id="cart-overview-content" class="content" style="gap:14px"></div>
+</div>
+
+<!-- CART — оформление -->
+<div id="s-cart" class="screen">
+  <div class="page-hdr">
+    <button class="back-btn" id="cart-back-btn" onclick="cartGoBack()">←</button>
+    <h2>Оформление</h2>
+    <div class="page-hdr-end" id="cart-venue-name" style="font-size:13px;color:var(--text-dim)"></div>
+  </div>
+  <div class="content" style="gap:14px">
+    <div id="cart-items-wrap"></div>
+    <div class="section">
+      <div class="section-title">Способ получения</div>
+      <div class="btn-row">
+        <button class="btn btn-primary delivery-type-btn" data-val="delivery" onclick="selectDeliveryType(this)">🚴 Доставка</button>
+        <button class="btn btn-secondary delivery-type-btn" data-val="pickup" onclick="selectDeliveryType(this)">🏪 Самовывоз</button>
+      </div>
+    </div>
+    <div class="section" id="address-section">
+      <div class="section-title">Адрес доставки</div>
+      <div class="field"><label>Улица</label><input class="inp" id="addr-street" placeholder="ул. Абая" type="text"></div>
+      <div class="inp-row">
+        <div class="field"><label>Дом</label><input class="inp" id="addr-house" placeholder="12" type="text"></div>
+        <div class="field"><label>Квартира</label><input class="inp" id="addr-apt" placeholder="45" type="text"></div>
+      </div>
+      <label class="check-row" id="intercom-row" onclick="toggleIntercom()">
+        <div class="check-box" id="intercom-box">🔔</div>
+        <span class="check-label">Есть домофон</span>
+      </label>
+    </div>
+    <div class="alert-box info hidden" id="pickup-info">Вы заберёте заказ самостоятельно из заведения.</div>
+    <div class="section">
+      <div class="section-title">Оплата</div>
+      <div class="btn-row" id="payment-opts-row">
+        <button class="btn btn-primary payment-opt" data-val="cash" onclick="selectPayment(this)">💵 Наличные</button>
+        <button class="btn btn-secondary payment-opt" data-val="card" onclick="selectPayment(this)">💳 Карта</button>
+      </div>
+    </div>
+    <div class="section">
+      <div class="section-title">Комментарий к заказу</div>
+      <textarea class="inp" id="order-comment" rows="3" placeholder="Например: без лука, позвоните заранее..."></textarea>
+    </div>
+    <div class="card card-body">
+      <div class="flex justify-between"><span class="text-dim">Товары</span><span id="cart-items-sum">0 ₸</span></div>
+      <div class="flex justify-between mt-1"><span class="text-dim">Доставка</span><span id="cart-delivery-price">0 ₸</span></div>
+      <div class="divider" style="margin:8px 0"></div>
+      <div class="flex justify-between"><span class="font-bold">Итого</span><span class="font-bold text-primary" id="cart-total-final">0 ₸</span></div>
+    </div>
+    <button class="btn btn-primary" id="order-btn" onclick="submitOrder()">Оформить заказ</button>
+  </div>
+</div>
+
+<!-- ORDERS (active + history) -->
+<div id="s-orders" class="screen">
+  <div class="page-hdr"><h2>Заказы</h2></div>
+  <div id="orders-content" class="content" style="gap:10px;padding-top:12px"></div>
+</div>
+
+<!-- SETTINGS / PROFILE -->
+<div id="s-settings" class="screen">
+  <div class="page-hdr"><h2>Профиль</h2></div>
+  <div class="content" style="gap:14px">
+    <div class="card card-body" id="profile-card">
+      <div class="flex items-center gap-2">
+        <div class="avatar" id="profile-avatar">?</div>
+        <div>
+          <div class="font-bold" id="profile-name">—</div>
+          <div class="text-sm text-dim" id="profile-phone">—</div>
+          <div class="text-sm text-dim" id="profile-city-label" style="margin-top:2px">📍 —</div>
+        </div>
+      </div>
+    </div>
+
+    <!-- City change -->
+    <div class="section">
+      <div class="section-title">Мой город</div>
+      <div class="flex items-center gap-2">
+        <span class="text-dim" id="settings-city-name">—</span>
+        <button class="btn btn-ghost btn-sm" onclick="openCityChange()">Изменить</button>
+      </div>
+    </div>
+
+<!-- Saved address -->
+    <div class="section">
+      <div class="section-title">Сохранённый адрес</div>
+      <div class="field"><label>Улица</label><input class="inp" id="saved-street" placeholder="ул. Абая" type="text"></div>
+      <div class="inp-row">
+        <div class="field"><label>Дом</label><input class="inp" id="saved-house" placeholder="12" type="text"></div>
+        <div class="field"><label>Квартира</label><input class="inp" id="saved-apt" placeholder="45" type="text"></div>
+      </div>
+      <button class="btn btn-secondary btn-sm" onclick="saveAddress()">💾 Сохранить адрес</button>
+    </div>
+
+    <!-- Favourites -->
+    <div class="section">
+      <div class="section-title">Избранные заведения</div>
+      <div id="favorites-list"></div>
+    </div>
+  </div>
+</div>
+
+<!-- BOTTOM NAV -->
+<div class="bottom-nav" id="main-nav" style="display:none">
+  <div class="nav-item active" id="nav-home" onclick="navTo('s-home');setNav(this)">
+    <div class="nav-icon">🏠</div><div class="nav-label">Главная</div>
+  </div>
+  <div class="nav-item" id="nav-cart" onclick="navToCart();setNav(this)">
+    <div class="nav-icon">🛒</div><div class="nav-label">Корзина</div>
+    <div class="nav-badge hidden" id="cart-nav-badge">0</div>
+  </div>
+  <div class="nav-item" id="nav-orders" onclick="navToAllOrders();setNav(this)">
+    <div class="nav-icon">📦</div><div class="nav-label">Заказы</div>
+    <div class="nav-badge hidden" id="order-nav-badge">!</div>
+  </div>
+  <div class="nav-item" id="nav-settings" onclick="navTo('s-settings');loadSettings2();setNav(this)">
+    <div class="nav-icon">👤</div><div class="nav-label">Профиль</div>
+  </div>
+</div>
+
+
+<!-- FULL-SCREEN NOTIFICATIONS -->
+<div class="fs-notif" id="notif-accepted">
+  <div class="fs-notif-icon success">✅</div>
+  <div class="fs-notif-title">Заказ принят!</div>
+  <div class="fs-notif-text" id="notif-accepted-text">Ваш заказ принят в работу.</div>
+  <button class="btn btn-primary" onclick="closeNotif('notif-accepted')">Хорошо, благодарю 👍</button>
+</div>
+<div class="fs-notif" id="notif-cancelled">
+  <div class="fs-notif-icon danger">❌</div>
+  <div class="fs-notif-title">Заказ отменён</div>
+  <div class="fs-notif-text">Ваш заказ был отменён. С вами свяжется оператор.</div>
+  <button class="btn btn-danger" onclick="closeNotif('notif-cancelled')">Хорошо, ожидаю</button>
+</div>
+<div class="fs-notif" id="notif-delivering">
+  <div class="fs-notif-icon primary">🚴</div>
+  <div class="fs-notif-title">Заказ в пути!</div>
+  <div class="fs-notif-text" id="notif-delivering-text">Курьер везёт ваш заказ!</div>
+  <button class="btn btn-primary" onclick="closeNotif('notif-delivering')">Отлично!</button>
+</div>
+<div class="fs-notif" id="notif-delivered">
+  <div class="fs-notif-icon success">🎉</div>
+  <div class="fs-notif-title">Заказ доставлен!</div>
+  <div class="fs-notif-text">Приятного аппетита! Спасибо, что выбрали Vezoo.</div>
+  <button class="btn btn-primary" onclick="onDeliveredClose()">Приятного аппетита! 😋</button>
+</div>
+
+<!-- HISTORY ORDER DETAIL -->
+<div class="overlay" id="history-detail-overlay" onclick="closeHistoryDetail(event)">
+  <div class="sheet">
+    <div id="history-detail-content"></div>
+  </div>
+</div>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
+<script src="../shared/firebase.js"></script>
+<script src="../shared/agreement.js"></script>
+<script src="app.js"></script>
+</body>
+</html>
