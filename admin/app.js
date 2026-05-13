@@ -127,27 +127,38 @@ function updatePinDots() {
   }
 }
 
+// In-memory PIN rate limit: max 5 wrong attempts, then 60s lockout.
+// Resets on correct PIN or on app reload (intentional — PIN pad behaviour).
+let _pinWrongCount = 0;
+let _pinLockUntil  = 0;
+
 async function checkPin() {
-  // Rate limit: 5 attempts per minute
-  try { await serverRateLimit(STATE.uid, 'pin'); }
-  catch (e) {
+  const now = Date.now();
+  if (now < _pinLockUntil) {
+    const secsLeft = Math.ceil((_pinLockUntil - now) / 1000);
     tgHaptic('error');
-    document.getElementById('pin-sub-text').textContent = e.message;
+    document.getElementById('pin-sub-text').textContent = `Слишком много попыток. Подождите ${secsLeft} сек.`;
     setTimeout(() => { _pinBuffer = ''; updatePinDots(); document.getElementById('pin-sub-text').textContent = 'Введите PIN-код'; }, 2000);
     return;
   }
   const ok = await verifyPin('admin', _pinBuffer);
   if (ok) {
+    _pinWrongCount = 0; _pinLockUntil = 0;
     document.getElementById('s-pin').style.display = 'none';
     await checkVenueAndInit();
   } else {
+    _pinWrongCount++;
+    if (_pinWrongCount >= 5) { _pinLockUntil = Date.now() + 60000; _pinWrongCount = 0; }
     tgHaptic('error');
     for (let i = 0; i < 4; i++) {
       const dot = document.getElementById('pd' + i);
       if (dot) { dot.classList.add('error'); dot.classList.remove('filled'); }
     }
-    document.getElementById('pin-sub-text').textContent = 'Неверный PIN. Попробуйте снова';
-    setTimeout(() => { _pinBuffer = ''; updatePinDots(); document.getElementById('pin-sub-text').textContent = 'Введите PIN-код'; }, 900);
+    const attLeft = _pinLockUntil ? 0 : (5 - _pinWrongCount);
+    document.getElementById('pin-sub-text').textContent = _pinLockUntil
+      ? 'Слишком много попыток. Подождите 60 сек.'
+      : `Неверный PIN. Осталось попыток: ${attLeft}`;
+    setTimeout(() => { _pinBuffer = ''; updatePinDots(); document.getElementById('pin-sub-text').textContent = 'Введите PIN-код'; }, 1500);
   }
 }
 
