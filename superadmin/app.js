@@ -20,8 +20,7 @@ let _saVenCoverDataUrl = null;
 //  BOOT
 // ══════════════════════════════════════════════════════════
 window.addEventListener('DOMContentLoaded', async () => {
-  const _urlParams = new URLSearchParams(location.search);
-  if (_urlParams.get('reset') === '1') { localStorage.clear(); location.replace(location.pathname); return; }
+  if (new URLSearchParams(location.search).get('reset') === '1') { localStorage.clear(); location.replace(location.pathname); return; }
   tgReady();
   if (tg?.BackButton) tg.BackButton.onClick(() => {
     const open = document.querySelector('.overlay.open');
@@ -30,44 +29,35 @@ window.addEventListener('DOMContentLoaded', async () => {
   });
 
   const _tgUserId = tg?.initDataUnsafe?.user?.id ? String(tg.initDataUnsafe.user.id) : null;
-  initUserStorage(_tgUserId);
-
-  // Emergency PIN reset: ?resetpin=1 — clears stored superadmin PIN back to '0000'
-  if (_urlParams.get('resetpin') === '1') {
-    await initFirebase();
-    try { await db.collection('settings').doc('pins').set({ superadmin: null }, { merge: true }); } catch {}
-    try { localStorage.removeItem(storageKey('settings_pins')); } catch {}
-    alert('PIN суперадмина сброшен на 0000');
-    location.replace(location.pathname);
-    return;
-  }
-
   try {
-    const s = JSON.parse(localStorage.getItem(storageKey('sa_state')) || '{}');
+    const s = JSON.parse(localStorage.getItem('vez_sa_state') || '{}');
     if (!_tgUserId || s.tgId === _tgUserId) { STATE.uid = s.uid||null; STATE.user = s.user||null; }
   } catch {}
 
+  const urlUid = readUidFromUrl();
+  if (urlUid) { STATE.uid = urlUid; saveState(); }
+
   await initFirebase();
-  const _urlUid = readUidFromUrl();
-  if (_urlUid) { STATE.uid = _urlUid; saveState(); }
   if (!STATE.uid) { const tgUid = await resolveUidByTgId(); if (tgUid) { STATE.uid = tgUid; saveState(); } }
   if (!STATE.uid) { showScreen('s-no-uid'); return; }
 
+  try { localStorage.removeItem('vez_users_' + STATE.uid); } catch {}
+  await dbSet('users', STATE.uid, { role: 'superadmin' });
   const existing = await dbGet('users', STATE.uid);
 
-  if (!existing?.agreedSA && !STATE.user?.agreedSA) {
-    STATE.user = existing || {};
+  if (!existing?.agreedSA) {
+    STATE.user = existing || { uid: STATE.uid, role: 'superadmin' };
     saveState();
     showAgreement();
     return;
   }
-  STATE.user = existing || STATE.user; saveState();
+  STATE.user = existing; saveState();
   showPinScreen();
 });
 
 function saveState() {
   const tgUserId = tg?.initDataUnsafe?.user?.id ? String(tg.initDataUnsafe.user.id) : null;
-  try { localStorage.setItem(storageKey('sa_state'), JSON.stringify({ uid: STATE.uid, user: STATE.user, tgId: tgUserId })); } catch {}
+  try { localStorage.setItem('vez_sa_state', JSON.stringify({ uid: STATE.uid, user: STATE.user, tgId: tgUserId })); } catch {}
 }
 
 // ══════════════════════════════════════════════════════════
@@ -79,8 +69,8 @@ function showAgreement() {
 }
 
 async function submitAgree() {
-  await dbSet('users', STATE.uid, { agreedSA: true, role: 'superadmin' });
-  STATE.user = { ...STATE.user, agreedSA: true, role: 'superadmin' }; saveState();
+  await dbSet('users', STATE.uid, { agreedSA: true });
+  STATE.user = { ...STATE.user, agreedSA: true }; saveState();
   document.getElementById('s-agree').style.display = 'none';
   showPinScreen();
 }
@@ -121,38 +111,19 @@ function updatePinDots() {
   }
 }
 
-// In-memory PIN rate limit: max 5 wrong attempts, then 60s lockout.
-// Resets on correct PIN or on app reload (intentional — PIN pad behaviour).
-let _pinWrongCount = 0;
-let _pinLockUntil  = 0;
-
 async function checkPin() {
-  const now = Date.now();
-  if (now < _pinLockUntil) {
-    const secsLeft = Math.ceil((_pinLockUntil - now) / 1000);
-    tgHaptic('error');
-    document.getElementById('pin-sub-text').textContent = `Слишком много попыток. Подождите ${secsLeft} сек.`;
-    setTimeout(() => { _pinBuffer = ''; updatePinDots(); document.getElementById('pin-sub-text').textContent = 'Введите PIN-код'; }, 2000);
-    return;
-  }
   const ok = await verifyPin('superadmin', _pinBuffer);
   if (ok) {
-    _pinWrongCount = 0; _pinLockUntil = 0;
     document.getElementById('s-pin').style.display = 'none';
     initMain();
   } else {
-    _pinWrongCount++;
-    if (_pinWrongCount >= 5) { _pinLockUntil = Date.now() + 60000; _pinWrongCount = 0; }
     tgHaptic('error');
     for (let i = 0; i < 4; i++) {
       const dot = document.getElementById('pd' + i);
       if (dot) { dot.classList.add('error'); dot.classList.remove('filled'); }
     }
-    const attLeft = _pinLockUntil ? 0 : (5 - _pinWrongCount);
-    document.getElementById('pin-sub-text').textContent = _pinLockUntil
-      ? 'Слишком много попыток. Подождите 60 сек.'
-      : `Неверный PIN. Осталось попыток: ${attLeft}`;
-    setTimeout(() => { _pinBuffer = ''; updatePinDots(); document.getElementById('pin-sub-text').textContent = 'Введите PIN-код'; }, 1500);
+    document.getElementById('pin-sub-text').textContent = 'Неверный PIN. Попробуйте снова';
+    setTimeout(() => { _pinBuffer = ''; updatePinDots(); document.getElementById('pin-sub-text').textContent = 'Введите PIN-код'; }, 900);
   }
 }
 
@@ -169,6 +140,7 @@ async function changePinSa() {
 // ══════════════════════════════════════════════════════════
 function initMain() {
   document.getElementById('main-nav').style.display = 'flex';
+  startHeartbeat(STATE.uid);
   loadCategories();
   loadPendingBadges();
   showScreen('s-categories');
@@ -199,8 +171,8 @@ async function loadCategories() {
   }
   list.innerHTML = ALL_CATS.map(c => `
     <div class="list-item">
-      <div class="li-icon yellow" style="font-size:24px">${escHtml(c.icon||'📦')}</div>
-      <div class="li-body"><div class="li-title">${escHtml(c.name)}</div><div class="li-sub">Порядок: ${c.order||0}</div></div>
+      <div class="li-icon yellow" style="font-size:24px">${c.icon||'📦'}</div>
+      <div class="li-body"><div class="li-title">${c.name}</div><div class="li-sub">Порядок: ${c.order||0}</div></div>
       <div style="display:flex;gap:6px">
         <button class="btn btn-icon btn-ghost" onclick="openEditCategory('${c.id}')">✏️</button>
         <button class="btn btn-icon btn-danger" onclick="deleteCategory('${c.id}')">🗑</button>
@@ -275,8 +247,8 @@ async function loadGeo() {
       <div class="country-card">
         <div class="country-card-hdr">
           <div>
-            <div class="country-card-name">🏳 ${escHtml(country.name)}</div>
-            <div class="country-currency">${escHtml(country.currency)} · ${cities.length} ${pluralCity(cities.length)}</div>
+            <div class="country-card-name">🏳 ${country.name}</div>
+            <div class="country-currency">${country.currency} · ${cities.length} ${pluralCity(cities.length)}</div>
           </div>
           <div style="display:flex;gap:6px">
             <button class="btn btn-xs btn-outline" onclick="openAddCity('${country.id}')">+ Город</button>
@@ -287,7 +259,7 @@ async function loadGeo() {
         ${cities.length ? cities.map(city => `
           <div class="city-row">
             <div>
-              <div class="city-row-name">📍 ${escHtml(city.name)}</div>
+              <div class="city-row-name">📍 ${city.name}</div>
             </div>
             <div style="display:flex;align-items:center;gap:8px">
               <div class="city-row-price">${fmtPrice(city.deliveryPrice, country.currency)}</div>
@@ -418,11 +390,11 @@ async function loadAllVenues() {
     if (!v.blocked && v.onlineOrdersEnabled !== false) badges.push('<span class="badge badge-approved">Онлайн</span>');
     return `
       <div class="list-item" onclick="openSaVenueEdit('${v.id}')">
-        <div class="li-icon yellow" style="font-size:24px">${escHtml(cat?.icon||'🏪')}</div>
+        <div class="li-icon yellow" style="font-size:24px">${cat?.icon||'🏪'}</div>
         <div class="li-body">
-          <div class="li-title">${escHtml(v.name)}${v.blocked?' <span style="color:var(--danger);font-size:11px">BLOCKED</span>':''}</div>
-          <div class="li-sub">${escHtml(cat?.name||'Без категории')} · ${escHtml(v.cityName||'—')}</div>
-          <div class="li-sub">${escHtml(v.address||'—')}</div>
+          <div class="li-title">${v.name}${v.blocked?' <span style="color:var(--danger);font-size:11px">BLOCKED</span>':''}</div>
+          <div class="li-sub">${cat?.name||'Без категории'} · ${v.cityName||'—'}</div>
+          <div class="li-sub">${v.address||'—'}</div>
         </div>
         <div style="display:flex;flex-direction:column;gap:4px;align-items:flex-end">${badges.join('')}</div>
       </div>`;
@@ -431,18 +403,18 @@ async function loadAllVenues() {
 
 function _renderSaVenueSheetHtml(venue) {
   const isEdit = !!venue;
-  const catsOpts = ALL_CATS.map(c => `<option value="${c.id}" ${venue?.categoryId===c.id?'selected':''}>${escHtml(c.icon||'')} ${escHtml(c.name)}</option>`).join('');
-  const countryOpts = ALL_COUNTRIES.map(c => `<option value="${c.id}" ${venue?.countryId===c.id?'selected':''}>${escHtml(c.name)}</option>`).join('');
+  const catsOpts = ALL_CATS.map(c => `<option value="${c.id}" ${venue?.categoryId===c.id?'selected':''}>${c.icon||''} ${c.name}</option>`).join('');
+  const countryOpts = ALL_COUNTRIES.map(c => `<option value="${c.id}" ${venue?.countryId===c.id?'selected':''}>${c.name}</option>`).join('');
   const filteredCities = venue?.countryId ? ALL_CITIES.filter(c=>c.countryId===venue.countryId) : ALL_CITIES;
-  const cityOpts = filteredCities.map(c => `<option value="${c.id}" ${venue?.cityId===c.id?'selected':''}>${escHtml(c.name)}</option>`).join('');
+  const cityOpts = filteredCities.map(c => `<option value="${c.id}" ${venue?.cityId===c.id?'selected':''}>${c.name}</option>`).join('');
   _saVenPayMethods = { cash: venue?.paymentMethods?.cash!==false, card: venue?.paymentMethods?.card!==false };
   const onlineChecked = venue?.onlineOrdersEnabled !== false ? 'checked' : '';
   const venId = venue?.id || '';
   return `
-    <div class="sheet-title">${isEdit ? escHtml(venue.name) : 'Новое заведение'}</div>
+    <div class="sheet-title">${isEdit ? venue.name : 'Новое заведение'}</div>
     <div style="display:flex;flex-direction:column;gap:12px">
       <div class="section-title">Основное</div>
-      <div class="field"><label>Название *</label><input class="inp" id="sa-ven-name" placeholder="Кафе «Уют»" value="${escHtml(venue?.name||'')}" maxlength="80"></div>
+      <div class="field"><label>Название *</label><input class="inp" id="sa-ven-name" placeholder="Кафе «Уют»" value="${venue?.name||''}" maxlength="80"></div>
       <div class="field"><label>Категория *</label><select class="inp" id="sa-ven-cat"><option value="">Выберите...</option>${catsOpts}</select></div>
       <div class="field"><label>Описание</label><textarea class="inp" id="sa-ven-desc" rows="2" maxlength="500">${venue?.description||''}</textarea></div>
 
@@ -454,7 +426,7 @@ function _renderSaVenueSheetHtml(venue) {
         <div class="field" style="max-width:88px"><label>Дом *</label><input class="inp" id="sa-ven-house" placeholder="10" value="${venue?.addrHouse||''}"></div>
         <div class="field" style="max-width:78px"><label>Офис</label><input class="inp" id="sa-ven-office" placeholder="5" value="${venue?.addrOffice||''}"></div>
       </div>
-      <div class="field"><label>Телефон</label><input class="inp" id="sa-ven-phone" type="tel" placeholder="+7 (777) 000-00-00" value="${escHtml(venue?.phone||'')}"></div>
+      <div class="field"><label>Телефон</label><input class="inp" id="sa-ven-phone" type="tel" placeholder="+7 (777) 000-00-00" value="${venue?.phone||''}"></div>
 
       <div class="section-title">Часы работы</div>
       <div class="inp-row">
@@ -615,7 +587,7 @@ async function _loadSaVenueCouriers(venueId) {
   listEl.innerHTML = rows.map(r => `
     <div class="flex items-center gap-2">
       <div class="li-icon yellow" style="width:34px;height:34px;font-size:16px">🚴</div>
-      <div style="flex:1"><div class="font-bold text-sm">${escHtml(r.courierName)}</div><div class="text-xs text-dim">${escHtml(r.phone)} · ${r.status==='confirmed'?'<span style="color:var(--success)">Подтвердил</span>':'Ожидает'}</div></div>
+      <div style="flex:1"><div class="font-bold text-sm">${r.courierName}</div><div class="text-xs text-dim">${r.phone} · ${r.status==='confirmed'?'<span style="color:var(--success)">Подтвердил</span>':'Ожидает'}</div></div>
       <button class="btn btn-xs" style="background:var(--danger-soft);color:var(--danger);border:none;padding:4px 8px;border-radius:6px;cursor:pointer" onclick="saRemoveCourierFromVenue('${r.uid}','${venueId}')">×</button>
     </div>`).join('');
 }
@@ -625,7 +597,7 @@ function saVenCountryChange(preselectCityId) {
   const citySelect = document.getElementById('sa-ven-city');
   if (!citySelect) return;
   const cities = ALL_CITIES.filter(c => !countryId || c.countryId === countryId);
-  citySelect.innerHTML = '<option value="">Выберите город...</option>' + cities.map(c => `<option value="${c.id}" ${c.id === preselectCityId ? 'selected' : ''}>${escHtml(c.name)}</option>`).join('');
+  citySelect.innerHTML = '<option value="">Выберите город...</option>' + cities.map(c => `<option value="${c.id}" ${c.id === preselectCityId ? 'selected' : ''}>${c.name}</option>`).join('');
 }
 
 function toggleSaVenPayTag(method) {
@@ -706,8 +678,6 @@ async function saToggleVenueBlock(venueId, currentlyBlocked) {
 async function saAssignAdminToVenue(venueId) {
   const phone = document.getElementById('sa-ven-admin-phone')?.value.trim();
   if (!phone) { showToast('Введите телефон', 'warning'); return; }
-  try { await serverRateLimit(STATE.uid, 'qr'); }
-  catch (e) { showToast(e.message, 'warning'); return; }
   const links = await dbGetAll('user_links');
   const link  = links.find(l => normPhone(l.phone||'') === normPhone(phone));
   if (!link)  { showToast('Пользователь не найден', 'error'); return; }
@@ -746,8 +716,6 @@ function saScanQrAdmin(venueId) {
 async function saAssignOpToVenue(venueId) {
   const phone = document.getElementById('sa-ven-op-phone')?.value.trim();
   if (!phone) { showToast('Введите телефон', 'warning'); return; }
-  try { await serverRateLimit(STATE.uid, 'qr'); }
-  catch (e) { showToast(e.message, 'warning'); return; }
   const links = await dbGetAll('user_links');
   const link  = links.find(l => normPhone(l.phone||'') === normPhone(phone));
   if (!link)  { showToast('Пользователь не найден', 'error'); return; }
@@ -789,8 +757,6 @@ function saScanQrOpForVenue(venueId) {
 async function saAddCourierToVenue(venueId) {
   const phone = document.getElementById('sa-ven-courier-phone')?.value.trim();
   if (!phone) { showToast('Введите телефон', 'warning'); return; }
-  try { await serverRateLimit(STATE.uid, 'qr'); }
-  catch (e) { showToast(e.message, 'warning'); return; }
   const links = await dbGetAll('user_links');
   const link  = links.find(l => normPhone(l.phone||'') === normPhone(phone));
   if (!link)  { showToast('Пользователь не найден', 'error'); return; }
@@ -838,8 +804,8 @@ async function loadCouriersByStatus(status, el) {
       <div class="list-item" onclick="openSaCourier('${c.uid||c.id}')">
         <div class="li-icon yellow">🚴</div>
         <div class="li-body">
-          <div class="li-title">${escHtml(c.name||'—')} ${rating}</div>
-          <div class="li-sub">${escHtml(c.phone||'—')} · ${fmtDate(c.createdAt)}</div>
+          <div class="li-title">${c.name||'—'} ${rating}</div>
+          <div class="li-sub">${c.phone||'—'} · ${fmtDate(c.createdAt)}</div>
           <div class="li-sub">${c.onShift?'<span style="color:var(--success)">На смене</span>':'Офлайн'}</div>
         </div>
         <span class="badge badge-${status==='pending'?'moderation':status==='active'?'approved':'rejected'}">${status==='pending'?'Проверка':status==='active'?'Активен':'Заблокирован'}</span>
@@ -854,10 +820,10 @@ async function openSaCourier(courierUid) {
   const totalRev = deliveredOrders.reduce((s,o)=>s+(o.total||0),0);
   const content = document.getElementById('sa-courier-detail');
   content.innerHTML = `
-    <div class="sheet-title">${escHtml(courier.name||'Курьер')}</div>
+    <div class="sheet-title">${courier.name||'Курьер'}</div>
     <div class="card card-body" style="margin-bottom:12px;gap:6px;display:flex;flex-direction:column">
-      <div class="flex justify-between"><span class="text-dim">Телефон</span><span style="font-family:monospace">${escHtml(courier.phone||'—')}</span></div>
-      <div class="flex justify-between"><span class="text-dim">Статус</span><span>${escHtml(courier.status||'—')}</span></div>
+      <div class="flex justify-between"><span class="text-dim">Телефон</span><span style="font-family:monospace">${courier.phone||'—'}</span></div>
+      <div class="flex justify-between"><span class="text-dim">Статус</span><span>${courier.status}</span></div>
       <div class="flex justify-between"><span class="text-dim">На смене</span><span>${courier.onShift?'<span style="color:var(--success)">Да</span>':'Нет'}</span></div>
       <div class="flex justify-between"><span class="text-dim">Рейтинг</span><span>${courier.rating?'⭐ '+Number(courier.rating).toFixed(1):'Нет оценок'}</span></div>
       <div class="flex justify-between"><span class="text-dim">Доставлено</span><span class="font-bold">${deliveredOrders.length}</span></div>
@@ -980,7 +946,7 @@ async function loadSaStats() {
   document.getElementById('sa-stats-venues').innerHTML = venueStats.filter(v=>v.orders>0).map(v=>`
     <div class="list-item" style="cursor:default">
       <div class="li-icon yellow">🏪</div>
-      <div class="li-body"><div class="li-title">${escHtml(v.name)}</div><div class="li-sub">${v.delivered} доставлено из ${v.orders}</div></div>
+      <div class="li-body"><div class="li-title">${v.name}</div><div class="li-sub">${v.delivered} доставлено из ${v.orders}</div></div>
       <div class="li-price">${fmtPrice(v.revenue)}</div>
     </div>`).join('') || '<div class="empty" style="padding:30px 24px"><div class="empty-icon">📊</div><div class="empty-text">Нет данных за период</div></div>';
 }
@@ -1000,8 +966,8 @@ async function loadUsersByRole(role, el) {
       <div class="list-item" onclick="openSaUser('${c.uid||c.id}')">
         <div class="li-icon yellow" style="font-size:22px">🚴</div>
         <div class="li-body">
-          <div class="li-title">${escHtml(c.name||'—')}${c.status==='blocked'?' <span style="color:var(--danger);font-size:11px">BLOCKED</span>':''}</div>
-          <div class="li-sub">${escHtml(c.phone||'—')} · <span style="color:${c.status==='active'?'var(--success)':c.status==='blocked'?'var(--danger)':'var(--warning)'}">${c.status==='active'?'Активен':c.status==='blocked'?'Заблокирован':'На проверке'}</span></div>
+          <div class="li-title">${c.name||'—'}${c.status==='blocked'?' <span style="color:var(--danger);font-size:11px">BLOCKED</span>':''}</div>
+          <div class="li-sub">${c.phone||'—'} · <span style="color:${c.status==='active'?'var(--success)':c.status==='blocked'?'var(--danger)':'var(--warning)'}">${c.status==='active'?'Активен':c.status==='blocked'?'Заблокирован':'На проверке'}</span></div>
         </div>
         <div class="chevron">›</div>
       </div>`).join('');
@@ -1026,10 +992,10 @@ async function loadUsersByRole(role, el) {
     if (u.agreedSA       || u.role==='superadmin')  roleIcons.push('👑');
     return `
       <div class="list-item" onclick="openSaUser('${u.uid||u.id}')">
-        <div class="avatar" style="width:36px;height:36px;font-size:14px">${escHtml((u.name||'?')[0].toUpperCase())}</div>
+        <div class="avatar" style="width:36px;height:36px;font-size:14px">${(u.name||'?')[0].toUpperCase()}</div>
         <div class="li-body">
-          <div class="li-title">${escHtml(u.name||'—')}${u.blocked?' <span style="color:var(--danger);font-size:11px">BLOCKED</span>':''}</div>
-          <div class="li-sub">${escHtml(u.phone||'—')}${roleIcons.length?' · '+roleIcons.join(' '):''}</div>
+          <div class="li-title">${u.name||'—'}${u.blocked?' <span style="color:var(--danger);font-size:11px">BLOCKED</span>':''}</div>
+          <div class="li-sub">${u.phone||'—'}${roleIcons.length?' · '+roleIcons.join(' '):''}</div>
         </div>
         <div class="chevron">›</div>
       </div>`;
@@ -1047,11 +1013,11 @@ async function openSaUser(uid) {
   if (user.agreedSA || user.role==='superadmin')        roleIcons.push('👑 Суперадмин');
   const content = document.getElementById('sa-user-detail');
   content.innerHTML = `
-    <div class="sheet-title">${escHtml(user.name||'—')}</div>
+    <div class="sheet-title">${user.name||'—'}</div>
     <div class="card card-body" style="margin-bottom:12px;gap:6px;display:flex;flex-direction:column">
-      <div class="flex justify-between"><span class="text-dim">Телефон</span><span style="font-family:monospace">${escHtml(user.phone||'—')}</span></div>
-      <div class="flex justify-between"><span class="text-dim">Роли</span><span style="text-align:right;font-size:12px;max-width:60%">${roleIcons.join('<br>')||escHtml(user.role||'—')}</span></div>
-      <div class="flex justify-between"><span class="text-dim">Город</span><span>${escHtml(user.cityName||'—')}</span></div>
+      <div class="flex justify-between"><span class="text-dim">Телефон</span><span style="font-family:monospace">${user.phone||'—'}</span></div>
+      <div class="flex justify-between"><span class="text-dim">Роли</span><span style="text-align:right;font-size:12px;max-width:60%">${roleIcons.join('<br>')||user.role||'—'}</span></div>
+      <div class="flex justify-between"><span class="text-dim">Город</span><span>${user.cityName||'—'}</span></div>
       <div class="flex justify-between"><span class="text-dim">Статус</span><span>${user.blocked?'<span style="color:var(--danger)">Заблокирован</span>':'Активен'}</span></div>
       <div class="flex justify-between"><span class="text-dim">Регистрация</span><span>${fmtDate(user.createdAt)}</span></div>
     </div>

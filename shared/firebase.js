@@ -14,19 +14,7 @@ const FIREBASE_CONFIG = {
 };
 
 const WEBAPP_BASE = "https://mathian.github.io/vezoo";
-
-// ── Per-user localStorage namespace ──────────────────────────────────────────
-// Call initUserStorage(tgId) at the very start of DOMContentLoaded, before any
-// localStorage read/write. This namespaces all cache keys by Telegram user ID,
-// so multiple accounts on the same device never share data.
-let _tgPfx = 'vez_anon_'; // fallback if tgId unknown
-
-function initUserStorage(tgId) {
-  _tgPfx = tgId ? `vez_${String(tgId)}_` : 'vez_anon_';
-}
-
-// Convenience: build a localStorage key in the current user's namespace
-function storageKey(name) { return _tgPfx + name; }
+const PFX = 'vez_'; // localStorage prefix
 
 // ── Firebase state ──
 let db   = null;
@@ -51,26 +39,18 @@ function initFirebase() {
   });
 }
 
-// ── Write (merge, silent) ──
+// ── Write (merge) ──
 async function dbSet(col, id, data) {
   const payload = { ...data, _upd: new Date().toISOString() };
-  try { localStorage.setItem(`${_tgPfx}${col}_${id}`, JSON.stringify(payload)); } catch {}
+  try { localStorage.setItem(`${PFX}${col}_${id}`, JSON.stringify(payload)); } catch {}
   if (!_fbR) return;
   try { await db.collection(col).doc(String(id)).set(payload, { merge: true }); }
   catch (e) { console.warn(`[DB] set ${col}/${id}:`, e.message); }
 }
 
-// ── Write (strict) — throws on Firestore error; use for critical writes ──
-async function dbSetStrict(col, id, data) {
-  const payload = { ...data, _upd: new Date().toISOString() };
-  try { localStorage.setItem(`${_tgPfx}${col}_${id}`, JSON.stringify(payload)); } catch {}
-  if (!_fbR) throw new Error('Нет соединения с сервером. Проверьте интернет.');
-  await db.collection(col).doc(String(id)).set(payload, { merge: true }); // throws on any error
-}
-
 // ── Delete ──
 async function dbDelete(col, id) {
-  try { localStorage.removeItem(`${_tgPfx}${col}_${id}`); } catch {}
+  try { localStorage.removeItem(`${PFX}${col}_${id}`); } catch {}
   if (!_fbR) return;
   try { await db.collection(col).doc(String(id)).delete(); }
   catch (e) { console.warn(`[DB] del ${col}/${id}:`, e.message); }
@@ -83,12 +63,12 @@ async function dbGet(col, id) {
       const s = await db.collection(col).doc(String(id)).get();
       if (s.exists) {
         const d = s.data();
-        try { localStorage.setItem(`${_tgPfx}${col}_${id}`, JSON.stringify(d)); } catch {}
+        try { localStorage.setItem(`${PFX}${col}_${id}`, JSON.stringify(d)); } catch {}
         return d;
       }
     } catch (e) { console.warn(`[DB] get ${col}/${id}:`, e.message); }
   }
-  try { const r = localStorage.getItem(`${_tgPfx}${col}_${id}`); return r ? JSON.parse(r) : null; }
+  try { const r = localStorage.getItem(`${PFX}${col}_${id}`); return r ? JSON.parse(r) : null; }
   catch { return null; }
 }
 
@@ -264,11 +244,6 @@ function statusBadgeClass(st) {
   return 'badge ' + (map[st] || 'badge-pending');
 }
 
-// ── XSS escape ──
-function escHtml(s) {
-  return String(s ?? '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;').replace(/'/g,'&#39;');
-}
-
 // ── Stars ──
 function renderStars(n, interactive = false, onClick = null) {
   const full = Math.round(n || 0);
@@ -303,20 +278,19 @@ async function resolveUidByTgId() {
 }
 
 // ─────────────────────── State helpers ───────────────────────
-
-// Read uid directly from URL / Telegram start_param — no token resolution needed.
-// The uid is the HMAC hash of the user's phone, passed by the bot in the WebApp link.
 function readUidFromUrl() {
-  // 1. Telegram WebApp start_param (most common path — bot sends ?startapp=uid)
+  // 1. Telegram WebApp start_param (передаётся через ?startapp= или бот /start uid_xxx)
   const startParam = tg?.initDataUnsafe?.start_param || '';
-  if (startParam && startParam.length > 5) return startParam;
-  // 2. tgWebAppStartParam in hash fragment
+  if (startParam && startParam.startsWith('u_') && startParam.length > 5) {
+    return startParam;
+  }
+  // 2. Telegram WebApp передаёт параметры через tgWebAppStartParam в hash
   try {
     const hash = new URLSearchParams(location.hash.replace('#', ''));
     const hashUid = hash.get('tgWebAppStartParam') || hash.get('uid');
     if (hashUid && hashUid.length > 5) return hashUid;
   } catch {}
-  // 3. Direct ?uid= query param (fallback for browser testing)
+  // 3. Прямой ?uid= в URL (fallback для тестирования в браузере)
   const p = new URLSearchParams(location.search);
   const uid = p.get('uid') || p.get('tgWebAppStartParam');
   if (uid && uid.length > 5) {
@@ -324,6 +298,12 @@ function readUidFromUrl() {
     return uid;
   }
   return null;
+}
+
+// ─────────────────────── Heartbeat ───────────────────────
+function startHeartbeat(uid) {
+  const send = () => { if (uid && _fbR) dbSet('users', uid, { webAppLastSeen: new Date().toISOString() }); };
+  send(); setInterval(send, 5000);
 }
 
 // ─────────────────────── Screen helper ───────────────────────
@@ -442,34 +422,16 @@ async function getDeliveryPriceForCity(cityId) {
 // ─────────────────────── PIN helpers ───────────────────────
 const PIN_DEFAULTS = { admin:'0000', operator:'0000', master:'0000', superadmin:'0000' };
 
-// SHA-256 hash with fixed salt (WebCrypto API — built-in, no external lib)
-async function _hashPin(pin) {
-  const data = new TextEncoder().encode('vezoo_salt_v1:' + pin);
-  const buf  = await crypto.subtle.digest('SHA-256', data);
-  return Array.from(new Uint8Array(buf)).map(b => b.toString(16).padStart(2,'0')).join('');
-}
-
 async function verifyPin(role, entered) {
   try {
-    const cfg    = await dbGet('settings', 'pins');
+    const cfg = await dbGet('settings', 'pins');
     const stored = cfg?.[role] || PIN_DEFAULTS[role] || '0000';
-    console.log(`[PIN] role=${role} stored_len=${stored.length} stored_preview=${stored.slice(0,8)}`);
-    if (stored.length === 64) {
-      const enteredHash = await _hashPin(entered);
-      console.log(`[PIN] hash_match=${enteredHash === stored}`);
-      return enteredHash === stored;
-    }
-    // Legacy plaintext (until PIN is re-saved via settings)
     return entered === stored;
-  } catch (e) {
-    console.warn('[PIN] verifyPin error:', e.message);
-    return entered === '0000';
-  }
+  } catch { return entered === '0000'; }
 }
 
 async function savePin(role, newPin) {
-  const hashed = await _hashPin(newPin);
-  await dbSet('settings', 'pins', { [role]: hashed });
+  await dbSet('settings', 'pins', { [role]: newPin });
 }
 
 async function getPinForRole(role) {
@@ -496,57 +458,6 @@ function checkAllergyConflict(itemIngredients, userProfile) {
   if (!prefs.length) return false;
   const lower = itemIngredients.map(x => x.toLowerCase());
   return prefs.some(p => lower.some(i => i.includes(p.toLowerCase())));
-}
-
-// ─────────────────────── Rate limiting ───────────────────────
-// ── Server-enforced rate limit via Firebase Security Rules ──────────────
-// action: 'qr' | 'search'
-//
-// IMPORTANT: uses firebase.auth().currentUser.uid (the anonymous Firebase UID),
-// NOT STATE.uid — these are different! Security Rules check request.auth.uid
-// which equals the Firebase anonymous UID, not the app-level STATE.uid.
-//
-// Cooldowns enforced by Rules in firebase.rules: 3s for qr/search.
-// If no Firebase auth or no connection → skips silently (don't block user).
-// If network error → logs and skips (only 'permission-denied' = real rate limit).
-async function serverRateLimit(_, action) {
-  const authUid = firebase.auth().currentUser?.uid;
-  if (!authUid || !_fbR) return; // not authenticated or offline — skip gracefully
-
-  const docId = `${authUid}_${action}`;
-  try {
-    await db.collection('_rate_limits').doc(docId).set({
-      ts: firebase.firestore.FieldValue.serverTimestamp()
-    });
-    // Write succeeded → limit not exceeded, proceed normally
-  } catch (e) {
-    if (e.code === 'permission-denied') {
-      // Rules rejected write = cooldown not elapsed = genuine rate limit
-      const secs = { qr: 3, search: 3 }[action] || 1;
-      throw new Error(`Слишком быстро. Подождите ${secs} сек.`);
-    }
-    // Network error / unavailable — log but do NOT block the user
-    console.warn(`[RateLimit] serverRateLimit(${action}) skipped:`, e.message);
-  }
-}
-
-// key — unique string (e.g. 'pin_UID', 'order_UID', 'review_UID')
-// maxCount — allowed calls in window
-// windowMs  — rolling window in milliseconds
-// Throws Error with message if limit exceeded, resolves normally otherwise.
-async function checkRateLimit(key, maxCount, windowMs) {
-  const docId = '_rl_' + key.replace(/[^a-z0-9]/gi, '_');
-  const now   = Date.now();
-  const snap  = await dbGet('_rate_limits', docId);
-  if (snap && snap.resetAt > now && snap.count >= maxCount) {
-    const secsLeft = Math.ceil((snap.resetAt - now) / 1000);
-    throw new Error(`Слишком много попыток. Подождите ${secsLeft} сек.`);
-  }
-  if (!snap || snap.resetAt <= now) {
-    await dbSet('_rate_limits', docId, { count: 1, resetAt: now + windowMs });
-  } else {
-    await dbSet('_rate_limits', docId, { count: snap.count + 1, resetAt: snap.resetAt });
-  }
 }
 
 // ─────────────────────── Agreement checkbox ───────────────────────

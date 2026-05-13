@@ -41,26 +41,21 @@ window.addEventListener('DOMContentLoaded', async () => {
   _initBackButton();
 
   const _tgUserId = tg?.initDataUnsafe?.user?.id ? String(tg.initDataUnsafe.user.id) : null;
-  // Read uid from URL before initFirebase — no Firebase needed, just reads URL params.
-  // This lets us use uid as a namespace fallback when tgId is unavailable,
-  // ensuring each account's cart/favorites are isolated even on shared devices.
-  const _urlUid = readUidFromUrl();
-  // Namespace all localStorage by tgId. If tgId unavailable (some Telegram clients
-  // don't expose it), fall back to uid from URL so accounts don't share data.
-  initUserStorage(_tgUserId || _urlUid);
-
   try {
-    const s = JSON.parse(localStorage.getItem(storageKey('client_state')) || '{}');
+    const s = JSON.parse(localStorage.getItem('vez_client_state') || '{}');
     if (!_tgUserId || s.tgId === _tgUserId) {
       STATE.uid  = s.uid  || null;
       STATE.user = s.user || null;
     }
-    CART      = JSON.parse(localStorage.getItem(storageKey('cart')) || '{}');
-    FAVORITES = JSON.parse(localStorage.getItem(storageKey('favorites')) || '[]');
+    CART      = JSON.parse(localStorage.getItem('vez_cart') || '{}');
+    FAVORITES = JSON.parse(localStorage.getItem('vez_favorites') || '[]');
   } catch {}
 
+  const urlUid = readUidFromUrl();
+  if (urlUid) { STATE.uid = urlUid; _saveClientState(); }
+
   await initFirebase();
-  if (_urlUid) { STATE.uid = _urlUid; _saveClientState(); }
+
   if (!STATE.uid) {
     const tgUid = await resolveUidByTgId();
     if (tgUid) { STATE.uid = tgUid; _saveClientState(); }
@@ -70,12 +65,10 @@ window.addEventListener('DOMContentLoaded', async () => {
   const existing = await dbGet('users', STATE.uid);
   if (existing?.blocked) { showScreen('s-blocked'); return; }
 
-  if (!existing?.agreedClient && !STATE.user?.agreedClient) {
+  if (!existing?.agreedClient) {
     document.getElementById('s-agree').style.display = 'flex';
     return;
   }
-  // Resync: if agreed in localStorage but not in Firestore (e.g. Firestore was offline on first agree), re-save
-  if (!existing?.agreedClient && STATE.user?.agreedClient) await dbSet('users', STATE.uid, { agreedClient: true });
 
   if (!existing.name) {
     const autoName = _getTgName() || existing.firstName || 'Пользователь';
@@ -102,10 +95,10 @@ function _getTgName() {
 
 function _saveClientState() {
   const tgId = tg?.initDataUnsafe?.user?.id ? String(tg.initDataUnsafe.user.id) : null;
-  try { localStorage.setItem(storageKey('client_state'), JSON.stringify({ uid: STATE.uid, user: STATE.user, tgId })); } catch {}
+  try { localStorage.setItem('vez_client_state', JSON.stringify({ uid: STATE.uid, user: STATE.user, tgId })); } catch {}
 }
-function _saveCart()      { try { localStorage.setItem(storageKey('cart'),      JSON.stringify(CART));      } catch {} }
-function _saveFavorites() { try { localStorage.setItem(storageKey('favorites'), JSON.stringify(FAVORITES)); } catch {} }
+function _saveCart()      { try { localStorage.setItem('vez_cart', JSON.stringify(CART)); } catch {} }
+function _saveFavorites() { try { localStorage.setItem('vez_favorites', JSON.stringify(FAVORITES)); } catch {} }
 
 // ── Agreement ──
 async function submitAgree() {
@@ -146,10 +139,10 @@ async function _showCitySelect() {
   let html = '';
   for (const [cid, cities] of Object.entries(grouped)) {
     const country = countries.find(c => c.id === cid);
-    if (country) html += `<div class="country-group-title">${escHtml(country.name)}</div>`;
+    if (country) html += `<div class="country-group-title">${country.name}</div>`;
     html += cities.map(city => `
-      <div class="city-item" onclick="selectCity(decodeURIComponent('${encodeURIComponent(city.id)}'),decodeURIComponent('${encodeURIComponent(city.name||'')}'),decodeURIComponent('${encodeURIComponent(country?.currency||'₸')}'))">
-        <span class="font-bold">${escHtml(city.name)}</span>
+      <div class="city-item" onclick="selectCity('${city.id}','${(city.name||'').replace(/'/g,"\\'")}','${country?.currency||'₸'}')">
+        <span class="font-bold">${city.name}</span>
       </div>`).join('');
   }
   document.getElementById('city-select-list').innerHTML = html;
@@ -172,7 +165,8 @@ function openCityChange() {
 // ── Init main ──
 function initMain() {
   document.getElementById('main-nav').style.display = 'flex';
-  FAVORITES = JSON.parse(localStorage.getItem(storageKey('favorites')) || '[]');
+  startHeartbeat(STATE.uid);
+  FAVORITES = JSON.parse(localStorage.getItem('vez_favorites') || '[]');
   if (STATE.user?.favorites) FAVORITES = STATE.user.favorites;
   if (STATE.user?.cityName) {
     document.getElementById('city-btn').textContent = '📍 ' + STATE.user.cityName;
@@ -206,7 +200,7 @@ function renderCatTabs() {
   const container = document.getElementById('home-cat-tabs');
   const tabs = [{ id: null, name: 'Все', icon: '🏪' }, ...CATEGORIES.map(c => ({ id: c.id, name: c.name, icon: c.icon || '📦' }))];
   container.innerHTML = tabs.map((c, i) =>
-    `<button class="cat-tab${i === 0 ? ' active' : ''}" onclick="filterVenues(this,decodeURIComponent('${encodeURIComponent(c.id || '')}'))">${escHtml(c.icon || '')} ${escHtml(c.name)}</button>`
+    `<button class="cat-tab${i === 0 ? ' active' : ''}" onclick="filterVenues(this,'${c.id || ''}')">${c.icon} ${c.name}</button>`
   ).join('');
 }
 
@@ -240,11 +234,11 @@ function renderVenues(catId) {
         <div class="venue-card-img">${cover}</div>
         <div class="venue-card-body">
           <div class="flex justify-between items-center">
-            <div class="venue-card-name">${escHtml(v.name)}${cartBadge}</div>
+            <div class="venue-card-name">${v.name}${cartBadge}</div>
             <button class="venue-fav${isFav ? ' active' : ''}" onclick="event.stopPropagation();toggleFav('${v.id}',this)">${isFav ? '❤️' : '🤍'}</button>
           </div>
           <div class="venue-card-meta">
-            ${cat ? `<span class="cat-pill">${escHtml(cat.icon || '')} ${escHtml(cat.name)}</span>` : ''}
+            ${cat ? `<span class="cat-pill">${cat.icon || ''} ${cat.name}</span>` : ''}
             <div class="star-row">${renderStars(v.rating || 0)}<span class="rating-val" style="font-size:12px;margin-left:4px">${(v.rating || 0).toFixed(1)}</span></div>
           </div>
           <div class="venue-card-foot">
@@ -305,10 +299,10 @@ async function openVenue(venueId) {
   document.getElementById('venue-closed-banner').classList.toggle('hidden', open);
 
   document.getElementById('venue-meta-el').innerHTML = `
-    ${cat ? `<span class="cat-pill">${escHtml(cat.icon || '')} ${escHtml(cat.name)}</span>` : ''}
-    <span class="venue-delivery-info">🚴 ${escHtml(String(venue.deliveryTime || '?'))} мин</span>
+    ${cat ? `<span class="cat-pill">${cat.icon || ''} ${cat.name}</span>` : ''}
+    <span class="venue-delivery-info">🚴 ${venue.deliveryTime || '?'} мин</span>
     <span class="venue-delivery-info">💰 ${fmtPrice(venue.deliveryPrice || 0, _selectedCurrency)}</span>
-    ${venue.workOpen ? `<span class="venue-delivery-info">🕐 ${escHtml(venue.workOpen)}–${escHtml(venue.workClose)}</span>` : ''}`;
+    ${venue.workOpen ? `<span class="venue-delivery-info">🕐 ${venue.workOpen}–${venue.workClose}</span>` : ''}`;
 
   document.getElementById('venue-stars-el').innerHTML  = renderStars(venue.rating || 0);
   document.getElementById('venue-rating-val').textContent = (venue.rating || 0).toFixed(1);
@@ -333,7 +327,7 @@ async function loadVenueMenu(venueId) {
   VENUE_MENU = (await dbQuery('menu_items', 'venueId', '==', venueId)).filter(i => i.available !== false);
   const menuCats = ['Все', ...new Set(VENUE_MENU.map(i => i.category).filter(Boolean))];
   document.getElementById('venue-cat-tabs').innerHTML = menuCats.map((c, i) =>
-    `<button class="cat-tab${i === 0 ? ' active' : ''}" onclick="filterVenueMenu(this,decodeURIComponent('${encodeURIComponent(c)}'))">${escHtml(c)}</button>`
+    `<button class="cat-tab${i === 0 ? ' active' : ''}" onclick="filterVenueMenu(this,'${c}')">${c}</button>`
   ).join('');
   renderVenueMenuGrid(null);
 }
@@ -364,15 +358,15 @@ function renderVenueMenuGrid(cat) {
       ? `<span class="badge-vegan" title="Веган-продукт">🌿</span>`
       : '';
     const imgHtml = item.imageUrl
-      ? `<div class="menu-card-img"><img src="${item.imageUrl}" alt="${escHtml(item.name)}" loading="lazy" onerror="this.parentElement.innerHTML='<span style=font-size:44px>🍽️</span>'"></div>`
-      : `<div class="menu-card-img"><span style="font-size:44px">${escHtml(item.emoji || '🍽️')}</span></div>`;
+      ? `<div class="menu-card-img"><img src="${item.imageUrl}" alt="${item.name}" loading="lazy" onerror="this.parentElement.innerHTML='<span style=font-size:44px>${item.emoji || '🍽️'}</span>'"></div>`
+      : `<div class="menu-card-img"><span style="font-size:44px">${item.emoji || '🍽️'}</span></div>`;
 
     if (item.variants && item.variants.length > 0) {
       const variantRows = item.variants.map(v => {
         const key = `${item.id}::${v.name}`;
         const qty = (venueCart.find(c => c.cartKey === key) || { qty: 0 }).qty;
         return `<div class="variant-row" id="vr-${CSS.escape(key)}">
-          <span class="variant-name">${escHtml(v.name)}</span>
+          <span class="variant-name">${v.name}</span>
           <div style="display:flex;align-items:center;gap:4px">
             <span class="variant-price">${fmtPrice(v.price, _selectedCurrency)}</span>
             <div class="qty-ctrl">
@@ -382,11 +376,11 @@ function renderVenueMenuGrid(cat) {
           </div>
         </div>`;
       }).join('');
-      return `<div class="menu-card menu-card-wide${hasConflict ? ' menu-card-warn' : ''}" id="mc-${item.id}">${imgHtml}<div class="menu-card-body"><div class="menu-card-name">${escHtml(item.name)} ${allergyBadge}${veganBadge}</div>${item.description ? `<div class="menu-card-desc">${escHtml(item.description)}</div>` : ''}<div class="variants-container" style="margin-top:8px">${variantRows}</div></div></div>`;
+      return `<div class="menu-card menu-card-wide${hasConflict ? ' menu-card-warn' : ''}" id="mc-${item.id}">${imgHtml}<div class="menu-card-body"><div class="menu-card-name">${item.name} ${allergyBadge}${veganBadge}</div>${item.description ? `<div class="menu-card-desc">${item.description}</div>` : ''}<div class="variants-container" style="margin-top:8px">${variantRows}</div></div></div>`;
     } else {
       const cartItem = venueCart.find(c => c.cartKey === item.id);
       const qty = cartItem ? cartItem.qty : 0;
-      return `<div class="menu-card${hasConflict ? ' menu-card-warn' : ''}" id="mc-${item.id}">${imgHtml}<div class="menu-card-body"><div class="menu-card-name">${escHtml(item.name)} ${allergyBadge}${veganBadge}</div>${item.description ? `<div class="menu-card-desc">${escHtml(item.description)}</div>` : ''}<div class="qty-row"><div class="menu-card-price">${fmtPrice(item.price, _selectedCurrency)}</div><div class="qty-ctrl">${qty > 0 ? `<div class="qty-btn" onclick="changeQty('${item.id}',-1)">−</div><div class="qty-num" id="qn-${item.id}">${qty}</div>` : ''}<div class="qty-btn add" onclick="changeQty('${item.id}',1)">+</div></div></div></div></div>`;
+      return `<div class="menu-card${hasConflict ? ' menu-card-warn' : ''}" id="mc-${item.id}">${imgHtml}<div class="menu-card-body"><div class="menu-card-name">${item.name} ${allergyBadge}${veganBadge}</div>${item.description ? `<div class="menu-card-desc">${item.description}</div>` : ''}<div class="qty-row"><div class="menu-card-price">${fmtPrice(item.price, _selectedCurrency)}</div><div class="qty-ctrl">${qty > 0 ? `<div class="qty-btn" onclick="changeQty('${item.id}',-1)">−</div><div class="qty-num" id="qn-${item.id}">${qty}</div>` : ''}<div class="qty-btn add" onclick="changeQty('${item.id}',1)">+</div></div></div></div></div>`;
     }
   }).join('');
 }
@@ -499,12 +493,12 @@ function renderCartOverview() {
         <div class="flex justify-between items-center">
           <div style="display:flex;align-items:center;gap:8px">
             <span style="font-size:22px">${cat?.icon || '🏪'}</span>
-            <div class="font-bold">${escHtml(venue?.name || venueId)}</div>
+            <div class="font-bold">${venue?.name || venueId}</div>
           </div>
           <span class="${open ? 'venue-open' : 'venue-closed'}" style="font-size:12px">${open ? '● Открыто' : '● Закрыто'}</span>
         </div>
         <div style="display:flex;flex-direction:column;gap:4px">
-          ${items.slice(0, 3).map(c => `<div class="flex justify-between" style="font-size:13px"><span>${escHtml(c.emoji || '')} ${escHtml(c.name)}</span><span class="text-dim">${c.qty} × ${fmtPrice(c.price, _selectedCurrency)}</span></div>`).join('')}
+          ${items.slice(0, 3).map(c => `<div class="flex justify-between" style="font-size:13px"><span>${c.emoji} ${c.name}</span><span class="text-dim">${c.qty} × ${fmtPrice(c.price, _selectedCurrency)}</span></div>`).join('')}
           ${items.length > 3 ? `<div class="text-dim text-sm">и ещё ${items.length - 3} позиц.</div>` : ''}
         </div>
         <div class="flex justify-between items-center" style="padding-top:4px;border-top:1px solid var(--border)">
@@ -581,8 +575,8 @@ function renderCartScreen() {
   const itemsHtml = venueCart.map(c => `
     <div class="flex items-center gap-2" style="justify-content:space-between;margin-bottom:10px">
       <div style="display:flex;align-items:center;gap:8px">
-        <span style="font-size:22px">${escHtml(c.emoji || '🍽️')}</span>
-        <div><div style="font-weight:600;font-size:13px">${escHtml(c.name)}</div><div style="font-size:12px;color:var(--text-dim)">${fmtPrice(c.price, _selectedCurrency)} × ${c.qty}</div></div>
+        <span style="font-size:22px">${c.emoji}</span>
+        <div><div style="font-weight:600;font-size:13px">${c.name}</div><div style="font-size:12px;color:var(--text-dim)">${fmtPrice(c.price, _selectedCurrency)} × ${c.qty}</div></div>
       </div>
       <div style="display:flex;align-items:center;gap:6px">
         <div style="font-weight:700;font-size:14px">${fmtPrice(c.price * c.qty, _selectedCurrency)}</div>
@@ -648,10 +642,6 @@ async function submitOrder() {
   if (!venueCart.length)           { showToast('Корзина пуста', 'warning'); return; }
   if (!isVenueOpen(CURRENT_VENUE)) { showToast('Заведение сейчас закрыто', 'warning'); return; }
 
-  // Rate limit: 2 orders per minute
-  try { await checkRateLimit('order_' + STATE.uid, 2, 60000); }
-  catch (e) { showToast(e.message, 'warning'); return; }
-
   const isPickup = _deliveryType === 'pickup';
   const street   = document.getElementById('addr-street').value.trim();
   const house    = document.getElementById('addr-house').value.trim();
@@ -677,26 +667,19 @@ async function submitOrder() {
     address: isPickup ? null : { street, house, apt, hasIntercom: _intercomChecked },
     payment: _paymentMethod, deliveryType: _deliveryType, comment,
     status: 'pending', createdAt: new Date().toISOString(),
-    clientNotification: { type: '', seen: true },
-    // Bot dedup flags — set to false so bot can query only unnotified orders
-    adminBotNotified: false, clientBotNotified: false, cancelledBotNotified: false, courierBotNotified: false
+    clientNotification: { type: '', seen: true }
   };
 
   try {
-    await dbSetStrict('orders', orderId, order); // throws if Firestore rejects
+    await dbSet('orders', orderId, order);
     CART[venueId] = []; delete CART[venueId];
     _saveCart(); updateCartNavBadge();
     tgHaptic('success'); showToast('Заказ оформлен!', 'success');
     navToAllOrders();
   } catch (e) {
-    console.error('[Order] submit failed:', e.message);
-    const msg = e.code === 'permission-denied'
-      ? 'Нет доступа. Попробуйте перезайти в приложение.'
-      : (e.message || 'Ошибка при оформлении заказа');
-    showToast(msg, 'error');
-  } finally {
-    btn.disabled = false; btn.textContent = 'Оформить заказ';
+    showToast('Ошибка при оформлении', 'error');
   }
+  btn.disabled = false; btn.textContent = 'Оформить заказ';
 }
 
 // ══════════════════════════════════════════════════════════
@@ -861,7 +844,7 @@ function renderHistoryCard(o) {
   return `
     <div class="order-card" style="cursor:pointer;border-left:3px solid ${(o.status === 'delivered' || o.status === 'issued') ? 'var(--success)' : 'var(--danger)'}" onclick="openHistoryOrder('${o.id}')">
       <div class="order-card-hdr">
-        <div><div class="font-bold" style="font-size:13px">📍 ${escHtml(o.venueName || 'Заведение')}</div><div class="order-id">${fmtDate(o.createdAt)} · #${(o.id || '').slice(-6)}</div></div>
+        <div><div class="font-bold" style="font-size:13px">📍 ${o.venueName || 'Заведение'}</div><div class="order-id">${fmtDate(o.createdAt)} · #${(o.id || '').slice(-6)}</div></div>
         <div style="text-align:right">
           <span class="${statusBadgeClass(o.status)}">${statusLabel(o.status)}</span>
           <div class="order-total" style="font-size:15px;margin-top:3px">${fmtPrice((o.total||0)+(o.deliveryPrice||0), o.currency || _selectedCurrency)}</div>
@@ -869,7 +852,7 @@ function renderHistoryCard(o) {
         </div>
       </div>
       <div class="order-card-body">
-        <div class="text-sm text-dim">${(o.items || []).map(i => `${i.emoji || '🍽️'} ${escHtml(i.name)} ×${i.qty}`).join(', ')}</div>
+        <div class="text-sm text-dim">${(o.items || []).map(i => `${i.emoji || '🍽️'} ${i.name} ×${i.qty}`).join(', ')}</div>
         <div class="text-xs text-dim" style="margin-top:4px">Нажмите для деталей →</div>
       </div>
     </div>`;
@@ -888,13 +871,13 @@ function openHistoryOrder(orderId) {
       <span class="${statusBadgeClass(o.status)}">${statusLabel(o.status)}</span>
     </div>
     <div class="card card-body" style="margin-bottom:12px;gap:6px;display:flex;flex-direction:column">
-      <div class="flex justify-between"><span class="text-dim">Заведение</span><span class="font-bold">${escHtml(o.venueName||'—')}</span></div>
-      ${addr?`<div class="flex justify-between"><span class="text-dim">Адрес</span><span style="text-align:right;max-width:60%">${escHtml(addr.street)} ${escHtml(addr.house)}${addr.apt?', кв.'+escHtml(addr.apt):''}</span></div>`:'<div class="flex justify-between"><span class="text-dim">Получение</span><span>🏪 Самовывоз</span></div>'}
+      <div class="flex justify-between"><span class="text-dim">Заведение</span><span class="font-bold">${o.venueName||'—'}</span></div>
+      ${addr?`<div class="flex justify-between"><span class="text-dim">Адрес</span><span style="text-align:right;max-width:60%">${addr.street} ${addr.house}${addr.apt?', кв.'+addr.apt:''}</span></div>`:'<div class="flex justify-between"><span class="text-dim">Получение</span><span>🏪 Самовывоз</span></div>'}
       <div class="flex justify-between"><span class="text-dim">Оплата</span><span>${o.payment==='cash'?'💵 Наличные':'💳 Карта'}</span></div>
     </div>
     <div class="section-title" style="margin-bottom:6px">Состав</div>
     <div class="card card-body" style="margin-bottom:12px;gap:4px;display:flex;flex-direction:column">
-      ${(o.items||[]).map(it=>`<div class="flex justify-between text-sm"><span>${it.emoji||'🍽️'} ${escHtml(it.name)}${it.variantName?' ('+escHtml(it.variantName)+')':''} ×${it.qty}</span><span>${fmtPrice(it.price*it.qty, cur)}</span></div>`).join('')}
+      ${(o.items||[]).map(it=>`<div class="flex justify-between text-sm"><span>${it.emoji||'🍽️'} ${it.name}${it.variantName?' ('+it.variantName+')':''} ×${it.qty}</span><span>${fmtPrice(it.price*it.qty, cur)}</span></div>`).join('')}
       <div class="divider" style="margin:4px 0"></div>
       ${o.deliveryPrice?`<div class="flex justify-between text-sm"><span class="text-dim">Доставка</span><span>${fmtPrice(o.deliveryPrice, cur)}</span></div>`:''}
       <div class="flex justify-between"><span class="font-bold">Итого</span><span class="font-bold text-primary">${fmtPrice((o.total||0)+(o.deliveryPrice||0), cur)}</span></div>
@@ -985,22 +968,22 @@ function renderOrderCard(o) {
   return `
     <div class="order-card" style="margin-bottom:2px">
       <div class="order-card-hdr">
-        <div><div class="font-bold" style="font-size:13px">📍 ${escHtml(o.venueName || 'Заведение')}</div><div class="order-id">#${(o.id || '').slice(-6)}</div></div>
+        <div><div class="font-bold" style="font-size:13px">📍 ${o.venueName || 'Заведение'}</div><div class="order-id">#${(o.id || '').slice(-6)}</div></div>
         <span class="${statusBadgeClass(o.status)}">${statusLabel(o.status)}</span>
       </div>
       <div class="order-card-body">
         <div class="status-track" style="margin-bottom:12px">${track}</div>
         ${showCd ? `<div class="countdown-box" style="margin-bottom:12px"><div class="countdown-lbl">${isPickup ? 'Готовность' : 'Время доставки'}</div><div class="countdown-val" id="cd-val-${o.id}">—</div><div class="progress-wrap" style="margin-top:8px"><div class="progress-bar" id="cd-bar-${o.id}"></div></div></div>` : ''}
         <div style="display:flex;flex-direction:column;gap:4px;font-size:13px;margin-bottom:8px">
-          ${(o.items || []).map(it => `<div class="flex justify-between"><span>${it.emoji || '🍽️'} ${escHtml(it.name)}${it.variantName ? ' (' + escHtml(it.variantName) + ')' : ''} ×${it.qty}</span><span class="font-bold">${fmtPrice(it.price * it.qty, cur)}</span></div>`).join('')}
+          ${(o.items || []).map(it => `<div class="flex justify-between"><span>${it.emoji || '🍽️'} ${it.name}${it.variantName ? ' (' + it.variantName + ')' : ''} ×${it.qty}</span><span class="font-bold">${fmtPrice(it.price * it.qty, cur)}</span></div>`).join('')}
         </div>
         <div class="divider" style="margin:6px 0"></div>
         <div class="flex justify-between"><span class="text-dim">Товары</span><span>${fmtPrice(o.total, cur)}</span></div>
         ${o.deliveryPrice ? `<div class="flex justify-between"><span class="text-dim">Доставка</span><span>${fmtPrice(o.deliveryPrice, cur)}</span></div>` : ''}
         <div class="flex justify-between"><span class="font-bold">Итого</span><span class="font-bold text-primary">${fmtPrice((o.total||0)+(o.deliveryPrice||0), cur)}</span></div>
         <div class="flex justify-between"><span class="text-dim">Оплата</span><span>${o.payment === 'cash' ? '💵 Наличные' : '💳 Карта'}</span></div>
-        ${addr ? `<div class="flex justify-between"><span class="text-dim">Адрес</span><span style="text-align:right;max-width:58%">${escHtml(addr.street)} ${escHtml(addr.house)}${addr.apt ? ', кв.' + escHtml(addr.apt) : ''}</span></div>` : ''}
-        ${o.courierName ? `<div class="flex justify-between"><span class="text-dim">Курьер</span><span>${escHtml(o.courierName)}</span></div>` : ''}
+        ${addr ? `<div class="flex justify-between"><span class="text-dim">Адрес</span><span style="text-align:right;max-width:58%">${addr.street} ${addr.house}${addr.apt ? ', кв.' + addr.apt : ''}</span></div>` : ''}
+        ${o.courierName ? `<div class="flex justify-between"><span class="text-dim">Курьер</span><span>${o.courierName}</span></div>` : ''}
         ${o.status === 'pending' ? `<div style="margin-top:10px;text-align:right"><button class="btn btn-danger btn-sm" onclick="clientCancelOrder('${o.id}')">❌ Отменить заказ</button></div>` : ''}
       </div>
     </div>`;
@@ -1070,7 +1053,7 @@ async function renderReviews() {
         <div class="section-title">Мой отзыв</div>
         <div class="review-card" style="border-color:var(--primary);border-width:1.5px">
           <div class="star-row">${renderStars(myReview.stars)}</div>
-          <div class="review-text">${escHtml(myReview.text || '')}</div>
+          <div class="review-text">${myReview.text || ''}</div>
           <div class="review-date">${fmtDate(myReview.updatedAt || myReview.createdAt)}</div>
           <div class="btn-row" style="margin-top:10px">
             <button class="btn btn-sm btn-outline" onclick="editReview()">✏️ Изменить</button>
@@ -1100,11 +1083,11 @@ async function renderReviews() {
   listEl.innerHTML = allReviews.map(r => `
     <div class="review-card" style="margin-bottom:10px">
       <div class="flex items-center gap-2">
-        <div class="avatar" style="width:32px;height:32px;font-size:13px">${escHtml((r.userName || '?')[0].toUpperCase())}</div>
-        <div class="review-user">${escHtml(r.userName || 'Пользователь')}</div>
+        <div class="avatar" style="width:32px;height:32px;font-size:13px">${(r.userName || '?')[0].toUpperCase()}</div>
+        <div class="review-user">${r.userName || 'Пользователь'}</div>
         <div class="star-row" style="margin-left:auto">${renderStars(r.stars)}</div>
       </div>
-      <div class="review-text">${escHtml(r.text || '')}</div>
+      <div class="review-text">${r.text || ''}</div>
       <div class="review-date">${fmtDate(r.updatedAt || r.createdAt)}</div>
     </div>`).join('');
 }
@@ -1120,9 +1103,6 @@ function selectReviewStar(n) {
 }
 async function submitReview() {
   if (_reviewStarsSel < 1) { showToast('Выберите оценку', 'warning'); return; }
-  // Rate limit: 1 review per minute
-  try { await checkRateLimit('review_' + STATE.uid, 1, 60000); }
-  catch (e) { showToast(e.message, 'warning'); return; }
   const text = document.getElementById('review-text')?.value.trim() || '';
   const venueId = _currentReviewVenueId;
   await dbSet('reviews', `${venueId}_${STATE.uid}`, {
@@ -1156,9 +1136,6 @@ async function editReview() {
 }
 async function submitEditReview() {
   if (_reviewStarsSel < 1) { showToast('Выберите оценку', 'warning'); return; }
-  // Same rate limit bucket as new review
-  try { await checkRateLimit('review_' + STATE.uid, 1, 60000); }
-  catch (e) { showToast(e.message, 'warning'); return; }
   const text = document.getElementById('review-text')?.value.trim() || '';
   await dbSet('reviews', `${_currentReviewVenueId}_${STATE.uid}`, { stars: _reviewStarsSel, text, updatedAt: new Date().toISOString() });
   await _updateVenueRating(_currentReviewVenueId);
@@ -1219,7 +1196,7 @@ function loadSettings2() {
   favList.innerHTML = favVenues.map(v => `
     <div class="list-item" onclick="openVenue('${v.id}');setNav(document.getElementById('nav-home'))">
       <div class="li-icon yellow">${CATEGORIES.find(c => c.id === v.categoryId)?.icon || '🏪'}</div>
-      <div class="li-body"><div class="li-title">${escHtml(v.name)}</div><div class="li-sub">${isVenueOpen(v) ? 'Открыто' : 'Закрыто'}</div></div>
+      <div class="li-body"><div class="li-title">${v.name}</div><div class="li-sub">${isVenueOpen(v) ? 'Открыто' : 'Закрыто'}</div></div>
       <div class="chevron">›</div>
     </div>`).join('');
 }
