@@ -31,17 +31,18 @@ window.addEventListener('DOMContentLoaded', async () => {
   _initCourierBackButton();
 
   const _tgUserId = tg?.initDataUnsafe?.user?.id ? String(tg.initDataUnsafe.user.id) : null;
-  initUserStorage(_tgUserId);
   try {
-    const s = JSON.parse(localStorage.getItem(storageKey('courier_state')) || '{}');
+    const s = JSON.parse(localStorage.getItem('vez_courier_state') || '{}');
     if (!_tgUserId || s.tgId === _tgUserId) {
       STATE.uid = s.uid || null; STATE.user = s.user || null;
     }
   } catch {}
 
+  const urlUid = readUidFromUrl();
+  if (urlUid) { STATE.uid = urlUid; _saveState(); }
+
   await initFirebase();
-  const _urlUid = readUidFromUrl();
-  if (_urlUid) { STATE.uid = _urlUid; _saveState(); }
+
   if (!STATE.uid) {
     const tgUid = await resolveUidByTgId();
     if (tgUid) { STATE.uid = tgUid; _saveState(); }
@@ -51,7 +52,7 @@ window.addEventListener('DOMContentLoaded', async () => {
   const existing = await dbGet('users', STATE.uid);
   if (existing?.blocked) { showScreen('s-blocked'); return; }
 
-  if (!existing?.agreedCourier && !STATE.user?.agreedCourier) {
+  if (!existing?.agreedCourier) {
     document.getElementById('s-agree').style.display = 'flex';
     return;
   }
@@ -68,7 +69,7 @@ function _getTgName() {
 
 function _saveState() {
   const tgId = tg?.initDataUnsafe?.user?.id ? String(tg.initDataUnsafe.user.id) : null;
-  try { localStorage.setItem(storageKey('courier_state'), JSON.stringify({ uid: STATE.uid, user: STATE.user, tgId })); } catch {}
+  try { localStorage.setItem('vez_courier_state', JSON.stringify({ uid: STATE.uid, user: STATE.user, tgId })); } catch {}
 }
 
 // ── Agreement ──
@@ -143,6 +144,8 @@ async function declineVenueInvite() {
 // ── Init main ──
 function initMain() {
   document.getElementById('main-nav').style.display = 'flex';
+  startHeartbeat(STATE.uid);
+
   const onShift = COURIER_DATA?.onShift || false;
   document.getElementById('shift-toggle').checked = onShift;
   document.getElementById('shift-label').textContent = onShift ? '🟢 На смене' : 'Офлайн';
@@ -312,12 +315,12 @@ function renderVenueOrders() {
 
 function _importantOrderCard(order) {
   const addr = order.address;
-  const addrStr = addr ? `${escHtml(addr.street)} ${escHtml(addr.house)}${addr.apt ? ', кв.' + escHtml(addr.apt) : ''}` : 'Самовывоз';
+  const addrStr = addr ? `${addr.street} ${addr.house}${addr.apt ? ', кв.' + addr.apt : ''}` : 'Самовывоз';
   return `
     <div class="delivery-card" style="border-left:3px solid var(--success)">
       <div class="delivery-card-hdr">
         <div>
-          <div class="font-bold" style="font-size:14px">⚡ ${escHtml(order.venueName || 'Заведение')}</div>
+          <div class="font-bold" style="font-size:14px">⚡ ${order.venueName || 'Заведение'}</div>
           <div class="text-xs text-dim">#${(order.id || '').slice(-6)} · ${fmtDate(order.createdAt)}</div>
         </div>
         <span class="${statusBadgeClass(order.status)}">${statusLabel(order.status)}</span>
@@ -342,14 +345,14 @@ function _poolBundleCard(orders, myVenueId) {
   const addrLines = orders.map(o => {
     const addr = o.address;
     return addr
-      ? `<div class="flex items-center gap-2"><span>📍</span><span>${escHtml(addr.street)} ${escHtml(addr.house)}${addr.apt?', кв.'+escHtml(addr.apt):''}</span></div>`
+      ? `<div class="flex items-center gap-2"><span>📍</span><span>${addr.street} ${addr.house}${addr.apt?', кв.'+addr.apt:''}</span></div>`
       : '<div>🏪 Самовывоз</div>';
   }).join('');
   return `
     <div class="delivery-card" onclick="openBundleAcceptSheet('${ids}','${pool}')" style="cursor:pointer">
       <div class="delivery-card-hdr">
         <div>
-          <div class="font-bold" style="font-size:14px">🏪 ${escHtml(first.venueName||'Заведение')}</div>
+          <div class="font-bold" style="font-size:14px">🏪 ${first.venueName||'Заведение'}</div>
           <div class="text-xs text-dim">${orders.length>1?orders.length+' заказа(ов)':fmtDate(first.createdAt)}</div>
         </div>
         <div class="text-primary font-bold">${fmtPrice(totalDelivery)}</div>
@@ -385,9 +388,9 @@ async function openAcceptSheet(orderId, pool) {
   content.innerHTML = `
     <div class="sheet-title">Принять заказ?</div>
     <div class="card card-body" style="margin-bottom:12px;gap:6px;display:flex;flex-direction:column">
-      <div class="flex justify-between"><span class="text-dim">Заведение</span><span class="font-bold">${escHtml(order.venueName || '—')}</span></div>
-      <div class="flex justify-between"><span class="text-dim">Адрес кафе</span><span style="text-align:right;max-width:60%">${escHtml(venueAddr)}</span></div>
-      <div class="flex justify-between"><span class="text-dim">Доставка</span><span style="text-align:right;max-width:60%">${addr ? `${escHtml(addr.street)} ${escHtml(addr.house)}${addr.apt ? ', кв.' + escHtml(addr.apt) : ''}` : 'Самовывоз'}</span></div>
+      <div class="flex justify-between"><span class="text-dim">Заведение</span><span class="font-bold">${order.venueName || '—'}</span></div>
+      <div class="flex justify-between"><span class="text-dim">Адрес кафе</span><span style="text-align:right;max-width:60%">${venueAddr}</span></div>
+      <div class="flex justify-between"><span class="text-dim">Доставка</span><span style="text-align:right;max-width:60%">${addr ? `${addr.street} ${addr.house}${addr.apt ? ', кв.' + addr.apt : ''}` : 'Самовывоз'}</span></div>
       <div class="flex justify-between"><span class="text-dim">Оплата</span><span>${order.payment === 'cash' ? '💵 Наличные' : '💳 Карта'}</span></div>
       <div class="flex justify-between"><span class="text-dim">Вознаграждение</span><span class="font-bold text-primary">${fmtPrice(order.deliveryPrice || 0)}</span></div>
     </div>
@@ -395,7 +398,7 @@ async function openAcceptSheet(orderId, pool) {
     <div class="card card-body" style="margin-bottom:14px;gap:4px;display:flex;flex-direction:column">
       ${(order.items || []).map(it => `
         <div class="flex justify-between text-sm">
-          <span>${it.emoji || '🍽️'} ${escHtml(it.name)}${it.variantName ? ' (' + escHtml(it.variantName) + ')' : ''} ×${it.qty}</span>
+          <span>${it.emoji || '🍽️'} ${it.name}${it.variantName ? ' (' + it.variantName + ')' : ''} ×${it.qty}</span>
           <span>${fmtPrice(it.price * it.qty)}</span>
         </div>`).join('')}
     </div>
@@ -440,21 +443,21 @@ async function openBundleAcceptSheet(orderIdsStr, pool) {
   const content = document.getElementById('accept-order-content');
   const orderCards = orders.map((o,i) => {
     const addr = o.address;
-    const addrStr = addr ? `${escHtml(addr.street)} ${escHtml(addr.house)}${addr.apt?', кв.'+escHtml(addr.apt):''}` : 'Самовывоз';
+    const addrStr = addr ? `${addr.street} ${addr.house}${addr.apt?', кв.'+addr.apt:''}` : 'Самовывоз';
     return `
       <div class="section-title" style="margin-bottom:4px">Заказ ${orders.length>1?i+1+' · ':''}#${(o.id||'').slice(-6)}</div>
       <div class="card card-body" style="margin-bottom:8px;gap:4px;display:flex;flex-direction:column">
         <div class="flex justify-between text-sm"><span class="text-dim">Адрес</span><span style="text-align:right;max-width:60%">${addrStr}</span></div>
         <div class="flex justify-between text-sm"><span class="text-dim">Оплата</span><span>${o.payment==='cash'?'💵 Наличные':'💳 Карта'}</span></div>
-        ${(o.items||[]).map(it=>`<div class="flex justify-between text-sm"><span>${it.emoji||'🍽️'} ${escHtml(it.name)} ×${it.qty}</span><span>${fmtPrice(it.price*it.qty)}</span></div>`).join('')}
+        ${(o.items||[]).map(it=>`<div class="flex justify-between text-sm"><span>${it.emoji||'🍽️'} ${it.name} ×${it.qty}</span><span>${fmtPrice(it.price*it.qty)}</span></div>`).join('')}
       </div>`;
   }).join('');
 
   content.innerHTML = `
     <div class="sheet-title">Принять ${orders.length>1?orders.length+' заказа(ов)':'заказ'}?</div>
     <div class="card card-body" style="margin-bottom:12px;gap:6px;display:flex;flex-direction:column">
-      <div class="flex justify-between"><span class="text-dim">Заведение</span><span class="font-bold">${escHtml(first.venueName||'—')}</span></div>
-      <div class="flex justify-between"><span class="text-dim">Адрес кафе</span><span style="text-align:right;max-width:60%">${escHtml(venueAddr)}</span></div>
+      <div class="flex justify-between"><span class="text-dim">Заведение</span><span class="font-bold">${first.venueName||'—'}</span></div>
+      <div class="flex justify-between"><span class="text-dim">Адрес кафе</span><span style="text-align:right;max-width:60%">${venueAddr}</span></div>
       <div class="flex justify-between"><span class="text-dim">Вознаграждение</span><span class="font-bold text-primary">${fmtPrice(totalDelivery)}</span></div>
     </div>
     ${orderCards}
@@ -538,13 +541,13 @@ function renderMyOrders() {
         <div class="delivery-card" onclick="openMyOrder('${o.id}')" style="cursor:pointer">
           <div class="delivery-card-hdr">
             <div>
-              <div class="font-bold" style="font-size:14px">🏪 ${escHtml(o.venueName || 'Заведение')}</div>
+              <div class="font-bold" style="font-size:14px">🏪 ${o.venueName || 'Заведение'}</div>
               <div class="text-xs text-dim">#${(o.id || '').slice(-6)} · ${fmtDate(o.createdAt)}</div>
             </div>
             <span class="${statusBadgeClass(o.status)}">${statusLabel(o.status)}</span>
           </div>
           <div class="delivery-card-body" style="font-size:13px">
-            ${addr ? `<div>📍 ${escHtml(addr.street)} ${escHtml(addr.house)}${addr.apt ? ', кв.' + escHtml(addr.apt) : ''}</div>` : '<div>🏪 Самовывоз</div>'}
+            ${addr ? `<div>📍 ${addr.street} ${addr.house}${addr.apt ? ', кв.' + addr.apt : ''}</div>` : '<div>🏪 Самовывоз</div>'}
             <div>💰 ${fmtPrice((o.total || 0) + (o.deliveryPrice || 0))} · ${o.payment === 'cash' ? 'Наличные' : 'Карта'}</div>
           </div>
           <div class="delivery-card-foot">
@@ -561,13 +564,13 @@ function renderMyOrders() {
       <div class="delivery-card">
         <div class="delivery-card-hdr">
           <div>
-            <div class="font-bold" style="font-size:13px">${escHtml(o.venueName || 'Заведение')}</div>
+            <div class="font-bold" style="font-size:13px">${o.venueName || 'Заведение'}</div>
             <div class="text-xs text-dim">${fmtDate(o.deliveredAt || o.createdAt)} · #${(o.id || '').slice(-6)}</div>
           </div>
           <span class="text-success font-bold">${fmtPrice(o.deliveryPrice || 0)}</span>
         </div>
         <div class="delivery-card-body text-sm text-dim">
-          ${o.address ? `📍 ${escHtml(o.address.street)} ${escHtml(o.address.house)}` : '🏪 Самовывоз'}
+          ${o.address ? `📍 ${o.address.street} ${o.address.house}` : '🏪 Самовывоз'}
         </div>
       </div>`).join('');
     if (_myHistory.length > _myHistPage) {
@@ -603,19 +606,19 @@ async function openMyOrder(orderId) {
   content.innerHTML = `
     <div class="sheet-title">Заказ #${(order.id || '').slice(-6)}</div>
     <div class="card card-body" style="margin-bottom:12px;gap:6px;display:flex;flex-direction:column">
-      <div class="flex justify-between"><span class="text-dim">Заведение</span><span class="font-bold">${escHtml(order.venueName || '—')}</span></div>
-      <div class="flex justify-between"><span class="text-dim">Адрес кафе</span><span style="text-align:right;max-width:60%">${escHtml(venueAddr)}</span></div>
-      <div class="flex justify-between"><span class="text-dim">Клиент</span><span>${escHtml(order.clientName || '—')}</span></div>
-      <div class="flex justify-between"><span class="text-dim">Телефон</span><span>${escHtml(order.clientPhone || '—')}</span></div>
-      <div class="flex justify-between"><span class="text-dim">Адрес</span><span style="text-align:right;max-width:60%">${addr ? `${escHtml(addr.street)} ${escHtml(addr.house)}${addr.apt ? ', кв.' + escHtml(addr.apt) : ''}${addr.hasIntercom ? ' · домофон: ' + escHtml(addr.intercomCode || 'есть') : ''}` : 'Самовывоз'}</span></div>
+      <div class="flex justify-between"><span class="text-dim">Заведение</span><span class="font-bold">${order.venueName || '—'}</span></div>
+      <div class="flex justify-between"><span class="text-dim">Адрес кафе</span><span style="text-align:right;max-width:60%">${venueAddr}</span></div>
+      <div class="flex justify-between"><span class="text-dim">Клиент</span><span>${order.clientName || '—'}</span></div>
+      <div class="flex justify-between"><span class="text-dim">Телефон</span><span>${order.clientPhone || '—'}</span></div>
+      <div class="flex justify-between"><span class="text-dim">Адрес</span><span style="text-align:right;max-width:60%">${addr ? `${addr.street} ${addr.house}${addr.apt ? ', кв.' + addr.apt : ''}${addr.hasIntercom ? ' · домофон: ' + (addr.intercomCode || 'есть') : ''}` : 'Самовывоз'}</span></div>
       <div class="flex justify-between"><span class="text-dim">Оплата</span><span>${order.payment === 'cash' ? '💵 Наличные' : '💳 Карта'}</span></div>
       <div class="flex justify-between"><span class="text-dim">Итого</span><span class="font-bold text-primary">${fmtPrice((order.total || 0) + (order.deliveryPrice || 0))}</span></div>
-      ${order.comment ? `<div class="flex justify-between"><span class="text-dim">Комментарий</span><span style="text-align:right;max-width:60%">${escHtml(order.comment)}</span></div>` : ''}
+      ${order.comment ? `<div class="flex justify-between"><span class="text-dim">Комментарий</span><span style="text-align:right;max-width:60%">${order.comment}</span></div>` : ''}
     </div>
     <div class="card card-body" style="margin-bottom:12px;gap:5px;display:flex;flex-direction:column">
       ${(order.items || []).map(it => `
         <div class="flex justify-between text-sm">
-          <span>${it.emoji || '🍽️'} ${escHtml(it.name)}${it.variantName ? ' (' + escHtml(it.variantName) + ')' : ''} ×${it.qty}</span>
+          <span>${it.emoji || '🍽️'} ${it.name}${it.variantName ? ' (' + it.variantName + ')' : ''} ×${it.qty}</span>
           <span>${fmtPrice(it.price * it.qty)}</span>
         </div>`).join('')}
     </div>
@@ -720,9 +723,9 @@ async function loadCourierProfile() {
     try {
       const venue = await dbGet('venues', courier.primaryVenueId);
       venueCard.innerHTML = `
-        <div class="font-bold">${escHtml(venue?.name || courier.primaryVenueId)}</div>
-        <div class="text-dim text-sm mt-1">${escHtml(venue?.address || '')}</div>
-        ${venue?.phone ? `<div class="text-sm mt-1">📞 ${escHtml(venue.phone)}</div>` : ''}`;
+        <div class="font-bold">${venue?.name || courier.primaryVenueId}</div>
+        <div class="text-dim text-sm mt-1">${venue?.address || ''}</div>
+        ${venue?.phone ? `<div class="text-sm mt-1">📞 ${venue.phone}</div>` : ''}`;
     } catch {
       venueCard.innerHTML = `<div class="text-dim text-sm">Ошибка загрузки</div>`;
     }
@@ -771,7 +774,7 @@ async function loadCourierHistory() {
       <div class="delivery-card">
         <div class="delivery-card-hdr">
           <div>
-            <div class="font-bold" style="font-size:13px">${escHtml(o.venueName || 'Заведение')}</div>
+            <div class="font-bold" style="font-size:13px">${o.venueName || 'Заведение'}</div>
             <div class="text-xs text-dim">${fmtTime(o.deliveredAt || o.createdAt)} · #${(o.id || '').slice(-6)}</div>
           </div>
           <div>
@@ -780,8 +783,8 @@ async function loadCourierHistory() {
           </div>
         </div>
         <div class="delivery-card-body text-sm">
-          <div>${o.address ? `📍 ${escHtml(o.address.street)} ${escHtml(o.address.house)}` : '🏪 Самовывоз'}</div>
-          <div class="text-dim">${(o.items || []).slice(0, 2).map(i => `${i.emoji || '🍽️'} ${escHtml(i.name)} ×${i.qty}`).join(', ')}</div>
+          <div>${o.address ? `📍 ${o.address.street} ${o.address.house}` : '🏪 Самовывоз'}</div>
+          <div class="text-dim">${(o.items || []).slice(0, 2).map(i => `${i.emoji || '🍽️'} ${i.name} ×${i.qty}`).join(', ')}</div>
         </div>
       </div>`).join('');
 }
