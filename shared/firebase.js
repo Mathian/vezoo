@@ -515,6 +515,26 @@ function checkAllergyConflict(itemIngredients, userProfile) {
 }
 
 // ─────────────────────── Rate limiting ───────────────────────
+// ── Server-enforced rate limit via Firebase Security Rules ──────────────
+// action: 'qr' | 'pin' | 'search' — must match suffix in Rules
+// Writes {ts: serverTimestamp()} to _rate_limits/{uid}_{action}.
+// If Rules reject the write → rate limit hit → throws Error with message.
+// Cooldowns are defined in firebase.rules (3s qr/search, 12s pin).
+async function serverRateLimit(uid, action) {
+  const docId = `${uid}_${action}`;
+  try {
+    await db.collection('_rate_limits').doc(docId).set({
+      ts: firebase.firestore.FieldValue.serverTimestamp()
+    });
+  } catch (e) {
+    if (e.code === 'permission-denied') {
+      const msgs = { qr: 'Слишком быстро. Подождите 3 сек.', pin: 'Слишком много попыток. Подождите 12 сек.', search: 'Слишком быстро. Подождите 3 сек.' };
+      throw new Error(msgs[action] || 'Слишком много запросов. Подождите.');
+    }
+    throw e; // rethrow unexpected errors
+  }
+}
+
 // key — unique string (e.g. 'pin_UID', 'order_UID', 'review_UID')
 // maxCount — allowed calls in window
 // windowMs  — rolling window in milliseconds

@@ -246,16 +246,16 @@ async function opLoadOrders(tab, el) {
 
 function renderOpOrderCard(o) {
   const addr = o.address;
-  const addrStr = typeof addr==='string' ? addr : (addr ? (`${addr.street||''} ${addr.house||''}${addr.apt?', кв.'+addr.apt:''}`).trim() : null);
+  const addrStr = typeof addr==='string' ? escHtml(addr) : (addr ? (`${escHtml(addr.street||'')} ${escHtml(addr.house||'')}${addr.apt?', кв.'+escHtml(addr.apt):''}`).trim() : null);
   const accentColors = {pending:'var(--warning)',accepted:'var(--info)',cooking:'var(--info)',searching_courier:'var(--primary)',courier_assigned:'var(--primary)',delivering:'var(--success)',delivered:'var(--success)',cancelled:'var(--danger)'};
   return `
     <div class="order-card" onclick="openOrderDetail('${o.id}')" style="cursor:pointer;border-left:3px solid ${accentColors[o.status]||'var(--border)'}">
       <div class="order-card-hdr">
-        <div><div class="font-bold" style="font-size:14px">${o.clientName||'Клиент'}${o.isManual?' <span class="badge badge-accepted" style="font-size:10px">📞</span>':''}</div><div class="order-id">${fmtDate(o.createdAt)} · #${(o.id||'').slice(-6)}</div></div>
+        <div><div class="font-bold" style="font-size:14px">${escHtml(o.clientName||'Клиент')}${o.isManual?' <span class="badge badge-accepted" style="font-size:10px">📞</span>':''}</div><div class="order-id">${fmtDate(o.createdAt)} · #${(o.id||'').slice(-6)}</div></div>
         <div style="text-align:right"><span class="${statusBadgeClass(o.status)}">${statusLabel(o.status)}</span><div style="font-weight:700;font-size:16px;color:var(--primary);margin-top:4px">${fmtPrice((o.total||0)+(o.deliveryPrice||0))}</div></div>
       </div>
       <div class="order-card-body">
-        <div class="text-sm text-dim">${(o.items||[]).map(i=>`${i.emoji||'🍽️'} ${i.name} ×${i.qty}`).join(', ')}</div>
+        <div class="text-sm text-dim">${(o.items||[]).map(i=>`${i.emoji||'🍽️'} ${escHtml(i.name)} ×${i.qty}`).join(', ')}</div>
         ${addrStr?`<div class="text-sm text-dim mt-1">📍 ${addrStr}</div>`:'<div class="text-sm text-dim mt-1">🏪 Самовывоз</div>'}
       </div>
     </div>`;
@@ -293,19 +293,19 @@ async function openOrderDetail(orderId) {
       <span class="${statusBadgeClass(order.status)}">${statusLabel(order.status)}</span>
     </div>
     <div class="card card-body" style="margin-bottom:12px;gap:6px;display:flex;flex-direction:column">
-      <div class="flex justify-between"><span class="text-dim">Клиент</span><span class="font-bold">${order.clientName||'—'}</span></div>
-      <div class="flex justify-between"><span class="text-dim">Телефон</span><span style="font-family:monospace">${order.clientPhone||'—'}</span></div>
+      <div class="flex justify-between"><span class="text-dim">Клиент</span><span class="font-bold">${escHtml(order.clientName||'—')}</span></div>
+      <div class="flex justify-between"><span class="text-dim">Телефон</span><span style="font-family:monospace">${escHtml(order.clientPhone||'—')}</span></div>
       ${order.status==='cancelled'&&order.cancelledBy?`<div class="flex justify-between"><span class="text-dim">Отменил</span><span style="color:var(--danger)">${{client:'Клиент',operator:'Оператор',admin:'Администратор'}[order.cancelledBy]||'—'}</span></div>`:''}
       ${callBtn?`<div>${callBtn}</div>`:''}
-      ${(order.courierName||order.courierPhone)?`<div class="flex justify-between"><span class="text-dim">Курьер</span><span style="text-align:right;max-width:60%">${order.courierName||'—'}${order.courierPhone?' · '+order.courierPhone:''}</span></div>`:'' }
+      ${(order.courierName||order.courierPhone)?`<div class="flex justify-between"><span class="text-dim">Курьер</span><span style="text-align:right;max-width:60%">${escHtml(order.courierName||'—')}${order.courierPhone?' · '+escHtml(order.courierPhone):''}</span></div>`:'' }
       ${callCourierBtn?`<div>${callCourierBtn}</div>`:''}
       <div class="flex justify-between"><span class="text-dim">Оплата</span><span>${order.payment==='cash'?'💵 Наличные':'💳 Карта'}</span></div>
       ${addrStr?`<div class="flex justify-between"><span class="text-dim">Адрес</span><span style="text-align:right;max-width:60%">${addrStr}</span></div>`:'<div class="flex justify-between"><span class="text-dim">Получение</span><span>🏪 Самовывоз</span></div>'}
-      ${order.comment?`<div class="flex justify-between"><span class="text-dim">Комментарий</span><span style="text-align:right;max-width:60%;font-size:12px">${order.comment}</span></div>`:''}
+      ${order.comment?`<div class="flex justify-between"><span class="text-dim">Комментарий</span><span style="text-align:right;max-width:60%;font-size:12px">${escHtml(order.comment)}</span></div>`:''}
     </div>
     <div class="section-title" style="margin-bottom:6px">Состав</div>
     <div class="card card-body" style="margin-bottom:12px;gap:5px;display:flex;flex-direction:column">
-      ${(order.items||[]).map(it=>`<div class="flex justify-between"><span>${it.emoji||'🍽️'} ${it.name}${it.variantName?' ('+it.variantName+')':''} ×${it.qty}</span><span class="font-bold">${fmtPrice(it.price*it.qty)}</span></div>`).join('')}
+      ${(order.items||[]).map(it=>`<div class="flex justify-between"><span>${it.emoji||'🍽️'} ${escHtml(it.name)}${it.variantName?' ('+escHtml(it.variantName)+')':''} ×${it.qty}</span><span class="font-bold">${fmtPrice(it.price*it.qty)}</span></div>`).join('')}
       <div class="divider"></div>
       ${order.deliveryPrice?`<div class="flex justify-between"><span class="text-dim">Доставка</span><span>${fmtPrice(order.deliveryPrice)}</span></div>`:''}
       <div class="flex justify-between"><span class="font-bold">Итого</span><span class="font-bold text-primary">${fmtPrice((order.total||0)+(order.deliveryPrice||0))}</span></div>
@@ -404,7 +404,7 @@ function opHandoffScanQr() {
 async function opFindHandoffCourier() {
   const phone=normPhone(document.getElementById('op-handoff-phone').value.trim());
   if (!phone) { showToast('Введите номер телефона','warning'); return; }
-  try { await checkRateLimit('qr_assign_' + STATE.uid, 1, 3000); }
+  try { await serverRateLimit(STATE.uid, 'qr'); }
   catch (e) { showToast(e.message, 'warning'); return; }
   const links=await dbGetAll('user_links');
   const link=links.find(l=>normPhone(l.phone||'')===phone);
@@ -414,13 +414,13 @@ async function opFindHandoffCourier() {
   _opHandoffCourier=courier;
   const foundEl=document.getElementById('op-handoff-found');
   foundEl.style.display='';
-  foundEl.innerHTML=`<div class="handoff-courier-found"><div class="handoff-courier-avatar">🚴</div><div><div style="font-weight:700;font-size:15px">${courier.name||'Курьер'}</div><div style="font-size:13px;color:var(--text-dim)">${courier.phone||phone}</div><div style="font-size:12px;color:${courier.onShift?'var(--success)':'var(--text-muted)'}">${courier.onShift?'На смене':'Офлайн'}</div></div></div>`;
+  foundEl.innerHTML=`<div class="handoff-courier-found"><div class="handoff-courier-avatar">🚴</div><div><div style="font-weight:700;font-size:15px">${escHtml(courier.name||'Курьер')}</div><div style="font-size:13px;color:var(--text-dim)">${escHtml(courier.phone||phone)}</div><div style="font-size:12px;color:${courier.onShift?'var(--success)':'var(--text-muted)'}">${courier.onShift?'На смене':'Офлайн'}</div></div></div>`;
   const orders=_allOrders.filter(o=>['accepted','cooking','searching_courier','courier_assigned','ready_for_courier'].includes(o.status) && o.deliveryType!=='pickup');
   if (!orders.length) { showToast('Нет активных заказов для передачи','info'); return; }
   document.getElementById('op-handoff-orders-section').style.display='';
   document.getElementById('op-handoff-orders-list').innerHTML=orders.map(o=>`
     <div class="handoff-order-row" id="oho_${o.id}" onclick="opToggleHandoffOrder('${o.id}','${o.courierUid||''}')">
-      <div style="flex:1"><div style="font-weight:600;font-size:14px">#${(o.id||'').slice(-6)} — ${o.clientName||'Клиент'}</div><div style="font-size:12px;color:var(--text-dim)">${statusLabel(o.status)} · ${fmtPrice((o.total||0)+(o.deliveryPrice||0))}</div></div>
+      <div style="flex:1"><div style="font-weight:600;font-size:14px">#${(o.id||'').slice(-6)} — ${escHtml(o.clientName||'Клиент')}</div><div style="font-size:12px;color:var(--text-dim)">${statusLabel(o.status)} · ${fmtPrice((o.total||0)+(o.deliveryPrice||0))}</div></div>
       <div id="oho_chk_${o.id}" style="font-size:20px;color:var(--text-muted)">○</div>
     </div>`).join('');
 }
@@ -473,7 +473,7 @@ async function opMoPhoneInput(input) {
   const matches=links.filter(l=>normPhone(l.phone||'').includes(norm.replace('+',''))).slice(0,5);
   const dd=document.getElementById('op-mo-autocomplete');
   if (!matches.length) { dd.style.display='none'; return; }
-  dd.style.display=''; dd.innerHTML=matches.map(l=>`<div class="autocomplete-item" onclick="opMoSelectClient('${(l.phone||'').replace(/'/g,'')}','${(l.firstName||'').replace(/'/g,'')}','${(l.uid||'').replace(/'/g,'')}')"><span style="font-family:monospace">${l.phone}</span> <span style="color:var(--text-dim)">${l.firstName||''}</span></div>`).join('');
+  dd.style.display=''; dd.innerHTML=matches.map(l=>`<div class="autocomplete-item" onclick="opMoSelectClient(decodeURIComponent('${encodeURIComponent(l.phone||'')}'),decodeURIComponent('${encodeURIComponent(l.firstName||'')}'),decodeURIComponent('${encodeURIComponent(l.uid||'')}'))"><span style="font-family:monospace">${escHtml(l.phone||'')}</span> <span style="color:var(--text-dim)">${escHtml(l.firstName||'')}</span></div>`).join('');
 }
 
 async function opMoSelectClient(phone, name, uid) {
@@ -531,9 +531,9 @@ async function loadOpSettings() {
   // Venue info
   const vi = document.getElementById('op-venue-info');
   vi.innerHTML = VENUE ? `
-    <div class="flex justify-between"><span class="text-dim">Заведение</span><span class="font-bold">${VENUE.name||'—'}</span></div>
-    <div class="flex justify-between"><span class="text-dim">Адрес</span><span style="text-align:right;max-width:60%">${VENUE.address||'—'}</span></div>
-    <div class="flex justify-between"><span class="text-dim">Телефон</span><span>${VENUE.phone||'—'}</span></div>
+    <div class="flex justify-between"><span class="text-dim">Заведение</span><span class="font-bold">${escHtml(VENUE.name||'—')}</span></div>
+    <div class="flex justify-between"><span class="text-dim">Адрес</span><span style="text-align:right;max-width:60%">${escHtml(VENUE.address||'—')}</span></div>
+    <div class="flex justify-between"><span class="text-dim">Телефон</span><span>${escHtml(VENUE.phone||'—')}</span></div>
   ` : '<div class="text-dim text-sm">Нет данных</div>';
 
   // Today's stats
