@@ -51,13 +51,21 @@ function initFirebase() {
   });
 }
 
-// ── Write (merge) ──
+// ── Write (merge, silent) ──
 async function dbSet(col, id, data) {
   const payload = { ...data, _upd: new Date().toISOString() };
   try { localStorage.setItem(`${_tgPfx}${col}_${id}`, JSON.stringify(payload)); } catch {}
   if (!_fbR) return;
   try { await db.collection(col).doc(String(id)).set(payload, { merge: true }); }
   catch (e) { console.warn(`[DB] set ${col}/${id}:`, e.message); }
+}
+
+// ── Write (strict) — throws on Firestore error; use for critical writes ──
+async function dbSetStrict(col, id, data) {
+  const payload = { ...data, _upd: new Date().toISOString() };
+  try { localStorage.setItem(`${_tgPfx}${col}_${id}`, JSON.stringify(payload)); } catch {}
+  if (!_fbR) throw new Error('Нет соединения с сервером. Проверьте интернет.');
+  await db.collection(col).doc(String(id)).set(payload, { merge: true }); // throws on any error
 }
 
 // ── Delete ──

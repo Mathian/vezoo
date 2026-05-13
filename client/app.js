@@ -684,15 +684,20 @@ async function submitOrder() {
   };
 
   try {
-    await dbSet('orders', orderId, order);
+    await dbSetStrict('orders', orderId, order); // throws if Firestore rejects
     CART[venueId] = []; delete CART[venueId];
     _saveCart(); updateCartNavBadge();
     tgHaptic('success'); showToast('Заказ оформлен!', 'success');
     navToAllOrders();
   } catch (e) {
-    showToast('Ошибка при оформлении', 'error');
+    console.error('[Order] submit failed:', e.message);
+    const msg = e.code === 'permission-denied'
+      ? 'Нет доступа. Попробуйте перезайти в приложение.'
+      : (e.message || 'Ошибка при оформлении заказа');
+    showToast(msg, 'error');
+  } finally {
+    btn.disabled = false; btn.textContent = 'Оформить заказ';
   }
-  btn.disabled = false; btn.textContent = 'Оформить заказ';
 }
 
 // ══════════════════════════════════════════════════════════
