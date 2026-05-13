@@ -41,8 +41,13 @@ window.addEventListener('DOMContentLoaded', async () => {
   _initBackButton();
 
   const _tgUserId = tg?.initDataUnsafe?.user?.id ? String(tg.initDataUnsafe.user.id) : null;
-  // Namespace all localStorage by tgId — must happen before any read/write
-  initUserStorage(_tgUserId);
+  // Read uid from URL before initFirebase — no Firebase needed, just reads URL params.
+  // This lets us use uid as a namespace fallback when tgId is unavailable,
+  // ensuring each account's cart/favorites are isolated even on shared devices.
+  const _urlUid = readUidFromUrl();
+  // Namespace all localStorage by tgId. If tgId unavailable (some Telegram clients
+  // don't expose it), fall back to uid from URL so accounts don't share data.
+  initUserStorage(_tgUserId || _urlUid);
 
   try {
     const s = JSON.parse(localStorage.getItem(storageKey('client_state')) || '{}');
@@ -55,7 +60,6 @@ window.addEventListener('DOMContentLoaded', async () => {
   } catch {}
 
   await initFirebase();
-  const _urlUid = readUidFromUrl();
   if (_urlUid) { STATE.uid = _urlUid; _saveClientState(); }
   if (!STATE.uid) {
     const tgUid = await resolveUidByTgId();
@@ -673,7 +677,9 @@ async function submitOrder() {
     address: isPickup ? null : { street, house, apt, hasIntercom: _intercomChecked },
     payment: _paymentMethod, deliveryType: _deliveryType, comment,
     status: 'pending', createdAt: new Date().toISOString(),
-    clientNotification: { type: '', seen: true }
+    clientNotification: { type: '', seen: true },
+    // Bot dedup flags — set to false so bot can query only unnotified orders
+    adminBotNotified: false, clientBotNotified: false, cancelledBotNotified: false, courierBotNotified: false
   };
 
   try {
