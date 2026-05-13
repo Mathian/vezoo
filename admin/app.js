@@ -30,27 +30,26 @@ window.addEventListener('DOMContentLoaded', async () => {
   tgReady();
   _initAdminBackButton();
   const _tgUserId = tg?.initDataUnsafe?.user?.id ? String(tg.initDataUnsafe.user.id) : null;
-  initUserStorage(_tgUserId);
   try {
-    const s = JSON.parse(localStorage.getItem(storageKey('admin_state')) || '{}');
+    const s = JSON.parse(localStorage.getItem('vez_admin_state') || '{}');
     if (!_tgUserId || s.tgId === _tgUserId) { STATE.uid = s.uid||null; STATE.user = s.user||null; }
   } catch {}
+  const urlUid = readUidFromUrl();
+  if (urlUid) { STATE.uid = urlUid; saveState(); }
   await initFirebase();
-  const _urlUid = readUidFromUrl();
-  if (_urlUid) { STATE.uid = _urlUid; saveState(); }
   if (!STATE.uid) { const tgUid = await resolveUidByTgId(); if (tgUid) { STATE.uid = tgUid; saveState(); } }
   if (!STATE.uid) { showScreen('s-no-uid'); return; }
 
   const existing = await dbGet('users', STATE.uid);
   if (existing?.blocked) { showScreen('s-blocked'); return; }
-  if (!existing?.agreedAdmin && !STATE.user?.agreedAdmin) { showAgreement(); return; }
+  if (!existing?.agreedAdmin) { showAgreement(); return; }
 
   if (existing && !existing.name) {
     const autoName = _getTgName() || 'Администратор';
     await dbSet('users', STATE.uid, { name: autoName });
     existing.name = autoName;
   }
-  STATE.user = existing || STATE.user; saveState();
+  STATE.user = existing; saveState();
   showPinScreen();
 });
 
@@ -62,7 +61,7 @@ function _getTgName() {
 
 function saveState() {
   const tgUserId = tg?.initDataUnsafe?.user?.id ? String(tg.initDataUnsafe.user.id) : null;
-  try { localStorage.setItem(storageKey('admin_state'), JSON.stringify({ uid: STATE.uid, user: STATE.user, tgId: tgUserId })); } catch {}
+  try { localStorage.setItem('vez_admin_state', JSON.stringify({ uid: STATE.uid, user: STATE.user, tgId: tgUserId })); } catch {}
 }
 
 // ══════════════════════════════════════════════════════════
@@ -121,38 +120,19 @@ function updatePinDots() {
   }
 }
 
-// In-memory PIN rate limit: max 5 wrong attempts, then 60s lockout.
-// Resets on correct PIN or on app reload (intentional — PIN pad behaviour).
-let _pinWrongCount = 0;
-let _pinLockUntil  = 0;
-
 async function checkPin() {
-  const now = Date.now();
-  if (now < _pinLockUntil) {
-    const secsLeft = Math.ceil((_pinLockUntil - now) / 1000);
-    tgHaptic('error');
-    document.getElementById('pin-sub-text').textContent = `Слишком много попыток. Подождите ${secsLeft} сек.`;
-    setTimeout(() => { _pinBuffer = ''; updatePinDots(); document.getElementById('pin-sub-text').textContent = 'Введите PIN-код'; }, 2000);
-    return;
-  }
   const ok = await verifyPin('admin', _pinBuffer);
   if (ok) {
-    _pinWrongCount = 0; _pinLockUntil = 0;
     document.getElementById('s-pin').style.display = 'none';
     await checkVenueAndInit();
   } else {
-    _pinWrongCount++;
-    if (_pinWrongCount >= 5) { _pinLockUntil = Date.now() + 60000; _pinWrongCount = 0; }
     tgHaptic('error');
     for (let i = 0; i < 4; i++) {
       const dot = document.getElementById('pd' + i);
       if (dot) { dot.classList.add('error'); dot.classList.remove('filled'); }
     }
-    const attLeft = _pinLockUntil ? 0 : (5 - _pinWrongCount);
-    document.getElementById('pin-sub-text').textContent = _pinLockUntil
-      ? 'Слишком много попыток. Подождите 60 сек.'
-      : `Неверный PIN. Осталось попыток: ${attLeft}`;
-    setTimeout(() => { _pinBuffer = ''; updatePinDots(); document.getElementById('pin-sub-text').textContent = 'Введите PIN-код'; }, 1500);
+    document.getElementById('pin-sub-text').textContent = 'Неверный PIN. Попробуйте снова';
+    setTimeout(() => { _pinBuffer = ''; updatePinDots(); document.getElementById('pin-sub-text').textContent = 'Введите PIN-код'; }, 900);
   }
 }
 
@@ -282,6 +262,7 @@ function togglePayTag(btnId, method) {
 // ══════════════════════════════════════════════════════════
 function initMain() {
   document.getElementById('main-nav').style.display = 'flex';
+  startHeartbeat(STATE.uid);
   loadMenuItems();
   watchNewOrders();
   showScreen('s-menu');
@@ -331,7 +312,7 @@ function _getCatValue() {
 function renderMenuCatTabs() {
   const container = document.getElementById('menu-cats-tabs');
   container.innerHTML = ['Все',...MENU_CATS].map((c,i)=>
-    `<button class="cat-tab${i===0?' active':''}" onclick="filterMenuItems(this,decodeURIComponent('${encodeURIComponent(c)}'))">${escHtml(c)}</button>`
+    `<button class="cat-tab${i===0?' active':''}" onclick="filterMenuItems(this,'${c}')">${c}</button>`
   ).join('');
 }
 
@@ -350,17 +331,17 @@ function renderMenuItems(cat) {
       ? item.variants.map(v=>`${v.name}: ${fmtPrice(v.price)}`).join('<br>')
       : fmtPrice(item.price);
     const imgEl = item.imageUrl
-      ? `<div class="admin-item-img"><img src="${item.imageUrl}" onerror="this.parentElement.innerHTML='<span style=font-size:26px>🍽️</span>'"></div>`
-      : `<div class="admin-item-img"><span style="font-size:26px">${escHtml(item.emoji||'🍽️')}</span></div>`;
+      ? `<div class="admin-item-img"><img src="${item.imageUrl}" onerror="this.parentElement.innerHTML='<span style=font-size:26px>${item.emoji||'🍽️'}</span>'"></div>`
+      : `<div class="admin-item-img"><span style="font-size:26px">${item.emoji||'🍽️'}</span></div>`;
     const ingChips = item.ingredients?.length
-      ? `<div class="ingredients-row">${item.ingredients.slice(0,3).map(x=>`<span class="ingredient-chip">${escHtml(x)}</span>`).join('')}${item.ingredients.length>3?`<span class="ingredient-chip">+${item.ingredients.length-3}</span>`:''}</div>` : '';
+      ? `<div class="ingredients-row">${item.ingredients.slice(0,3).map(x=>`<span class="ingredient-chip">${x}</span>`).join('')}${item.ingredients.length>3?`<span class="ingredient-chip">+${item.ingredients.length-3}</span>`:''}</div>` : '';
     return `
       <div class="admin-item">
         ${imgEl}
         <div class="admin-item-body">
-          <div class="admin-item-name">${escHtml(item.name)}${item.available===false?' <span class="badge badge-cancelled" style="font-size:10px;padding:2px 6px">Скрыт</span>':''}</div>
+          <div class="admin-item-name">${item.name}${item.available===false?' <span class="badge badge-cancelled" style="font-size:10px;padding:2px 6px">Скрыт</span>':''}</div>
           <div class="admin-item-price">${priceStr}</div>
-          ${item.category?`<div class="text-xs text-dim" style="margin-top:2px">${escHtml(item.category)}</div>`:''}
+          ${item.category?`<div class="text-xs text-dim" style="margin-top:2px">${item.category}</div>`:''}
           ${ingChips}
         </div>
         <div class="admin-item-actions">
@@ -541,12 +522,12 @@ function renderOrdersList(orders) {
   list.innerHTML=orders.sort((a,b)=>(b.createdAt||'').localeCompare(a.createdAt||'')).map(o=>`
     <div class="order-card" onclick="openOrderDetail('${o.id}')" style="cursor:pointer">
       <div class="order-card-hdr">
-        <div><div class="font-bold" style="font-size:13px">${escHtml(o.clientName||'Клиент')}${o.isManual?` <span class="badge badge-accepted" style="font-size:10px">📞</span>`:''}</div><div class="order-id">${fmtDate(o.createdAt)} · #${(o.id||'').slice(-6)}</div></div>
+        <div><div class="font-bold" style="font-size:13px">${o.clientName||'Клиент'}${o.isManual?` <span class="badge badge-accepted" style="font-size:10px">📞</span>`:''}</div><div class="order-id">${fmtDate(o.createdAt)} · #${(o.id||'').slice(-6)}</div></div>
         <div style="text-align:right"><span class="${statusBadgeClass(o.status)}">${statusLabel(o.status)}</span><div style="font-weight:700;font-size:15px;color:var(--primary);margin-top:3px">${fmtPrice((o.total||0)+(o.deliveryPrice||0))}</div></div>
       </div>
       <div class="order-card-body">
-        <div class="text-sm text-dim">${(o.items||[]).map(i=>`${i.emoji||'🍽️'} ${escHtml(i.name)} ×${i.qty}`).join(', ')}</div>
-        ${o.address?`<div class="text-sm text-dim mt-1">📍 ${escHtml(String(o.address.street||o.address||''))} ${escHtml(o.address.house||'')}${o.address.apt?', кв.'+escHtml(o.address.apt):''}</div>`:''}
+        <div class="text-sm text-dim">${(o.items||[]).map(i=>`${i.emoji||'🍽️'} ${i.name} ×${i.qty}`).join(', ')}</div>
+        ${o.address?`<div class="text-sm text-dim mt-1">📍 ${o.address.street||o.address} ${o.address.house||''}${o.address.apt?', кв.'+o.address.apt:''}</div>`:''}
       </div>
     </div>`).join('');
 }
@@ -566,19 +547,19 @@ async function openOrderDetail(orderId) {
       <span class="${statusBadgeClass(order.status)}">${statusLabel(order.status)}</span>
     </div>
     <div class="card card-body" style="margin-bottom:12px;gap:6px;display:flex;flex-direction:column">
-      <div class="flex justify-between"><span class="text-dim">Клиент</span><span class="font-bold">${escHtml(order.clientName||'—')}</span></div>
-      <div class="flex justify-between"><span class="text-dim">Телефон</span><span style="font-family:monospace">${escHtml(order.clientPhone||'—')}</span></div>
+      <div class="flex justify-between"><span class="text-dim">Клиент</span><span class="font-bold">${order.clientName||'—'}</span></div>
+      <div class="flex justify-between"><span class="text-dim">Телефон</span><span style="font-family:monospace">${order.clientPhone||'—'}</span></div>
       ${order.status==='cancelled'&&order.cancelledBy?`<div class="flex justify-between"><span class="text-dim">Отменил</span><span style="color:var(--danger)">${{client:'Клиент',operator:'Оператор',admin:'Администратор'}[order.cancelledBy]||'—'}</span></div>`:''}
       ${callBtn?`<div>${callBtn}</div>`:''}
-      ${(order.courierName||order.courierPhone)?`<div class="flex justify-between"><span class="text-dim">Курьер</span><span style="text-align:right;max-width:60%">${escHtml(order.courierName||'—')}${order.courierPhone?' · '+escHtml(order.courierPhone):''}</span></div>`:'' }
+      ${(order.courierName||order.courierPhone)?`<div class="flex justify-between"><span class="text-dim">Курьер</span><span style="text-align:right;max-width:60%">${order.courierName||'—'}${order.courierPhone?' · '+order.courierPhone:''}</span></div>`:'' }
       ${callCourierBtn?`<div>${callCourierBtn}</div>`:''}
       <div class="flex justify-between"><span class="text-dim">Оплата</span><span>${order.payment==='cash'?'💵 Наличные':'💳 Карта'}</span></div>
-      <div class="flex justify-between"><span class="text-dim">Адрес</span><span style="text-align:right;max-width:60%">${escHtml(addrStr)}</span></div>
-      ${order.comment?`<div class="flex justify-between"><span class="text-dim">Комментарий</span><span style="text-align:right;max-width:60%">${escHtml(order.comment)}</span></div>`:''}
+      <div class="flex justify-between"><span class="text-dim">Адрес</span><span style="text-align:right;max-width:60%">${addrStr}</span></div>
+      ${order.comment?`<div class="flex justify-between"><span class="text-dim">Комментарий</span><span style="text-align:right;max-width:60%">${order.comment}</span></div>`:''}
     </div>
     <div class="section-title" style="margin-bottom:6px">Состав</div>
     <div class="card card-body" style="margin-bottom:12px;gap:5px;display:flex;flex-direction:column">
-      ${(order.items||[]).map(it=>`<div class="flex justify-between"><span>${it.emoji||'🍽️'} ${escHtml(it.name)}${it.variantName?' ('+escHtml(it.variantName)+')':''} ×${it.qty}</span><span class="font-bold">${fmtPrice(it.price*it.qty)}</span></div>`).join('')}
+      ${(order.items||[]).map(it=>`<div class="flex justify-between"><span>${it.emoji||'🍽️'} ${it.name}${it.variantName?' ('+it.variantName+')':''} ×${it.qty}</span><span class="font-bold">${fmtPrice(it.price*it.qty)}</span></div>`).join('')}
       <div class="divider"></div>
       ${order.deliveryPrice?`<div class="flex justify-between"><span class="text-dim">Доставка</span><span>${fmtPrice(order.deliveryPrice)}</span></div>`:''}
       <div class="flex justify-between"><span class="font-bold">Итого</span><span class="font-bold text-primary">${fmtPrice(order.total+(order.deliveryPrice||0))}</span></div>
@@ -602,8 +583,8 @@ function renderAdminOrderActions(order) {
   if (order.status==='accepted'||order.status==='cooking') return `<div style="display:flex;flex-direction:column;gap:8px"><button class="btn btn-success btn-sm" onclick="adminMarkReadyForCourier('${order.id}')">✅ Заказ готов</button><div class="btn-row"><button class="btn btn-secondary btn-sm" onclick="adminSearchCourier('${order.id}')">🔍 В общий пул</button><button class="btn btn-primary btn-sm" onclick="openHandoffFlow()">📦 Передать</button></div>${cancelBtn}</div>${blBtn}`;
   if (order.status==='ready_for_courier') return `<div style="display:flex;flex-direction:column;gap:8px"><div class="alert-box success" style="font-size:13px">⚡ Заказ готов — ждём курьера кафе</div><button class="btn btn-primary btn-sm" onclick="openHandoffFlow()">📦 Передать курьеру</button><button class="btn btn-secondary btn-sm" onclick="adminSearchCourier('${order.id}')">🔍 Выставить в общий пул</button>${cancelBtn}</div>${blBtn}`;
   if (order.status==='searching_courier') return `<div style="display:flex;flex-direction:column;gap:8px"><div class="alert-box info" style="font-size:13px">⏳ Ждём курьера из пула…</div><button class="btn btn-primary btn-sm" onclick="openHandoffFlow()">📦 Передать курьеру</button>${cancelBtn}</div>${blBtn}`;
-  if (order.status==='courier_assigned') return `<div style="display:flex;flex-direction:column;gap:8px"><div class="alert-box info" style="font-size:13px">🏃 <strong>${escHtml(order.courierName||'Курьер')}</strong> едет в кафе</div><button class="btn btn-success btn-sm" onclick="openHandoffFlow()">📦 Передать заказ курьеру</button>${cancelBtn}</div>${blBtn}`;
-  if (order.status==='delivering') return `<div style="display:flex;flex-direction:column;gap:8px"><div class="alert-box success">🚴 Курьер: <strong>${escHtml(order.courierName||'')}</strong></div>${cancelBtn}</div>${blBtn}`;
+  if (order.status==='courier_assigned') return `<div style="display:flex;flex-direction:column;gap:8px"><div class="alert-box info" style="font-size:13px">🏃 <strong>${order.courierName||'Курьер'}</strong> едет в кафе</div><button class="btn btn-success btn-sm" onclick="openHandoffFlow()">📦 Передать заказ курьеру</button>${cancelBtn}</div>${blBtn}`;
+  if (order.status==='delivering') return `<div style="display:flex;flex-direction:column;gap:8px"><div class="alert-box success">🚴 Курьер: <strong>${order.courierName||''}</strong></div>${cancelBtn}</div>${blBtn}`;
   if (order.status==='cancelled') {
     const byLabel = {client:'клиентом',operator:'оператором',admin:'администратором'}[order.cancelledBy]||'';
     return `<div class="alert-box danger">❌ Заказ отменён${byLabel?' '+byLabel:''}</div>${blBtn}`;
@@ -690,8 +671,6 @@ function handoffScanQr() {
 async function findHandoffCourier() {
   const phone=normPhone(document.getElementById('handoff-phone').value.trim());
   if (!phone) { showToast('Введите номер телефона','warning'); return; }
-  try { await serverRateLimit(STATE.uid, 'qr'); }
-  catch (e) { showToast(e.message, 'warning'); return; }
   const links=await dbGetAll('user_links');
   const link=links.find(l=>normPhone(l.phone)===phone);
   if (!link) { showToast('Курьер не найден','error'); return; }
@@ -704,8 +683,8 @@ async function findHandoffCourier() {
     <div class="handoff-courier-found">
       <div class="handoff-courier-avatar">🚴</div>
       <div>
-        <div style="font-weight:700;font-size:15px">${escHtml(courier.name||'Курьер')}</div>
-        <div style="font-size:13px;color:var(--text-dim)">${escHtml(courier.phone||phone)}</div>
+        <div style="font-weight:700;font-size:15px">${courier.name||'Курьер'}</div>
+        <div style="font-size:13px;color:var(--text-dim)">${courier.phone||phone}</div>
         <div style="font-size:12px;color:${courier.onShift?'var(--success)':'var(--text-muted)'}">${courier.onShift?'На смене':'Офлайн'}</div>
       </div>
     </div>`;
@@ -720,7 +699,7 @@ async function findHandoffCourier() {
   ordList.innerHTML=orders.map(o=>`
     <div class="handoff-order-row" id="ho_${o.id}" onclick="toggleHandoffOrder('${o.id}','${(o.courierUid||'')}')">
       <div style="flex:1">
-        <div style="font-weight:600;font-size:14px">#${(o.id||'').slice(-6)} — ${escHtml(o.clientName||'Клиент')}</div>
+        <div style="font-weight:600;font-size:14px">#${(o.id||'').slice(-6)} — ${o.clientName||'Клиент'}</div>
         <div style="font-size:12px;color:var(--text-dim)">${statusLabel(o.status)} · ${fmtPrice((o.total||0)+(o.deliveryPrice||0))}</div>
       </div>
       <div id="ho_chk_${o.id}" style="font-size:20px;color:var(--text-muted)">○</div>
@@ -782,20 +761,16 @@ async function openManualOrder() {
   _openSheet('manual-order-overlay');
 }
 
-let _moDebounce = null;
 async function moPhoneInput(input) {
   const val=input.value.trim();
   if (val.length<7) { document.getElementById('mo-autocomplete').style.display='none'; return; }
-  clearTimeout(_moDebounce);
-  _moDebounce = setTimeout(async () => {
   const norm=normPhone(val);
   const links=await dbGetAll('user_links');
   const matches=links.filter(l=>normPhone(l.phone||'').includes(norm.replace('+',''))).slice(0,5);
   const dd=document.getElementById('mo-autocomplete');
   if (!matches.length) { dd.style.display='none'; return; }
   dd.style.display='';
-  dd.innerHTML=matches.map(l=>`<div class="autocomplete-item" onclick="moSelectClient(decodeURIComponent('${encodeURIComponent(l.phone||'')}'),decodeURIComponent('${encodeURIComponent(l.firstName||'')}'),decodeURIComponent('${encodeURIComponent(l.uid||'')}'))"><span style="font-family:monospace">${escHtml(l.phone||'')}</span> <span style="color:var(--text-dim)">${escHtml(l.firstName||'')} ${escHtml(l.lastName||'')}</span></div>`).join('');
-  }, 300);
+  dd.innerHTML=matches.map(l=>`<div class="autocomplete-item" onclick="moSelectClient('${(l.phone||'').replace(/'/g,'')}','${(l.firstName||'').replace(/'/g,'')}','${(l.uid||'').replace(/'/g,'')}')"><span style="font-family:monospace">${l.phone}</span> <span style="color:var(--text-dim)">${l.firstName||''} ${l.lastName||''}</span></div>`).join('');
 }
 
 async function moSelectClient(phone, name, uid) {
@@ -910,9 +885,6 @@ async function generateAdminReport() {
   const fromDate = document.getElementById('rep-date-from')?.value;
   const toDate   = document.getElementById('rep-date-to')?.value;
   if (!fromDate || !toDate) { showToast('Выберите период','warning'); return; }
-  // Rate limit: 1 report per 30 seconds
-  try { await checkRateLimit('report_' + STATE.uid, 1, 30000); }
-  catch (e) { showToast(e.message, 'warning'); return; }
   const btn = document.querySelector('[onclick="generateAdminReport()"]');
   if (btn) { btn.disabled=true; btn.textContent='⏳ Формирую...'; }
   try {
@@ -1128,7 +1100,7 @@ async function loadPermCouriers() {
   listEl.innerHTML=rows.map(r=>`
     <div class="flex items-center gap-2">
       <div class="li-icon yellow" style="width:34px;height:34px;font-size:16px">🚴</div>
-      <div style="flex:1"><div class="font-bold text-sm">${escHtml(r.courierName)}</div><div class="text-xs text-dim">${escHtml(r.phone)} · ${r.status==='confirmed'?'<span class="text-success">Подтвердил</span>':'Ожидает'}</div></div>
+      <div style="flex:1"><div class="font-bold text-sm">${r.courierName}</div><div class="text-xs text-dim">${r.phone} · ${r.status==='confirmed'?'<span class="text-success">Подтвердил</span>':'Ожидает'}</div></div>
       <button class="btn btn-xs" style="background:var(--danger-soft);color:var(--danger);border:none;padding:4px 8px;border-radius:6px;cursor:pointer" onclick="removePermCourier('${r.uid}')">×</button>
     </div>`).join('');
 }
