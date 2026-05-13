@@ -150,7 +150,6 @@ async function opLeaveVenue() {
 function initMain() {
   document.getElementById('main-nav').style.display = 'flex';
   document.getElementById('op-venue-name-hdr').textContent = VENUE?.name||'Заведение';
-  startHeartbeat(STATE.uid);
   watchOrders();
   showScreen('s-new-orders');
   setNav(document.getElementById('nav-new'));

@@ -176,7 +176,6 @@ async function changePinSa() {
 // ══════════════════════════════════════════════════════════
 function initMain() {
   document.getElementById('main-nav').style.display = 'flex';
-  startHeartbeat(STATE.uid);
   loadCategories();
   loadPendingBadges();
   showScreen('s-categories');

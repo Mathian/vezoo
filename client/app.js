@@ -174,7 +174,6 @@ function openCityChange() {
 // ── Init main ──
 function initMain() {
   document.getElementById('main-nav').style.display = 'flex';
-  startHeartbeat(STATE.uid);
   FAVORITES = JSON.parse(localStorage.getItem(storageKey('favorites')) || '[]');
   if (STATE.user?.favorites) FAVORITES = STATE.user.favorites;
   if (STATE.user?.cityName) {

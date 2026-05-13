@@ -289,7 +289,6 @@ function togglePayTag(btnId, method) {
 // ══════════════════════════════════════════════════════════
 function initMain() {
   document.getElementById('main-nav').style.display = 'flex';
-  startHeartbeat(STATE.uid);
   loadMenuItems();
   watchNewOrders();
   showScreen('s-menu');

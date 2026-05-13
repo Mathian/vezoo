@@ -151,8 +151,6 @@ async function declineVenueInvite() {
 // ── Init main ──
 function initMain() {
   document.getElementById('main-nav').style.display = 'flex';
-  startHeartbeat(STATE.uid);
-
   const onShift = COURIER_DATA?.onShift || false;
   document.getElementById('shift-toggle').checked = onShift;
   document.getElementById('shift-label').textContent = onShift ? '🟢 На смене' : 'Офлайн';

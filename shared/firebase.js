@@ -361,12 +361,6 @@ function _clearVezCache() {
   } catch {}
 }
 
-// ─────────────────────── Heartbeat ───────────────────────
-function startHeartbeat(uid) {
-  const send = () => { if (uid && _fbR) dbSet('users', uid, { webAppLastSeen: new Date().toISOString() }); };
-  send(); setInterval(send, 5000);
-}
-
 // ─────────────────────── Screen helper ───────────────────────
 function showScreen(id) {
   document.querySelectorAll('.screen').forEach(s => s.classList.remove('active'));
