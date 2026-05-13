@@ -20,7 +20,17 @@ let _saVenCoverDataUrl = null;
 //  BOOT
 // ══════════════════════════════════════════════════════════
 window.addEventListener('DOMContentLoaded', async () => {
-  if (new URLSearchParams(location.search).get('reset') === '1') { localStorage.clear(); location.replace(location.pathname); return; }
+  const _urlParams = new URLSearchParams(location.search);
+  if (_urlParams.get('reset') === '1') { localStorage.clear(); location.replace(location.pathname); return; }
+  // Emergency PIN reset: ?resetpin=1 — clears stored superadmin PIN back to '0000'
+  if (_urlParams.get('resetpin') === '1') {
+    await initFirebase();
+    try { await db.collection('settings').doc('pins').set({ superadmin: null }, { merge: true }); } catch {}
+    try { localStorage.removeItem('vez_settings_pins'); } catch {}
+    alert('PIN суперадмина сброшен на 0000');
+    location.replace(location.pathname);
+    return;
+  }
   tgReady();
   if (tg?.BackButton) tg.BackButton.onClick(() => {
     const open = document.querySelector('.overlay.open');

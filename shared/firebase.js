@@ -474,13 +474,18 @@ async function verifyPin(role, entered) {
   try {
     const cfg    = await dbGet('settings', 'pins');
     const stored = cfg?.[role] || PIN_DEFAULTS[role] || '0000';
+    console.log(`[PIN] role=${role} stored_len=${stored.length} stored_preview=${stored.slice(0,8)}`);
     if (stored.length === 64) {
-      // Stored as SHA-256 hash
-      return (await _hashPin(entered)) === stored;
+      const enteredHash = await _hashPin(entered);
+      console.log(`[PIN] hash_match=${enteredHash === stored}`);
+      return enteredHash === stored;
     }
     // Legacy plaintext (until PIN is re-saved via settings)
     return entered === stored;
-  } catch { return entered === '0000'; }
+  } catch (e) {
+    console.warn('[PIN] verifyPin error:', e.message);
+    return entered === '0000';
+  }
 }
 
 async function savePin(role, newPin) {
