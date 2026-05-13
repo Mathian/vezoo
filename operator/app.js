@@ -27,22 +27,17 @@ window.addEventListener('DOMContentLoaded', async () => {
     const s = JSON.parse(localStorage.getItem(storageKey('op_state')) || '{}');
     if (!tgUserId || s.tgId === tgUserId) { STATE.uid = s.uid||null; STATE.user = s.user||null; }
   } catch {}
-  const _urlToken = readUidFromUrl();
   await initFirebase();
-  if (_urlToken) {
-    const _res = await resolveLoginToken(_urlToken);
-    if (_res.uid) {
-      if (_res.clearStorage) _clearVezCache();
-      STATE.uid = _res.uid;
-      saveState();
-    }
-  }
+  const _urlUid = readUidFromUrl();
+  if (_urlUid) { STATE.uid = _urlUid; saveState(); }
   if (!STATE.uid) { const tgUid = await resolveUidByTgId(); if (tgUid) { STATE.uid = tgUid; saveState(); } }
   if (!STATE.uid) { showScreen('s-no-uid'); return; }
   const existing = await dbGet('users', STATE.uid);
   if (!existing) { showScreen('s-no-uid'); return; }
   if (existing.blocked) { showScreen('s-blocked'); return; }
-  if (!existing.agreedOperator) { STATE.user = existing; saveState(); showAgreement(); return; }
+  if (!existing?.agreedOperator && !STATE.user?.agreedOperator) { STATE.user = existing; saveState(); showAgreement(); return; }
+  // Resync: if agreed in localStorage but not in Firestore (e.g. Firestore was offline on first agree), re-save
+  if (!existing?.agreedOperator && STATE.user?.agreedOperator) await dbSet('users', STATE.uid, { agreedOperator: true });
   if (!existing.name) {
     const autoName = _getTgName() || 'Оператор';
     await dbSet('users', STATE.uid, { name: autoName }); existing.name = autoName;

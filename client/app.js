@@ -54,17 +54,9 @@ window.addEventListener('DOMContentLoaded', async () => {
     FAVORITES = JSON.parse(localStorage.getItem(storageKey('favorites')) || '[]');
   } catch {}
 
-  const _urlToken = readUidFromUrl();
   await initFirebase();
-
-  if (_urlToken) {
-    const _res = await resolveLoginToken(_urlToken);
-    if (_res.uid) {
-      if (_res.clearStorage) _clearVezCache();
-      STATE.uid = _res.uid;
-      _saveClientState();
-    }
-  }
+  const _urlUid = readUidFromUrl();
+  if (_urlUid) { STATE.uid = _urlUid; _saveClientState(); }
   if (!STATE.uid) {
     const tgUid = await resolveUidByTgId();
     if (tgUid) { STATE.uid = tgUid; _saveClientState(); }
@@ -74,10 +66,12 @@ window.addEventListener('DOMContentLoaded', async () => {
   const existing = await dbGet('users', STATE.uid);
   if (existing?.blocked) { showScreen('s-blocked'); return; }
 
-  if (!existing?.agreedClient) {
+  if (!existing?.agreedClient && !STATE.user?.agreedClient) {
     document.getElementById('s-agree').style.display = 'flex';
     return;
   }
+  // Resync: if agreed in localStorage but not in Firestore (e.g. Firestore was offline on first agree), re-save
+  if (!existing?.agreedClient && STATE.user?.agreedClient) await dbSet('users', STATE.uid, { agreedClient: true });
 
   if (!existing.name) {
     const autoName = _getTgName() || existing.firstName || 'Пользователь';

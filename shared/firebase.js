@@ -303,19 +303,20 @@ async function resolveUidByTgId() {
 }
 
 // ─────────────────────── State helpers ───────────────────────
+
+// Read uid directly from URL / Telegram start_param — no token resolution needed.
+// The uid is the HMAC hash of the user's phone, passed by the bot in the WebApp link.
 function readUidFromUrl() {
-  // 1. Telegram WebApp start_param — may be a one-time login token or legacy uid
+  // 1. Telegram WebApp start_param (most common path — bot sends ?startapp=uid)
   const startParam = tg?.initDataUnsafe?.start_param || '';
-  if (startParam && startParam.length > 5) {
-    return startParam;
-  }
-  // 2. tgWebAppStartParam in hash
+  if (startParam && startParam.length > 5) return startParam;
+  // 2. tgWebAppStartParam in hash fragment
   try {
     const hash = new URLSearchParams(location.hash.replace('#', ''));
     const hashUid = hash.get('tgWebAppStartParam') || hash.get('uid');
     if (hashUid && hashUid.length > 5) return hashUid;
   } catch {}
-  // 3. Direct ?uid= in URL (fallback for browser testing)
+  // 3. Direct ?uid= query param (fallback for browser testing)
   const p = new URLSearchParams(location.search);
   const uid = p.get('uid') || p.get('tgWebAppStartParam');
   if (uid && uid.length > 5) {
@@ -323,42 +324,6 @@ function readUidFromUrl() {
     return uid;
   }
   return null;
-}
-
-// Resolve one-time login token → { uid, clearStorage }
-// Bot writes user_links/{token} = { uid: realUid, used: false, expiresAt: Date.now()+300000 }
-// Bot also keeps user_links/{realUid} = { phone, firstName } for agreement lookup (unchanged)
-async function resolveLoginToken(token) {
-  if (!token || !_fbR) return { uid: token, clearStorage: false };
-  try {
-    const linkDoc = await dbGet('user_links', token);
-    if (linkDoc && linkDoc.uid && linkDoc.uid !== token) {
-      // True one-time token: doc uid ≠ token (token is a UUID, uid is the real user uid)
-      const realUid   = linkDoc.uid;
-      const isUsed    = linkDoc.used === true;
-      const isExpired = linkDoc.expiresAt && linkDoc.expiresAt < Date.now();
-      if (!isUsed && !isExpired) {
-        // First login — mark used, signal cache clear
-        await dbSet('user_links', token, { used: true });
-        return { uid: realUid, clearStorage: true };
-      }
-      // Already used or expired — return uid without cache clear
-      return { uid: realUid, clearStorage: false };
-    }
-    // Legacy format: token IS the uid (doc uid == token, or no uid field)
-    return { uid: token, clearStorage: false };
-  } catch {
-    return { uid: token, clearStorage: false };
-  }
-}
-
-// Clear all cached Firestore documents (vez_ prefix) from localStorage
-function _clearVezCache() {
-  try {
-    Object.keys(localStorage)
-      .filter(k => k.startsWith(_tgPfx))
-      .forEach(k => localStorage.removeItem(k));
-  } catch {}
 }
 
 // ─────────────────────── Screen helper ───────────────────────
