@@ -22,15 +22,6 @@ let _saVenCoverDataUrl = null;
 window.addEventListener('DOMContentLoaded', async () => {
   const _urlParams = new URLSearchParams(location.search);
   if (_urlParams.get('reset') === '1') { localStorage.clear(); location.replace(location.pathname); return; }
-  // Emergency PIN reset: ?resetpin=1 — clears stored superadmin PIN back to '0000'
-  if (_urlParams.get('resetpin') === '1') {
-    await initFirebase();
-    try { await db.collection('settings').doc('pins').set({ superadmin: null }, { merge: true }); } catch {}
-    try { localStorage.removeItem('vez_settings_pins'); } catch {}
-    alert('PIN суперадмина сброшен на 0000');
-    location.replace(location.pathname);
-    return;
-  }
   tgReady();
   if (tg?.BackButton) tg.BackButton.onClick(() => {
     const open = document.querySelector('.overlay.open');
@@ -39,8 +30,20 @@ window.addEventListener('DOMContentLoaded', async () => {
   });
 
   const _tgUserId = tg?.initDataUnsafe?.user?.id ? String(tg.initDataUnsafe.user.id) : null;
+  initUserStorage(_tgUserId);
+
+  // Emergency PIN reset: ?resetpin=1 — clears stored superadmin PIN back to '0000'
+  if (_urlParams.get('resetpin') === '1') {
+    await initFirebase();
+    try { await db.collection('settings').doc('pins').set({ superadmin: null }, { merge: true }); } catch {}
+    try { localStorage.removeItem(storageKey('settings_pins')); } catch {}
+    alert('PIN суперадмина сброшен на 0000');
+    location.replace(location.pathname);
+    return;
+  }
+
   try {
-    const s = JSON.parse(localStorage.getItem('vez_sa_state') || '{}');
+    const s = JSON.parse(localStorage.getItem(storageKey('sa_state')) || '{}');
     if (!_tgUserId || s.tgId === _tgUserId) { STATE.uid = s.uid||null; STATE.user = s.user||null; }
   } catch {}
 
@@ -71,7 +74,7 @@ window.addEventListener('DOMContentLoaded', async () => {
 
 function saveState() {
   const tgUserId = tg?.initDataUnsafe?.user?.id ? String(tg.initDataUnsafe.user.id) : null;
-  try { localStorage.setItem('vez_sa_state', JSON.stringify({ uid: STATE.uid, user: STATE.user, tgId: tgUserId })); } catch {}
+  try { localStorage.setItem(storageKey('sa_state'), JSON.stringify({ uid: STATE.uid, user: STATE.user, tgId: tgUserId })); } catch {}
 }
 
 // ══════════════════════════════════════════════════════════

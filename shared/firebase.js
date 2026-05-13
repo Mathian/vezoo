@@ -14,7 +14,19 @@ const FIREBASE_CONFIG = {
 };
 
 const WEBAPP_BASE = "https://mathian.github.io/vezoo";
-const PFX = 'vez_'; // localStorage prefix
+
+// ── Per-user localStorage namespace ──────────────────────────────────────────
+// Call initUserStorage(tgId) at the very start of DOMContentLoaded, before any
+// localStorage read/write. This namespaces all cache keys by Telegram user ID,
+// so multiple accounts on the same device never share data.
+let _tgPfx = 'vez_anon_'; // fallback if tgId unknown
+
+function initUserStorage(tgId) {
+  _tgPfx = tgId ? `vez_${String(tgId)}_` : 'vez_anon_';
+}
+
+// Convenience: build a localStorage key in the current user's namespace
+function storageKey(name) { return _tgPfx + name; }
 
 // ── Firebase state ──
 let db   = null;
@@ -42,7 +54,7 @@ function initFirebase() {
 // ── Write (merge) ──
 async function dbSet(col, id, data) {
   const payload = { ...data, _upd: new Date().toISOString() };
-  try { localStorage.setItem(`${PFX}${col}_${id}`, JSON.stringify(payload)); } catch {}
+  try { localStorage.setItem(`${_tgPfx}${col}_${id}`, JSON.stringify(payload)); } catch {}
   if (!_fbR) return;
   try { await db.collection(col).doc(String(id)).set(payload, { merge: true }); }
   catch (e) { console.warn(`[DB] set ${col}/${id}:`, e.message); }
@@ -50,7 +62,7 @@ async function dbSet(col, id, data) {
 
 // ── Delete ──
 async function dbDelete(col, id) {
-  try { localStorage.removeItem(`${PFX}${col}_${id}`); } catch {}
+  try { localStorage.removeItem(`${_tgPfx}${col}_${id}`); } catch {}
   if (!_fbR) return;
   try { await db.collection(col).doc(String(id)).delete(); }
   catch (e) { console.warn(`[DB] del ${col}/${id}:`, e.message); }
@@ -63,12 +75,12 @@ async function dbGet(col, id) {
       const s = await db.collection(col).doc(String(id)).get();
       if (s.exists) {
         const d = s.data();
-        try { localStorage.setItem(`${PFX}${col}_${id}`, JSON.stringify(d)); } catch {}
+        try { localStorage.setItem(`${_tgPfx}${col}_${id}`, JSON.stringify(d)); } catch {}
         return d;
       }
     } catch (e) { console.warn(`[DB] get ${col}/${id}:`, e.message); }
   }
-  try { const r = localStorage.getItem(`${PFX}${col}_${id}`); return r ? JSON.parse(r) : null; }
+  try { const r = localStorage.getItem(`${_tgPfx}${col}_${id}`); return r ? JSON.parse(r) : null; }
   catch { return null; }
 }
 
@@ -336,7 +348,7 @@ async function resolveLoginToken(token) {
 function _clearVezCache() {
   try {
     Object.keys(localStorage)
-      .filter(k => k.startsWith(PFX))
+      .filter(k => k.startsWith(_tgPfx))
       .forEach(k => localStorage.removeItem(k));
   } catch {}
 }

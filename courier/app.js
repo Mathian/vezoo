@@ -31,8 +31,9 @@ window.addEventListener('DOMContentLoaded', async () => {
   _initCourierBackButton();
 
   const _tgUserId = tg?.initDataUnsafe?.user?.id ? String(tg.initDataUnsafe.user.id) : null;
+  initUserStorage(_tgUserId);
   try {
-    const s = JSON.parse(localStorage.getItem('vez_courier_state') || '{}');
+    const s = JSON.parse(localStorage.getItem(storageKey('courier_state')) || '{}');
     if (!_tgUserId || s.tgId === _tgUserId) {
       STATE.uid = s.uid || null; STATE.user = s.user || null;
     }
@@ -75,7 +76,7 @@ function _getTgName() {
 
 function _saveState() {
   const tgId = tg?.initDataUnsafe?.user?.id ? String(tg.initDataUnsafe.user.id) : null;
-  try { localStorage.setItem('vez_courier_state', JSON.stringify({ uid: STATE.uid, user: STATE.user, tgId })); } catch {}
+  try { localStorage.setItem(storageKey('courier_state'), JSON.stringify({ uid: STATE.uid, user: STATE.user, tgId })); } catch {}
 }
 
 // ── Agreement ──

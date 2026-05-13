@@ -41,14 +41,17 @@ window.addEventListener('DOMContentLoaded', async () => {
   _initBackButton();
 
   const _tgUserId = tg?.initDataUnsafe?.user?.id ? String(tg.initDataUnsafe.user.id) : null;
+  // Namespace all localStorage by tgId — must happen before any read/write
+  initUserStorage(_tgUserId);
+
   try {
-    const s = JSON.parse(localStorage.getItem('vez_client_state') || '{}');
+    const s = JSON.parse(localStorage.getItem(storageKey('client_state')) || '{}');
     if (!_tgUserId || s.tgId === _tgUserId) {
       STATE.uid  = s.uid  || null;
       STATE.user = s.user || null;
     }
-    CART      = JSON.parse(localStorage.getItem('vez_cart') || '{}');
-    FAVORITES = JSON.parse(localStorage.getItem('vez_favorites') || '[]');
+    CART      = JSON.parse(localStorage.getItem(storageKey('cart')) || '{}');
+    FAVORITES = JSON.parse(localStorage.getItem(storageKey('favorites')) || '[]');
   } catch {}
 
   const _urlToken = readUidFromUrl();
@@ -101,10 +104,10 @@ function _getTgName() {
 
 function _saveClientState() {
   const tgId = tg?.initDataUnsafe?.user?.id ? String(tg.initDataUnsafe.user.id) : null;
-  try { localStorage.setItem('vez_client_state', JSON.stringify({ uid: STATE.uid, user: STATE.user, tgId })); } catch {}
+  try { localStorage.setItem(storageKey('client_state'), JSON.stringify({ uid: STATE.uid, user: STATE.user, tgId })); } catch {}
 }
-function _saveCart()      { try { localStorage.setItem('vez_cart', JSON.stringify(CART)); } catch {} }
-function _saveFavorites() { try { localStorage.setItem('vez_favorites', JSON.stringify(FAVORITES)); } catch {} }
+function _saveCart()      { try { localStorage.setItem(storageKey('cart'),      JSON.stringify(CART));      } catch {} }
+function _saveFavorites() { try { localStorage.setItem(storageKey('favorites'), JSON.stringify(FAVORITES)); } catch {} }
 
 // ── Agreement ──
 async function submitAgree() {
@@ -172,7 +175,7 @@ function openCityChange() {
 function initMain() {
   document.getElementById('main-nav').style.display = 'flex';
   startHeartbeat(STATE.uid);
-  FAVORITES = JSON.parse(localStorage.getItem('vez_favorites') || '[]');
+  FAVORITES = JSON.parse(localStorage.getItem(storageKey('favorites')) || '[]');
   if (STATE.user?.favorites) FAVORITES = STATE.user.favorites;
   if (STATE.user?.cityName) {
     document.getElementById('city-btn').textContent = '📍 ' + STATE.user.cityName;

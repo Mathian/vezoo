@@ -30,8 +30,9 @@ window.addEventListener('DOMContentLoaded', async () => {
   tgReady();
   _initAdminBackButton();
   const _tgUserId = tg?.initDataUnsafe?.user?.id ? String(tg.initDataUnsafe.user.id) : null;
+  initUserStorage(_tgUserId);
   try {
-    const s = JSON.parse(localStorage.getItem('vez_admin_state') || '{}');
+    const s = JSON.parse(localStorage.getItem(storageKey('admin_state')) || '{}');
     if (!_tgUserId || s.tgId === _tgUserId) { STATE.uid = s.uid||null; STATE.user = s.user||null; }
   } catch {}
   const _urlToken = readUidFromUrl();
@@ -68,7 +69,7 @@ function _getTgName() {
 
 function saveState() {
   const tgUserId = tg?.initDataUnsafe?.user?.id ? String(tg.initDataUnsafe.user.id) : null;
-  try { localStorage.setItem('vez_admin_state', JSON.stringify({ uid: STATE.uid, user: STATE.user, tgId: tgUserId })); } catch {}
+  try { localStorage.setItem(storageKey('admin_state'), JSON.stringify({ uid: STATE.uid, user: STATE.user, tgId: tgUserId })); } catch {}
 }
 
 // ══════════════════════════════════════════════════════════
