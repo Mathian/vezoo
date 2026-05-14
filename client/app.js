@@ -22,12 +22,13 @@ let _cartOpenedFrom  = 'venue';
 const _selectedCurrency = '₸';
 
 // ── App version cache (Дыры №2, №3, №4) ──
+// Версии хранятся в: versions/main → { venues: N, menu_venueId: N, ... }
 let _appVersions    = {};
 let _appVersionsTs  = 0;
 async function _getAppVersions() {
   const now = Date.now();
   if (_appVersionsTs > 0 && now - _appVersionsTs < 5 * 60 * 1000) return _appVersions;
-  try { _appVersions = await dbGet('settings', 'versions') || {}; } catch {}
+  try { _appVersions = await dbGet('versions', 'main') || {}; } catch {}
   _appVersionsTs = now;
   return _appVersions;
 }

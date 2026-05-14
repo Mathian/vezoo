@@ -265,10 +265,11 @@ async function setCourier(uid, data) {
 
 // ── Version bumping (Дыры №2, №3, №4) ──
 // field examples: 'venues', 'menu_venueId'
+// Хранится в коллекции versions, документ main
 async function bumpVersion(field) {
   if (!_fbR) return;
   try {
-    await db.collection('settings').doc('versions').set(
+    await db.collection('versions').doc('main').set(
       { [field]: firebase.firestore.FieldValue.increment(1) },
       { merge: true }
     );

@@ -10,7 +10,7 @@ let COURIER_DATA      = null;
 let _courierVenueCache = {};
 async function _refreshCourierVenueCache() {
   try {
-    const versions = await dbGet('settings', 'versions') || {};
+    const versions = await dbGet('versions', 'main') || {};
     const remoteV  = versions.venues || 0;
     const localV   = parseInt(localStorage.getItem('vez_local_venues_v') || '0');
     const cached   = JSON.parse(localStorage.getItem('vez_venues_data') || '[]');
