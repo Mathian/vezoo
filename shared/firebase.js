@@ -370,7 +370,7 @@ function renderQrCode(elementId, text, size = 180) {
   if (el.tagName === 'IMG') {
     const div = document.createElement('div');
     div.id = elementId;
-    div.style.cssText = `width:${size}px;height:${size}px;display:inline-block`;
+    div.style.cssText = `width:${size}px;height:${size}px;display:inline-block;background:#fff;border-radius:12px;padding:8px;box-shadow:0 4px 20px rgba(0,0,0,.3);box-sizing:content-box`;
     el.parentNode.replaceChild(div, el);
     el = div;
   } else {

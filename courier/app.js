@@ -102,6 +102,12 @@ async function submitAgree() {
 // ── Check courier status ──
 async function checkCourierStatus() {
   const courier = await dbGet('couriers', STATE.uid);
+  // Preserve locally-tracked totalDeliveries if it's higher (offline-safe)
+  const localRaw = (() => { try { return JSON.parse(localStorage.getItem('vez_courier_data') || 'null'); } catch { return null; } })();
+  const localDeliveries = localRaw?.totalDeliveries || 0;
+  if (courier && localDeliveries > (courier.totalDeliveries || 0)) {
+    courier.totalDeliveries = localDeliveries;
+  }
   COURIER_DATA = courier;
   if (!courier)                         { showScreen('s-pending'); return; }
   if (courier.status === 'pending')     { showScreen('s-pending'); return; }
@@ -588,11 +594,11 @@ async function courierDeliver(orderId) {
       deliveredAt: new Date().toISOString(),
       clientNotification: { type: 'delivered', seen: false }
     });
-    // Increment total deliveries
-    const courier = await dbGet('couriers', STATE.uid);
-    const total = (courier?.totalDeliveries || 0) + 1;
+    // Increment total deliveries (from local data, no extra Firestore read)
+    const total = (COURIER_DATA?.totalDeliveries || 0) + 1;
     await dbSet('couriers', STATE.uid, { totalDeliveries: total });
     COURIER_DATA = { ...COURIER_DATA, totalDeliveries: total };
+    try { localStorage.setItem('vez_courier_data', JSON.stringify(COURIER_DATA)); } catch {}
     closeMyOrderSheet();
     tgHaptic('success'); showToast('Заказ доставлен!', 'success');
   };
@@ -626,8 +632,7 @@ function closeMyOrderSheet(e) {
 //  PROFILE
 // ══════════════════════════════════════════════════════════
 async function loadCourierProfile() {
-  const courier = await dbGet('couriers', STATE.uid) || COURIER_DATA || {};
-  COURIER_DATA = { ...COURIER_DATA, ...courier };
+  const courier = COURIER_DATA || {};
 
   const phone = courier.phone || STATE.user?.phone || '';
   // QR

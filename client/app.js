@@ -669,6 +669,10 @@ async function submitOrder() {
 
   try {
     await dbSet('orders', orderId, order);
+    // Save new order to localStorage immediately
+    const storedOrders = _loadOrdersFromStorage();
+    storedOrders.unshift(order);
+    _saveOrdersToStorage(storedOrders);
     CART[venueId] = []; delete CART[venueId];
     _saveCart(); updateCartNavBadge();
     tgHaptic('success'); showToast('Заказ оформлен!', 'success');
@@ -684,10 +688,31 @@ async function submitOrder() {
 // ══════════════════════════════════════════════════════════
 let _allClientOrders = [];
 
+function _loadOrdersFromStorage() { try { return JSON.parse(localStorage.getItem('vez_client_orders') || '[]'); } catch { return []; } }
+function _saveOrdersToStorage(orders) { try { localStorage.setItem('vez_client_orders', JSON.stringify(orders)); } catch {} }
+
 function watchActiveOrders() {
   if (_ordersUnsub) { _ordersUnsub(); _ordersUnsub = null; }
+
+  // Show stored orders immediately while waiting for Firestore
+  const stored = _loadOrdersFromStorage();
+  if (stored.length) {
+    _allClientOrders = stored;
+    ACTIVE_ORDERS = stored.filter(o => !['delivered', 'cancelled', 'issued'].includes(o.status))
+      .sort((a, b) => (b.createdAt || '').localeCompare(a.createdAt || ''));
+    document.getElementById('order-nav-badge').classList.toggle('hidden', ACTIVE_ORDERS.length === 0);
+    if (document.getElementById('s-orders').classList.contains('active')) renderAllOrders();
+  }
+
   _ordersUnsub = onQuerySnap('orders', 'clientUid', '==', STATE.uid, orders => {
-    _allClientOrders = orders;
+    // Merge Firestore active orders with locally stored completed orders
+    const storedAll = _loadOrdersFromStorage();
+    const fsIds = new Set(orders.map(o => o.id));
+    const localCompleted = storedAll.filter(o => ['delivered', 'cancelled', 'issued'].includes(o.status) && !fsIds.has(o.id));
+    const merged = [...orders, ...localCompleted];
+    _allClientOrders = merged;
+    _saveOrdersToStorage(merged);
+
     ACTIVE_ORDERS = orders.filter(o => !['delivered', 'cancelled', 'issued'].includes(o.status))
       .sort((a, b) => (b.createdAt || '').localeCompare(a.createdAt || ''));
 
@@ -776,7 +801,6 @@ function renderAllOrders() {
     html += history.map(renderHistoryCard).join('');
   }
   container.innerHTML = html;
-  startAllCountdowns();
 }
 
 function renderHistoryCard(o) {
@@ -899,18 +923,16 @@ function renderOrderCard(o) {
         const cls = i < si ? 'done' : i === si ? 'active' : '';
         return `<div class="st-step ${cls}"><div class="st-dot">${cls === 'done' ? '✓' : s.icon}</div><div style="margin-top:4px;font-size:11px">${s.label}</div></div>${i < steps.length - 1 ? `<div class="st-line ${i < si ? 'done' : ''}"></div>` : ''}`;
       }).join('');
-  const showCd = o.estimatedAt && !['pending', 'delivered', 'cancelled'].includes(o.status);
   const addr   = o.address;
   const cur    = o.currency || _selectedCurrency;
   return `
     <div class="order-card" style="margin-bottom:2px">
       <div class="order-card-hdr">
-        <div><div class="font-bold" style="font-size:13px">📍 ${o.venueName || 'Заведение'}</div><div class="order-id">#${(o.id || '').slice(-6)}</div></div>
+        <div><div class="font-bold" style="font-size:13px">📍 ${o.venueName || 'Заведение'}</div><div class="order-id">#${(o.id || '').slice(-6)} · ${fmtDate(o.createdAt)}</div></div>
         <span class="${statusBadgeClass(o.status)}">${statusLabel(o.status)}</span>
       </div>
       <div class="order-card-body">
         <div class="status-track" style="margin-bottom:12px">${track}</div>
-        ${showCd ? `<div class="countdown-box" style="margin-bottom:12px"><div class="countdown-lbl">${isPickup ? 'Готовность' : 'Время доставки'}</div><div class="countdown-val" id="cd-val-${o.id}">—</div><div class="progress-wrap" style="margin-top:8px"><div class="progress-bar" id="cd-bar-${o.id}"></div></div></div>` : ''}
         <div style="display:flex;flex-direction:column;gap:4px;font-size:13px;margin-bottom:8px">
           ${(o.items || []).map(it => `<div class="flex justify-between"><span>${it.emoji || '🍽️'} ${it.name}${it.variantName ? ' (' + it.variantName + ')' : ''} ×${it.qty}</span><span class="font-bold">${fmtPrice(it.price * it.qty, cur)}</span></div>`).join('')}
         </div>
@@ -941,29 +963,6 @@ async function clientCancelOrder(orderId) {
   else if (confirm('Отменить заказ?')) await doCancel();
 }
 
-function startAllCountdowns() {
-  Object.values(_cdIntervals).forEach(clearInterval); _cdIntervals = {};
-  ACTIVE_ORDERS.forEach(o => {
-    if (o.estimatedAt && !['pending', 'delivered', 'cancelled'].includes(o.status)) _startCountdown(o);
-  });
-}
-
-function _startCountdown(o) {
-  const target    = new Date(o.estimatedAt).getTime();
-  const startTime = o.acceptedAt ? new Date(o.acceptedAt).getTime() : target - 3600000;
-  const total     = target - startTime;
-  const tick = () => {
-    const val = document.getElementById(`cd-val-${o.id}`);
-    const bar = document.getElementById(`cd-bar-${o.id}`);
-    if (!val) { clearInterval(_cdIntervals[o.id]); delete _cdIntervals[o.id]; return; }
-    const rem = target - Date.now();
-    if (rem <= 0) { val.textContent = 'Совсем скоро!'; val.classList.add('urgent'); if (bar) { bar.style.width = '0%'; bar.classList.add('urgent'); } clearInterval(_cdIntervals[o.id]); return; }
-    val.textContent = fmtCountdown(rem);
-    val.classList.toggle('urgent', rem < 300000);
-    if (bar) { bar.style.width = Math.max(0, (rem / total) * 100) + '%'; bar.classList.toggle('urgent', rem < 300000); }
-  };
-  tick(); _cdIntervals[o.id] = setInterval(tick, 1000);
-}
 
 // ══════════════════════════════════════════════════════════
 //  SETTINGS / PROFILE

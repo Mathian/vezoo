@@ -25,33 +25,6 @@
 <div id="s-blocked" class="screen no-nav"><div class="splash"><div class="splash-logo">🚫</div><div class="splash-title">Доступ закрыт</div><div class="splash-sub">Аккаунт заблокирован.</div></div></div>
 <div id="s-no-uid" class="screen no-nav"><div class="splash"><div class="splash-logo">🤖</div><div class="splash-title">Нужен бот</div><div class="splash-sub">Откройте через Telegram-бот администратора Vezoo.</div></div></div>
 
-<!-- PIN SCREEN -->
-<div id="s-pin" class="pin-screen" style="display:none">
-  <div class="pin-logo">🏪</div>
-  <div class="pin-title">Vezoo Admin</div>
-  <div class="pin-sub" id="pin-sub-text">Введите PIN-код</div>
-  <div class="pin-dots">
-    <div class="pin-dot" id="pd0"></div>
-    <div class="pin-dot" id="pd1"></div>
-    <div class="pin-dot" id="pd2"></div>
-    <div class="pin-dot" id="pd3"></div>
-  </div>
-  <div class="pin-pad">
-    <button class="pin-btn" onclick="pinInput('1')">1</button>
-    <button class="pin-btn" onclick="pinInput('2')">2</button>
-    <button class="pin-btn" onclick="pinInput('3')">3</button>
-    <button class="pin-btn" onclick="pinInput('4')">4</button>
-    <button class="pin-btn" onclick="pinInput('5')">5</button>
-    <button class="pin-btn" onclick="pinInput('6')">6</button>
-    <button class="pin-btn" onclick="pinInput('7')">7</button>
-    <button class="pin-btn" onclick="pinInput('8')">8</button>
-    <button class="pin-btn" onclick="pinInput('9')">9</button>
-    <button class="pin-btn empty"></button>
-    <button class="pin-btn" onclick="pinInput('0')">0</button>
-    <button class="pin-btn del" onclick="pinDelete()">⌫</button>
-  </div>
-</div>
-
 <!-- AGREEMENT -->
 <div id="s-agree" class="agree-screen" style="display:none">
   <div class="page-hdr" style="position:static">
@@ -104,16 +77,6 @@
   </div>
 </div>
 
-<!-- MAIN — MENU TAB -->
-<div id="s-menu" class="screen">
-  <div class="page-hdr">
-    <h2>Меню</h2>
-    <div class="page-hdr-end"><button class="btn btn-primary btn-sm" onclick="openAddItem()">+ Добавить</button></div>
-  </div>
-  <div id="menu-cats-tabs" class="cat-tabs" style="padding-top:8px"></div>
-  <div id="menu-items-list" style="display:flex;flex-direction:column;gap:8px;padding:0 20px 16px"></div>
-</div>
-
 <!-- MAIN — ORDERS TAB -->
 <div id="s-orders" class="screen">
   <div class="page-hdr">
@@ -134,42 +97,15 @@
   <div id="admin-orders-list" style="display:flex;flex-direction:column;gap:10px;padding:0 20px 16px"></div>
 </div>
 
-<!-- MAIN — STATS TAB -->
-<div id="s-stats" class="screen">
-  <div class="page-hdr"><h2>Статистика</h2></div>
-  <div class="content" style="gap:12px">
-
-    <div class="section-title">Сегодня</div>
-    <div class="stats-grid" id="stats-today-grid"></div>
-
-    <div class="section-title" style="margin-top:4px">Отчёт за период</div>
-    <div class="card card-body" style="flex-direction:row;gap:10px;align-items:center;padding:10px 14px">
-      <div style="flex:1;display:flex;flex-direction:column;gap:4px">
-        <label style="font-size:11px;color:var(--text-dim)">От</label>
-        <input class="inp" type="date" id="rep-date-from" style="padding:6px 10px;font-size:13px">
-      </div>
-      <div style="color:var(--text-dim);font-size:18px;padding-top:16px">—</div>
-      <div style="flex:1;display:flex;flex-direction:column;gap:4px">
-        <label style="font-size:11px;color:var(--text-dim)">До</label>
-        <input class="inp" type="date" id="rep-date-to" style="padding:6px 10px;font-size:13px">
-      </div>
-    </div>
-    <button class="btn btn-primary btn-sm" onclick="generateAdminReport()">📊 Сформировать отчёт</button>
-    <div id="admin-report-output" style="display:none;flex-direction:column;gap:8px">
-      <pre id="admin-report-text" style="white-space:pre-wrap;font-family:monospace;font-size:12px;background:var(--card-bg);border:1px solid var(--border);border-radius:12px;padding:14px;line-height:1.7;overflow-x:auto;margin:0"></pre>
-      <button class="btn btn-ghost btn-sm" onclick="copyAdminReport()">📋 Копировать отчёт</button>
-    </div>
-
-    <div class="section-title" style="margin-top:4px">ТОП-10 позиций за сегодня</div>
-    <div id="stats-top-items"></div>
-
-  </div>
-</div>
-
 <!-- MAIN — SETTINGS TAB -->
 <div id="s-settings" class="screen">
   <div class="page-hdr"><h2>Настройки</h2></div>
   <div class="content" style="gap:14px">
+    <div class="section">
+      <div class="section-title">Управление</div>
+      <button class="btn btn-secondary" style="width:100%;margin-bottom:10px" onclick="openMenuWithPin()">🍽️ Меню</button>
+      <button class="btn btn-secondary" style="width:100%" onclick="openStatsWithPin()">📊 Статистика</button>
+    </div>
     <div class="section">
       <div class="section-title">Мой QR-код</div>
       <div class="qr-container" id="admin-qr-container">
@@ -177,61 +113,6 @@
         <div class="qr-label">Код для передачи суперадминистратору</div>
         <div class="qr-phone" id="admin-qr-phone">—</div>
       </div>
-    </div>
-    <div class="section">
-      <div class="section-title">Заведение</div>
-      <div class="field"><label>Название</label><input class="inp" id="set-name" placeholder="Название"></div>
-      <div class="field"><label>Город</label><select class="inp" id="set-city"><option value="">Выберите город...</option></select></div>
-      <div class="field"><label>Адрес</label><input class="inp" id="set-address" placeholder="Адрес"></div>
-      <div class="field"><label>Телефон</label><input class="inp" id="set-phone" placeholder="+7 (777) 000-00-00" type="tel" maxlength="30"></div>
-      <div class="field"><label>Описание</label><textarea class="inp" id="set-desc" rows="3"></textarea></div>
-      <div class="field"><label>Ссылка на обложку</label><input class="inp" id="set-cover" placeholder="https://..."></div>
-      <div class="img-upload" id="set-cover-upload" onclick="document.getElementById('set-cover-file').click()" style="margin-top:6px">
-        <input type="file" id="set-cover-file" accept="image/*" onchange="previewCover(this,'set-cover-upload')">
-        <span class="img-upload-txt">📷 Загрузить обложку</span>
-      </div>
-      <button class="btn btn-secondary btn-sm" style="margin-top:8px" onclick="saveVenueInfo()">💾 Сохранить</button>
-    </div>
-    <div class="section">
-      <div class="section-title">Часы работы</div>
-      <div class="inp-row">
-        <div class="field"><label>Открытие</label><input class="inp" id="set-open" type="time"></div>
-        <div class="field"><label>Закрытие</label><input class="inp" id="set-close" type="time"></div>
-      </div>
-      <button class="btn btn-secondary btn-sm" onclick="saveWorkHours()">💾 Сохранить часы</button>
-    </div>
-    <div class="section">
-      <div class="section-title">Доставка и оплата</div>
-      <div class="toggle-row" style="margin-bottom:12px">
-        <div>
-          <div style="font-weight:600;font-size:14px">Принимать онлайн заказы</div>
-          <div style="font-size:12px;color:var(--text-dim);margin-top:2px">Клиенты видят заведение и могут делать заказы</div>
-        </div>
-        <label class="toggle"><input type="checkbox" id="set-online-orders" onchange="saveOnlineOrdersToggle(this.checked)"><span class="toggle-sl"></span></label>
-      </div>
-      <div class="field"><label>Время доставки (мин)</label><input class="inp" id="set-delivery-time" type="number" min="5"></div>
-      <div class="field"><label>Мин. сумма заказа</label><input class="inp" id="set-min-order" type="number" min="0"></div>
-      <div style="margin-top:8px">
-        <div class="section-title" style="margin-bottom:6px">Способы оплаты</div>
-        <div style="display:flex;gap:8px">
-          <button class="pay-tag" id="set-pay-cash" onclick="togglePayTag('set-pay-cash','cash')">💵 Наличные</button>
-          <button class="pay-tag" id="set-pay-card" onclick="togglePayTag('set-pay-card','card')">💳 Карта</button>
-        </div>
-      </div>
-      <button class="btn btn-secondary btn-sm" style="margin-top:10px" onclick="saveDeliverySettings()">💾 Сохранить</button>
-    </div>
-    <div class="section">
-      <div class="section-title">Оператор</div>
-      <div id="current-operator-info" class="alert-box info" style="margin-bottom:10px">Оператор не назначен</div>
-      <div class="field">
-        <label>Телефон оператора</label>
-        <div style="display:flex;gap:8px;align-items:flex-start">
-          <input class="inp" id="op-phone" type="tel" placeholder="+7 (777) 000-00-00" style="flex:1">
-          <button class="btn btn-secondary btn-sm btn-icon" onclick="scanQrOperator()" title="Сканировать QR" style="margin-top:0;height:46px;width:46px;flex-shrink:0;font-size:20px">📷</button>
-        </div>
-        <button class="btn btn-secondary btn-sm" style="margin-top:8px;width:100%" onclick="assignOperator()">Назначить оператора</button>
-      </div>
-      <button class="btn btn-ghost btn-sm" onclick="removeOperator()" id="remove-op-btn" style="display:none;margin-top:6px;color:var(--danger)">✕ Снять оператора</button>
     </div>
     <div class="section">
       <div class="section-title">Постоянные курьеры</div>
@@ -268,15 +149,9 @@
 
 <!-- BOTTOM NAV -->
 <div class="bottom-nav" id="main-nav" style="display:none">
-  <div class="nav-item active" id="nav-menu" onclick="adminNavTo('s-menu');setNav(this);loadMenuItems()">
-    <div class="nav-icon">🍽️</div><div class="nav-label">Меню</div>
-  </div>
-  <div class="nav-item" id="nav-orders" onclick="adminNavTo('s-orders');setNav(this);loadOrders('active')">
+  <div class="nav-item active" id="nav-orders" onclick="adminNavTo('s-orders');setNav(this);loadOrders('active')">
     <div class="nav-icon">📋</div><div class="nav-label">Заказы</div>
     <div class="nav-badge hidden" id="orders-badge">0</div>
-  </div>
-  <div class="nav-item" id="nav-stats" onclick="adminNavTo('s-stats');setNav(this);loadStats()">
-    <div class="nav-icon">📊</div><div class="nav-label">Статистика</div>
   </div>
   <div class="nav-item" id="nav-settings" onclick="adminNavTo('s-settings');setNav(this);loadSettingsScreen()">
     <div class="nav-icon">⚙️</div><div class="nav-label">Настройки</div>
@@ -321,10 +196,6 @@
           <button class="btn btn-ghost btn-sm" onclick="addVariant()">+ Добавить вариант</button>
         </div>
       </div>
-      <label class="toggle-row">
-        <span>Доступен для заказа</span>
-        <label class="toggle"><input type="checkbox" id="it-available" checked><span class="toggle-sl"></span></label>
-      </label>
       <div class="btn-row">
         <button class="btn btn-ghost" onclick="closeItemSheet()">Отмена</button>
         <button class="btn btn-primary" id="save-item-btn" onclick="saveItem()">Сохранить</button>
@@ -399,6 +270,74 @@
         <button class="btn btn-primary" onclick="submitManualOrder()">Оформить заказ</button>
       </div>
     </div>
+  </div>
+</div>
+
+<!-- MENU OVERLAY (fullscreen) -->
+<div class="overlay" id="menu-overlay" onclick="closeMenuOverlay(event)">
+  <div class="sheet" style="height:92vh;display:flex;flex-direction:column;overflow:hidden">
+    <div class="sheet-handle"></div>
+    <div style="display:flex;align-items:center;justify-content:space-between;padding:0 4px 12px">
+      <h2 style="margin:0;font-size:18px">Меню</h2>
+      <button class="btn btn-primary btn-sm" onclick="openAddItem()">+ Добавить</button>
+    </div>
+    <div id="menu-cats-tabs" class="cat-tabs" style="margin:0 0 8px;flex-shrink:0"></div>
+    <div id="menu-items-list" style="display:flex;flex-direction:column;gap:8px;padding:0 0 16px;overflow-y:auto;flex:1"></div>
+  </div>
+</div>
+
+<!-- STATS OVERLAY (fullscreen) -->
+<div class="overlay" id="stats-overlay" onclick="closeStatsOverlay(event)">
+  <div class="sheet" style="height:92vh;display:flex;flex-direction:column;overflow:hidden">
+    <div class="sheet-handle"></div>
+    <div style="padding:0 4px 12px"><h2 style="margin:0;font-size:18px">Статистика</h2></div>
+    <div style="display:flex;flex-direction:column;gap:12px;overflow-y:auto;flex:1;padding:0 0 16px">
+      <div class="section-title">Сегодня</div>
+      <div class="stats-grid" id="stats-today-grid"></div>
+      <div class="section-title" style="margin-top:4px">Отчёт за день</div>
+      <div class="card card-body" style="padding:10px 14px">
+        <label style="font-size:11px;color:var(--text-dim)">Дата</label>
+        <input class="inp" type="date" id="rep-date" style="padding:6px 10px;font-size:13px;margin-top:4px">
+      </div>
+      <button class="btn btn-primary btn-sm" onclick="generateAdminReport()">📊 Сформировать отчёт</button>
+      <div id="admin-report-output" style="display:none;flex-direction:column;gap:8px">
+        <pre id="admin-report-text" style="white-space:pre-wrap;font-family:monospace;font-size:12px;background:var(--card-bg);border:1px solid var(--border);border-radius:12px;padding:14px;line-height:1.7;overflow-x:auto;margin:0"></pre>
+        <button class="btn btn-ghost btn-sm" onclick="copyAdminReport()">📋 Копировать отчёт</button>
+      </div>
+      <div class="section-title" style="margin-top:4px">ТОП-10 позиций за сегодня</div>
+      <div id="stats-top-items"></div>
+    </div>
+  </div>
+</div>
+
+<!-- SECTION PIN OVERLAY -->
+<div class="overlay" id="section-pin-overlay">
+  <div class="sheet">
+    <div class="sheet-handle"></div>
+    <div class="pin-logo" style="font-size:32px;text-align:center;margin-bottom:4px">🔐</div>
+    <div class="pin-title" style="text-align:center;font-weight:700;font-size:17px;margin-bottom:4px">PIN-код</div>
+    <div class="pin-sub" id="spd-sub-text" style="text-align:center;font-size:13px;color:var(--text-dim);margin-bottom:14px">Введите PIN для доступа</div>
+    <div class="pin-dots" style="justify-content:center;display:flex;gap:12px;margin-bottom:20px">
+      <div class="pin-dot" id="spd0"></div>
+      <div class="pin-dot" id="spd1"></div>
+      <div class="pin-dot" id="spd2"></div>
+      <div class="pin-dot" id="spd3"></div>
+    </div>
+    <div class="pin-pad">
+      <button class="pin-btn" onclick="sectionPinInput('1')">1</button>
+      <button class="pin-btn" onclick="sectionPinInput('2')">2</button>
+      <button class="pin-btn" onclick="sectionPinInput('3')">3</button>
+      <button class="pin-btn" onclick="sectionPinInput('4')">4</button>
+      <button class="pin-btn" onclick="sectionPinInput('5')">5</button>
+      <button class="pin-btn" onclick="sectionPinInput('6')">6</button>
+      <button class="pin-btn" onclick="sectionPinInput('7')">7</button>
+      <button class="pin-btn" onclick="sectionPinInput('8')">8</button>
+      <button class="pin-btn" onclick="sectionPinInput('9')">9</button>
+      <button class="pin-btn empty"></button>
+      <button class="pin-btn" onclick="sectionPinInput('0')">0</button>
+      <button class="pin-btn del" onclick="sectionPinDelete()">⌫</button>
+    </div>
+    <button class="btn btn-ghost btn-sm" style="width:100%;margin-top:12px" onclick="closeSectionPin()">Отмена</button>
   </div>
 </div>
 

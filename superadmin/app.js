@@ -476,18 +476,6 @@ function _renderSaVenueSheetHtml(venue) {
       </div>
       <button class="btn btn-ghost btn-sm" id="sa-ven-remove-admin-btn" style="display:none;color:var(--danger)" onclick="saRemoveAdminFromVenue('${venId}')">✕ Снять администратора</button>
 
-      <div class="section-title" style="margin-top:4px">Оператор</div>
-      <div id="sa-ven-op-info" class="alert-box info" style="margin-bottom:8px">Загрузка...</div>
-      <div class="field">
-        <label>Телефон оператора</label>
-        <div style="display:flex;gap:8px;align-items:flex-start">
-          <input class="inp" id="sa-ven-op-phone" type="tel" placeholder="+7 (777) 000-00-00" style="flex:1">
-          <button class="btn btn-secondary btn-sm btn-icon" onclick="saScanQrOpForVenue('${venId}')" style="height:46px;width:46px;flex-shrink:0;font-size:20px">📷</button>
-        </div>
-        <button class="btn btn-secondary btn-sm" style="margin-top:8px;width:100%" onclick="saAssignOpToVenue('${venId}')">Назначить оператора</button>
-      </div>
-      <button class="btn btn-ghost btn-sm" id="sa-ven-remove-op-btn" style="display:none;color:var(--danger)" onclick="saRemoveOpFromVenue('${venId}')">✕ Снять оператора</button>
-
       <div class="section-title" style="margin-top:4px">Постоянные курьеры</div>
       <div id="sa-ven-couriers-list" style="display:flex;flex-direction:column;gap:6px;margin-bottom:8px"></div>
       <div class="field">
@@ -556,20 +544,6 @@ async function _loadSaVenueAssignees(venue) {
         adminEl.textContent = 'Администратор не назначен';
         adminEl.className = 'alert-box info';
       }
-    }
-  }
-  // Operator info
-  const opEl = document.getElementById('sa-ven-op-info');
-  const removeOpBtn = document.getElementById('sa-ven-remove-op-btn');
-  if (opEl) {
-    if (venue.operatorUid) {
-      const op = await dbGet('users', venue.operatorUid);
-      opEl.textContent = `Оператор: ${op?.name||'—'} (${op?.phone||'—'})`;
-      opEl.className = 'alert-box success';
-      if (removeOpBtn) removeOpBtn.style.display = '';
-    } else {
-      opEl.textContent = 'Оператор не назначен';
-      opEl.className = 'alert-box info';
     }
   }
   // Couriers list
@@ -708,47 +682,6 @@ function saScanQrAdmin(venueId) {
     tg.closeScanQrPopup();
     const phone = normPhone(data||'');
     if (phone && document.getElementById('sa-ven-admin-phone')) document.getElementById('sa-ven-admin-phone').value = phone;
-  });
-}
-
-async function saAssignOpToVenue(venueId) {
-  const phone = document.getElementById('sa-ven-op-phone')?.value.trim();
-  if (!phone) { showToast('Введите телефон', 'warning'); return; }
-  const links = await dbGetAll('user_links');
-  const link  = links.find(l => normPhone(l.phone||'') === normPhone(phone));
-  if (!link)  { showToast('Пользователь не найден', 'error'); return; }
-  const venue = await dbGet('venues', venueId);
-  await dbSet('operator_invites', link.uid, { uid: link.uid, venueId, venueName: venue?.name||'', venueAddress: venue?.address||'', adminUid: STATE.uid, status: 'pending', createdAt: new Date().toISOString() });
-  await dbSet('venues', venueId, { operatorUid: link.uid });
-  tgHaptic('success'); showToast('Приглашение оператору отправлено', 'success');
-  if (document.getElementById('sa-ven-op-phone')) document.getElementById('sa-ven-op-phone').value = '';
-  const opEl = document.getElementById('sa-ven-op-info');
-  if (opEl) { opEl.textContent = 'Приглашение отправлено, ожидает подтверждения'; opEl.className = 'alert-box info'; }
-  const btn = document.getElementById('sa-ven-remove-op-btn');
-  if (btn) btn.style.display = '';
-}
-
-async function saRemoveOpFromVenue(venueId) {
-  if (!confirm('Снять оператора с заведения?')) return;
-  const venue = await dbGet('venues', venueId);
-  if (venue?.operatorUid) {
-    await dbDelete('operator_invites', venue.operatorUid);
-    await dbSet('users', venue.operatorUid, { operatorVenueId: null });
-  }
-  await dbSet('venues', venueId, { operatorUid: null });
-  tgHaptic('light'); showToast('Оператор снят', 'info');
-  const opEl = document.getElementById('sa-ven-op-info');
-  if (opEl) { opEl.textContent = 'Оператор не назначен'; opEl.className = 'alert-box info'; }
-  const btn = document.getElementById('sa-ven-remove-op-btn');
-  if (btn) btn.style.display = 'none';
-}
-
-function saScanQrOpForVenue(venueId) {
-  if (!tg?.showScanQrPopup) { showToast('QR-сканер доступен только в Telegram', 'warning'); return; }
-  tg.showScanQrPopup({ text: 'Наведите камеру на QR-код оператора' }, data => {
-    tg.closeScanQrPopup();
-    const phone = normPhone(data||'');
-    if (phone && document.getElementById('sa-ven-op-phone')) document.getElementById('sa-ven-op-phone').value = phone;
   });
 }
 
@@ -961,7 +894,6 @@ async function loadUsersByRole(role, el) {
   const filterFn = {
     client:   u => !!(u.agreedClient || u.role === 'client'),
     admin:    u => !!(u.agreedAdmin  || u.role === 'admin'),
-    operator: u => !!(u.agreedOperator || (u.role === 'operator')),
   }[role] || (() => false);
   const users = allUsers.filter(filterFn);
 
@@ -970,7 +902,6 @@ async function loadUsersByRole(role, el) {
     const roleIcons = [];
     if (u.agreedClient   || u.role==='client')     roleIcons.push('👤');
     if (u.agreedAdmin    || u.role==='admin')       roleIcons.push('🏪');
-    if (u.agreedOperator || u.role==='operator')    roleIcons.push('🎧');
     if (u.agreedSA       || u.role==='superadmin')  roleIcons.push('👑');
     return `
       <div class="list-item" onclick="openSaUser('${u.uid||u.id}')">
@@ -990,7 +921,6 @@ async function openSaUser(uid) {
   const roleIcons = [];
   if (user.agreedClient   || user.role==='client')     roleIcons.push('👤 Клиент');
   if (user.agreedAdmin    || user.role==='admin')       roleIcons.push('🏪 Администратор');
-  if (user.agreedOperator || user.role==='operator')    roleIcons.push('🎧 Оператор');
   if (courierData) roleIcons.push(`🚴 Курьер (${courierData.status==='active'?'активен':courierData.status==='blocked'?'заблокирован':'на проверке'})`);
   if (user.agreedSA || user.role==='superadmin')        roleIcons.push('👑 Суперадмин');
   const content = document.getElementById('sa-user-detail');

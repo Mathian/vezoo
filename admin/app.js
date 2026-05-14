@@ -16,7 +16,8 @@ let _ordersUnsub    = null;
 let _coverDataUrl   = null;
 let _itemImgDataUrl = null;
 let _setCoverDataUrl = null;
-let _pinBuffer      = '';
+let _pinTarget      = null;
+let _sectionPinBuffer = '';
 let _ordersTab      = 'active';
 let _handoffCourier = null;
 let _handoffSelectedOrders = new Set();
@@ -50,7 +51,7 @@ window.addEventListener('DOMContentLoaded', async () => {
     existing.name = autoName;
   }
   STATE.user = existing; saveState();
-  showPinScreen();
+  await checkVenueAndInit();
 });
 
 function _getTgName() {
@@ -82,66 +83,102 @@ async function submitAgree() {
   saveState();
   if (btn) { btn.disabled = false; btn.classList.remove('btn-loading'); }
   document.getElementById('s-agree').style.display = 'none';
-  showPinScreen();
+  await checkVenueAndInit();
 }
 
 // ══════════════════════════════════════════════════════════
-//  PIN CODE
+//  SECTION PIN (Menu / Stats access)
 // ══════════════════════════════════════════════════════════
-function showPinScreen() {
-  document.getElementById('s-splash').style.display = 'none';
-  document.getElementById('s-agree').style.display  = 'none';
-  document.getElementById('s-pin').style.display    = 'flex';
-  _pinBuffer = '';
-  updatePinDots();
-  document.getElementById('pin-sub-text').textContent = 'Введите PIN-код';
+function openMenuWithPin() {
+  _pinTarget = 'menu';
+  _openSectionPin();
 }
 
-function pinInput(digit) {
-  if (_pinBuffer.length >= 4) return;
+function openStatsWithPin() {
+  _pinTarget = 'stats';
+  _openSectionPin();
+}
+
+function _openSectionPin() {
+  const lockSec = isPinLockedOut('admin');
+  if (lockSec > 0) { showToast(`Заблокировано на ${lockSec} сек.`, 'warning'); return; }
+  _sectionPinBuffer = '';
+  updateSectionPinDots();
+  document.getElementById('spd-sub-text').textContent = 'Введите PIN для доступа';
+  document.getElementById('section-pin-overlay').classList.add('open');
+}
+
+function sectionPinInput(digit) {
+  if (_sectionPinBuffer.length >= 4) return;
   tgHaptic('light');
-  _pinBuffer += digit;
-  updatePinDots();
-  if (_pinBuffer.length === 4) setTimeout(checkPin, 80);
+  _sectionPinBuffer += digit;
+  updateSectionPinDots();
+  if (_sectionPinBuffer.length === 4) setTimeout(checkSectionPin, 80);
 }
 
-function pinDelete() {
-  if (!_pinBuffer.length) return;
-  _pinBuffer = _pinBuffer.slice(0, -1);
-  updatePinDots();
+function sectionPinDelete() {
+  if (!_sectionPinBuffer.length) return;
+  _sectionPinBuffer = _sectionPinBuffer.slice(0, -1);
+  updateSectionPinDots();
 }
 
-function updatePinDots() {
+function updateSectionPinDots() {
   for (let i = 0; i < 4; i++) {
-    const dot = document.getElementById('pd' + i);
+    const dot = document.getElementById('spd' + i);
     if (!dot) continue;
-    dot.classList.toggle('filled', i < _pinBuffer.length);
+    dot.classList.toggle('filled', i < _sectionPinBuffer.length);
     dot.classList.remove('error');
   }
 }
 
-async function checkPin() {
+async function checkSectionPin() {
   const lockSec = isPinLockedOut('admin');
   if (lockSec > 0) {
-    document.getElementById('pin-sub-text').textContent = `Заблокировано на ${lockSec} сек.`;
-    _pinBuffer = ''; updatePinDots(); return;
+    document.getElementById('spd-sub-text').textContent = `Заблокировано на ${lockSec} сек.`;
+    _sectionPinBuffer = ''; updateSectionPinDots(); return;
   }
-  const ok = await verifyPin('admin', _pinBuffer);
+  const ok = await verifyPin('admin', _sectionPinBuffer);
   recordPinAttempt('admin', ok);
   if (ok) {
-    document.getElementById('s-pin').style.display = 'none';
-    await checkVenueAndInit();
+    document.getElementById('section-pin-overlay').classList.remove('open');
+    if (_pinTarget === 'menu') {
+      document.getElementById('menu-overlay').classList.add('open');
+      loadMenuItems();
+    } else if (_pinTarget === 'stats') {
+      document.getElementById('stats-overlay').classList.add('open');
+      loadStats();
+    }
+    _pinTarget = null;
   } else {
     tgHaptic('error');
     for (let i = 0; i < 4; i++) {
-      const dot = document.getElementById('pd' + i);
+      const dot = document.getElementById('spd' + i);
       if (dot) { dot.classList.add('error'); dot.classList.remove('filled'); }
     }
     const remaining = isPinLockedOut('admin');
-    document.getElementById('pin-sub-text').textContent = remaining > 0 ? `Заблокировано на ${remaining} сек.` : 'Неверный PIN. Попробуйте снова';
-    setTimeout(() => { _pinBuffer = ''; updatePinDots(); document.getElementById('pin-sub-text').textContent = 'Введите PIN-код'; }, 900);
+    document.getElementById('spd-sub-text').textContent = remaining > 0 ? `Заблокировано на ${remaining} сек.` : 'Неверный PIN. Попробуйте снова';
+    setTimeout(() => { _sectionPinBuffer = ''; updateSectionPinDots(); document.getElementById('spd-sub-text').textContent = 'Введите PIN для доступа'; }, 900);
   }
 }
+
+function closeSectionPin() {
+  document.getElementById('section-pin-overlay').classList.remove('open');
+  _sectionPinBuffer = ''; _pinTarget = null;
+}
+
+function closeMenuOverlay(e) {
+  if (e && e.target !== document.getElementById('menu-overlay')) return;
+  document.getElementById('menu-overlay').classList.remove('open');
+}
+
+function closeStatsOverlay(e) {
+  if (e && e.target !== document.getElementById('stats-overlay')) return;
+  document.getElementById('stats-overlay').classList.remove('open');
+}
+
+// ── Menu localStorage helpers ──
+function _loadMenuFromStorage() { try { return JSON.parse(localStorage.getItem('vez_admin_menu_' + (VENUE?.id||'')) || '[]'); } catch { return []; } }
+function _saveMenuToStorage(items) { try { localStorage.setItem('vez_admin_menu_' + (VENUE?.id||''), JSON.stringify(items)); } catch {} }
 
 async function changeAdminPin() {
   const val = (document.getElementById('new-pin-input')?.value || '').trim();
@@ -268,10 +305,10 @@ function togglePayTag(btnId, method) {
 // ══════════════════════════════════════════════════════════
 function initMain() {
   document.getElementById('main-nav').style.display = 'flex';
-  loadMenuItems();
   watchNewOrders();
-  showScreen('s-menu');
-  setNav(document.getElementById('nav-menu'));
+  showScreen('s-orders');
+  setNav(document.getElementById('nav-orders'));
+  loadOrders('active');
 }
 
 // ══════════════════════════════════════════════════════════
@@ -279,12 +316,24 @@ function initMain() {
 // ══════════════════════════════════════════════════════════
 async function loadMenuItems() {
   const list = document.getElementById('menu-items-list');
-  list.innerHTML = '<div class="loader"><div class="spinner"></div></div>';
-  MENU_ITEMS = await dbQuery('menu_items','venueId','==',VENUE.id);
-  MENU_CATS  = [...new Set(MENU_ITEMS.map(i => i.category).filter(Boolean))];
-  renderMenuCatTabs();
-  renderMenuItems(null);
-  _refreshCatSelect();
+  if (!list) return;
+  // Show localStorage data instantly
+  const stored = _loadMenuFromStorage();
+  if (stored.length) {
+    MENU_ITEMS = stored;
+    MENU_CATS  = [...new Set(MENU_ITEMS.map(i => i.category).filter(Boolean))];
+    renderMenuCatTabs(); renderMenuItems(null); _refreshCatSelect();
+  } else {
+    list.innerHTML = '<div class="loader"><div class="spinner"></div></div>';
+  }
+  // Fetch from Firestore, update localStorage
+  const fresh = await dbQuery('menu_items','venueId','==',VENUE.id);
+  if (fresh.length || !stored.length) {
+    MENU_ITEMS = fresh;
+    _saveMenuToStorage(MENU_ITEMS);
+    MENU_CATS  = [...new Set(MENU_ITEMS.map(i => i.category).filter(Boolean))];
+    renderMenuCatTabs(); renderMenuItems(null); _refreshCatSelect();
+  }
 }
 
 function _refreshCatSelect(currentVal) {
@@ -364,7 +413,6 @@ function openAddItem() {
   document.getElementById('it-price').value='';
   _refreshCatSelect();
   document.getElementById('it-cat-custom').style.display='none';
-  document.getElementById('it-available').checked=true;
   document.getElementById('it-img-upload').innerHTML=`<input type="file" id="it-img-file" accept="image/*" onchange="previewItemImg(this)"><span class="img-upload-txt">📷 Загрузить фото</span>`;
   document.getElementById('variants-check-box').textContent='';
   document.getElementById('simple-price-wrap').style.display='';
@@ -383,7 +431,6 @@ async function openEditItem(itemId) {
   document.getElementById('it-desc').value=item.description||'';
   document.getElementById('it-img-url').value=item.imageUrl||'';
   document.getElementById('it-price').value=item.price||'';
-  document.getElementById('it-available').checked=item.available!==false;
   _refreshCatSelect(item.category||'');
   if (item.imageUrl) {
     document.getElementById('it-img-upload').innerHTML=`<img src="${item.imageUrl}" style="position:absolute;inset:0;width:100%;height:100%;object-fit:cover"><input type="file" id="it-img-file" accept="image/*" onchange="previewItemImg(this)" style="position:absolute;inset:0;opacity:0;cursor:pointer">`;
@@ -442,7 +489,6 @@ async function saveItem() {
   const emoji = document.getElementById('it-emoji').value.trim()||'🍽️';
   const desc  = document.getElementById('it-desc').value.trim();
   const imgUrl = document.getElementById('it-img-url').value.trim()||_itemImgDataUrl||'';
-  const avail = document.getElementById('it-available').checked;
   if (!name) { showToast('Введите название','warning'); return; }
   let price=0, variants=[];
   if (_hasVariants) {
@@ -453,22 +499,34 @@ async function saveItem() {
   }
   const btn=document.getElementById('save-item-btn'); btn.disabled=true;
   const itemId=_editItemId||genId();
-  await dbSet('menu_items',itemId,{
-    id:itemId, venueId:VENUE.id, name, category:cat, emoji, description:desc,
-    imageUrl:imgUrl, price, variants, available:avail, createdAt:new Date().toISOString()
-  });
+  const itemData = { id:itemId, venueId:VENUE.id, name, category:cat, emoji, description:desc,
+    imageUrl:imgUrl, price, variants, createdAt:new Date().toISOString() };
+  await dbSet('menu_items',itemId, itemData);
+  // Update localStorage
+  if (_editItemId) {
+    const idx = MENU_ITEMS.findIndex(i => i.id === itemId);
+    if (idx >= 0) MENU_ITEMS[idx] = { ...MENU_ITEMS[idx], ...itemData };
+    else MENU_ITEMS.push(itemData);
+  } else {
+    MENU_ITEMS.push(itemData);
+  }
+  _saveMenuToStorage(MENU_ITEMS);
   document.getElementById('item-overlay').classList.remove('open');
   btn.disabled=false;
   tgHaptic('success');
   showToast(_editItemId?'Позиция обновлена':'Позиция добавлена','success');
-  await loadMenuItems();
+  MENU_CATS = [...new Set(MENU_ITEMS.map(i => i.category).filter(Boolean))];
+  renderMenuCatTabs(); renderMenuItems(null); _refreshCatSelect();
 }
 
 async function deleteItem(itemId) {
   if (!confirm('Удалить позицию из меню?')) return;
   await dbDelete('menu_items',itemId);
+  MENU_ITEMS = MENU_ITEMS.filter(i => i.id !== itemId);
+  _saveMenuToStorage(MENU_ITEMS);
   tgHaptic('light');
-  await loadMenuItems();
+  MENU_CATS = [...new Set(MENU_ITEMS.map(i => i.category).filter(Boolean))];
+  renderMenuCatTabs(); renderMenuItems(null); _refreshCatSelect();
 }
 
 // ══════════════════════════════════════════════════════════
@@ -821,17 +879,8 @@ function closeManualOrder(e) {
 }
 
 // ══════════════════════════════════════════════════════════
-//  QR SCAN FOR OPERATOR / COURIER
+//  QR SCAN FOR COURIER
 // ══════════════════════════════════════════════════════════
-function scanQrOperator() {
-  if (!tg?.showScanQrPopup) { showToast('QR-сканер доступен только в Telegram','warning'); return; }
-  tg.showScanQrPopup({text:'Наведите камеру на QR-код оператора'},data=>{
-    tg.closeScanQrPopup();
-    const phone=normPhone(data||'');
-    if (phone) document.getElementById('op-phone').value=phone;
-  });
-}
-
 function scanQrCourier() {
   if (!tg?.showScanQrPopup) { showToast('QR-сканер доступен только в Telegram','warning'); return; }
   tg.showScanQrPopup({text:'Наведите камеру на QR-код курьера'},data=>{
@@ -881,14 +930,14 @@ async function loadStats() {
 
 async function generateAdminReport() {
   if (!checkRateLimit('adminReport', 1, 300000)) { showToast('Отчёт можно формировать раз в 5 минут', 'warning'); return; }
-  const fromDate = document.getElementById('rep-date-from')?.value;
-  const toDate   = document.getElementById('rep-date-to')?.value;
-  if (!fromDate || !toDate) { showToast('Выберите период','warning'); return; }
+  const repDate = document.getElementById('rep-date')?.value;
+  if (!repDate) { showToast('Выберите дату','warning'); return; }
+  const fromDate = repDate, toDate = repDate;
   const btn = document.querySelector('[onclick="generateAdminReport()"]');
   if (btn) { btn.disabled=true; btn.textContent='⏳ Формирую...'; }
   try {
     const allOrders = await dbQuery('orders','venueId','==',VENUE.id);
-    const orders = allOrders.filter(o=>{ const d=(o.createdAt||'').slice(0,10); return d>=fromDate && d<=toDate; });
+    const orders = allOrders.filter(o=>{ const d=(o.createdAt||'').slice(0,10); return d === repDate; });
 
     // Permanent couriers
     const permLinks = await dbQuery('courier_venue_links','venueId','==',VENUE.id);
@@ -930,7 +979,7 @@ async function generateAdminReport() {
     const top10 = Object.values(itemFreq).sort((a,b)=>b.count-a.count).slice(0,10);
 
     const fmt = d => d.split('-').reverse().join('.');
-    let rep = `Период: ${fmt(fromDate)} – ${fmt(toDate)}\n\n`;
+    let rep = `Отчёт за: ${fmt(repDate)}\n\n`;
     rep += `Заказы Vezoo: ${onlineOrd.length}\n`;
     rep += `Созданные заведением: ${manualOrd.length}\n`;
     rep += `Отменённые заказы: ${cancelled.length}\n`;
@@ -976,40 +1025,11 @@ function copyAdminReport() {
 // ══════════════════════════════════════════════════════════
 async function loadSettingsScreen() {
   if (!VENUE) return;
-  ALL_CITIES = await getAllCities();
 
   // QR code
   const phone = STATE.user?.phone || '';
   renderQrCode('admin-qr-img', phone || STATE.uid, 180);
   document.getElementById('admin-qr-phone').textContent = phone || '—';
-
-  document.getElementById('set-name').value    = VENUE.name||'';
-  document.getElementById('set-address').value = VENUE.address||'';
-  document.getElementById('set-phone').value   = VENUE.phone||'';
-  document.getElementById('set-desc').value    = VENUE.description||'';
-  document.getElementById('set-cover').value   = VENUE.coverUrl||'';
-  document.getElementById('set-open').value    = VENUE.workOpen||'09:00';
-  document.getElementById('set-close').value   = VENUE.workClose||'22:00';
-  document.getElementById('set-delivery-time').value = VENUE.deliveryTime||30;
-  document.getElementById('set-min-order').value     = VENUE.minOrder||0;
-  _populateCitySelect('set-city', VENUE.cityId||'');
-
-  // Online orders toggle
-  const onlineToggle = document.getElementById('set-online-orders');
-  if (onlineToggle) onlineToggle.checked = VENUE.onlineOrdersEnabled !== false;
-
-  // Payment methods
-  _payMethods = { cash: VENUE.paymentMethods?.cash!==false, card: VENUE.paymentMethods?.card!==false };
-  const cashBtn = document.getElementById('set-pay-cash'), cardBtn = document.getElementById('set-pay-card');
-  if (cashBtn) cashBtn.className = 'pay-tag' + (_payMethods.cash ? ' active-cash' : '');
-  if (cardBtn) cardBtn.className = 'pay-tag' + (_payMethods.card ? ' active-card' : '');
-
-  // Operator
-  const op = VENUE.operatorUid ? await dbGet('users', VENUE.operatorUid) : null;
-  const opInfo = document.getElementById('current-operator-info');
-  const removeBtn = document.getElementById('remove-op-btn');
-  if (op) { opInfo.textContent = `Оператор: ${op.name||'—'} (${op.phone||'—'})`; opInfo.className = 'alert-box success'; removeBtn.style.display = ''; }
-  else    { opInfo.textContent = 'Оператор не назначен'; opInfo.className = 'alert-box info'; removeBtn.style.display = 'none'; }
 
   await loadPermCouriers();
   await loadBlacklist();
@@ -1054,29 +1074,6 @@ async function saveOnlineOrdersToggle(enabled) {
 
 function _normPhone(p) { return String(p||'').replace(/\D/g,''); }
 function _findLinkByPhone(links,phone) { const n=_normPhone(phone); return links.find(l=>_normPhone(l.phone)===n); }
-
-async function assignOperator() {
-  if (!checkRateLimit('assignOperator', 1, 10000)) { showToast('Слишком часто', 'warning'); return; }
-  const phone=document.getElementById('op-phone').value.trim();
-  if (!phone) { showToast('Введите телефон','warning'); return; }
-  const links=await dbGetAll('user_links');
-  const link=_findLinkByPhone(links,phone);
-  if (!link) { showToast('Пользователь с таким номером не найден','error'); return; }
-  const uid=link.uid;
-  await dbSet('operator_invites',uid,{uid,venueId:VENUE.id,venueName:VENUE.name,venueAddress:VENUE.address||'',adminUid:STATE.uid,status:'pending',createdAt:new Date().toISOString()});
-  await dbSet('venues',VENUE.id,{operatorUid:uid});
-  VENUE.operatorUid=uid;
-  tgHaptic('success'); showToast('Приглашение отправлено оператору','success');
-  document.getElementById('op-phone').value='';
-  await loadSettingsScreen();
-}
-
-async function removeOperator() {
-  if (!confirm('Снять оператора с заведения?')) return;
-  if (VENUE.operatorUid) { await dbDelete('operator_invites',VENUE.operatorUid); await dbSet('users',VENUE.operatorUid,{operatorVenueId:null}); }
-  await dbSet('venues',VENUE.id,{operatorUid:null}); VENUE.operatorUid=null;
-  showToast('Оператор снят','info'); await loadSettingsScreen();
-}
 
 async function addPermCourier() {
   if (!checkRateLimit('addPermCourier', 1, 10000)) { showToast('Слишком часто', 'warning'); return; }
