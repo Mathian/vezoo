@@ -19,6 +19,7 @@ let _acceptFromPool   = 'available'; // 'available' | 'venue'
 let _myHistory        = [];
 let _myHistPage       = 10;
 let _shownImportant   = new Set();
+let _openMyOrderId    = null;
 
 // ══════════════════════════════════════════════════════════
 //  BOOT
@@ -488,6 +489,11 @@ function watchMyOrders() {
     });
 
     if (document.getElementById('s-my-orders').classList.contains('active')) renderMyOrders();
+
+    // Auto-refresh open order detail if data changed (e.g. admin handed off → status delivering)
+    if (_openMyOrderId && document.getElementById('my-order-overlay')?.classList.contains('open')) {
+      openMyOrder(_openMyOrderId);
+    }
   });
 }
 
@@ -583,6 +589,7 @@ async function openMyOrder(orderId) {
            <button class="btn btn-success" onclick="courierDeliver('${order.id}')">✅ Доставил</button>
          </div>`
     }`;
+  _openMyOrderId = orderId;
   document.getElementById('my-order-overlay').classList.add('open');
   tg?.BackButton?.show();
 }
@@ -624,6 +631,7 @@ async function courierReturn(orderId) {
 
 function closeMyOrderSheet(e) {
   if (e && e.target !== document.getElementById('my-order-overlay')) return;
+  _openMyOrderId = null;
   document.getElementById('my-order-overlay').classList.remove('open');
   if (document.querySelector('.overlay.open') === null) tg?.BackButton?.hide();
 }
