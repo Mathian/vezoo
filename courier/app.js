@@ -618,7 +618,7 @@ async function openMyOrder(orderId) {
            🏃 Едете в кафе за заказом.<br>
            <span style="font-size:12px;color:var(--text-dim)">Оператор передаст заказ и подтвердит выдачу</span>
          </div>`
-      : `<div class="btn-row">
+      : `<div class="btn-row" style="margin-top:24px">
            <button class="btn btn-ghost btn-sm" onclick="courierReturn('${order.id}')">↩ Возврат</button>
            <button class="btn btn-success" onclick="courierDeliver('${order.id}')">✅ Доставил</button>
          </div>`

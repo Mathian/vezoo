@@ -233,10 +233,9 @@ async function openVenue(venueId) {
 
   showScreen('s-venue');
   await loadVenueMenu(venueId);
-  updateCartFAB();
 }
 
-function backToHome() { showScreen('s-home'); setNav(document.getElementById('nav-home')); updateCartFAB(); }
+function backToHome() { showScreen('s-home'); setNav(document.getElementById('nav-home')); }
 function toggleCurrentVenueFav() { if (!CURRENT_VENUE) return; toggleFav(CURRENT_VENUE.id, document.getElementById('venue-fav-btn')); }
 
 async function loadVenueMenu(venueId) {
@@ -319,7 +318,6 @@ function changeQty(itemId, delta, variantName = null) {
   if (!CART[venueId]?.length) delete CART[venueId];
   _saveCart();
   updateMenuItemUI(itemId);
-  updateCartFAB();
   updateCartNavBadge();
 }
 
@@ -359,21 +357,6 @@ function updateCartNavBadge() {
   badge.classList.toggle('hidden', cnt === 0);
 }
 
-function updateCartFAB() {
-  const fab      = document.getElementById('cart-fab');
-  const venueId  = CURRENT_VENUE?.id;
-  const items    = (venueId && CART[venueId]) || [];
-  const count    = items.reduce((s, c) => s + c.qty, 0);
-  const total    = items.reduce((s, c) => s + c.price * c.qty, 0);
-  const onVenue  = document.getElementById('s-venue').classList.contains('active');
-  if (count > 0 && onVenue) {
-    fab.classList.remove('hidden');
-    document.getElementById('cart-fab-count').textContent = `${count} поз.`;
-    document.getElementById('cart-fab-total').textContent = fmtPrice(total, _selectedCurrency);
-  } else {
-    fab.classList.add('hidden');
-  }
-}
 
 function venueCartTotal(venueId) {
   return (CART[venueId] || []).reduce((s, c) => s + c.price * c.qty, 0);
@@ -449,7 +432,6 @@ function openCart() {
   _cartOpenedFrom = 'venue';
   renderCartScreen();
   showScreen('s-cart');
-  document.getElementById('cart-fab').classList.add('hidden');
   document.getElementById('cart-venue-name').textContent = CURRENT_VENUE.name;
   _renderPaymentOpts(CURRENT_VENUE);
 }
@@ -469,7 +451,7 @@ function _renderPaymentOpts(venue) {
 
 function cartGoBack() {
   if (_cartOpenedFrom === 'overview') { showScreen('s-cart-overview'); renderCartOverview(); }
-  else { showScreen('s-venue'); updateCartFAB(); }
+  else { showScreen('s-venue'); }
 }
 
 function renderCartScreen() {
@@ -653,14 +635,30 @@ function watchActiveOrders() {
 
     document.getElementById('order-nav-badge').classList.toggle('hidden', ACTIVE_ORDERS.length === 0);
 
+    // Notification priority: only show notification if it matches the current
+    // order stage. Stale notifications (e.g. 'accepted' when order is already
+    // 'delivered') are silently dismissed — this prevents showing 3 popups
+    // when client opens the app after missing several status changes.
+    const _notifLevel  = { accepted: 1, ready: 2, delivering: 3, delivered: 4, cancelled: 4, issued: 4 };
+    const _statusLevel = {
+      pending: 0, accepted: 1, cooking: 1, ready: 2,
+      searching_courier: 2, courier_assigned: 2, ready_for_courier: 2,
+      delivering: 3, delivered: 4, cancelled: 4, issued: 4
+    };
     orders.forEach(o => {
       const n = o.clientNotification;
-      if (n && !n.seen) {
-        const key = `${o.id}:${n.type}`;
-        if (!_shownNotifs.has(key)) {
-          _shownNotifs.add(key);
-          _showClientNotification(o);
-        }
+      if (!n || n.seen) return;
+      const notifLvl  = _notifLevel[n.type]    || 0;
+      const statusLvl = _statusLevel[o.status] || 0;
+      if (notifLvl < statusLvl) {
+        // Notification is from an earlier stage — mark seen silently
+        dbSet('orders', o.id, { clientNotification: { ...n, seen: true } });
+        return;
+      }
+      const key = `${o.id}:${n.type}`;
+      if (!_shownNotifs.has(key)) {
+        _shownNotifs.add(key);
+        _showClientNotification(o);
       }
     });
 
@@ -958,7 +956,6 @@ function _initBackButton() {
     if (_navHistory.length > 0) {
       const prev = _navHistory.pop();
       _rawShowScreen(prev);
-      if (prev === 's-venue') updateCartFAB();
       if (!_navHistory.length) tg.BackButton.hide();
       return;
     }
@@ -972,7 +969,7 @@ function navTo(screenId) {
     _navHistory.push(cur); tg?.BackButton?.show();
   }
   showScreen(screenId);
-  if (screenId !== 's-venue') document.getElementById('cart-fab').classList.add('hidden');
+
   if (screenId === 's-home')   loadVenues();
   if (screenId === 's-orders') renderAllOrders();
 }
