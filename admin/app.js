@@ -7,7 +7,8 @@ const STATE = { uid: null, user: null };
 let VENUE           = null;
 let MENU_ITEMS      = [];
 let MENU_CATS       = [];
-let ALL_CATS        = [];
+let _allOrders      = [];
+let _linksCache     = null;
 let _editItemId     = null;
 let _variants       = [];
 let _hasVariants    = false;
@@ -203,8 +204,6 @@ async function changeAdminPin() {
 //  VENUE CHECK
 // ══════════════════════════════════════════════════════════
 async function checkVenueAndInit() {
-  ALL_CATS = await dbGetAll('categories','order','asc');
-
   // Check for pending admin invite
   const invite = await dbGet('admin_invites', STATE.uid);
   if (invite && invite.status === 'pending') {
@@ -495,20 +494,22 @@ async function deleteItem(itemId) {
 // ══════════════════════════════════════════════════════════
 //  ORDERS
 // ══════════════════════════════════════════════════════════
+const _ACTIVE_STATUSES = ['pending','accepted','cooking','searching_courier','courier_assigned','ready_for_courier','delivering','ready'];
+
 function watchNewOrders() {
-  _ordersUnsub=onQuerySnap('orders','venueId','==',VENUE.id,orders=>{
-    const pending=orders.filter(o=>o.status==='pending').length;
-    const badge=document.getElementById('orders-badge');
-    badge.textContent=pending; badge.classList.toggle('hidden',pending===0);
-    if (_ordersTab==='active' && document.getElementById('s-orders').classList.contains('active'))
-      renderOrdersList(orders.filter(o=>['pending','accepted','cooking','searching_courier','courier_assigned','ready_for_courier','delivering','ready'].includes(o.status)));
+  _ordersUnsub = onQuerySnap('orders','venueId','==',VENUE.id, orders => {
+    _allOrders = orders;
+    const pending = orders.filter(o => o.status === 'pending').length;
+    const badge = document.getElementById('orders-badge');
+    badge.textContent = pending; badge.classList.toggle('hidden', pending === 0);
+    if (document.getElementById('s-orders').classList.contains('active'))
+      loadOrders(_ordersTab);
   });
 }
 
-async function loadOrders(tab, el) {
+function loadOrders(tab, el) {
   _ordersTab = tab;
   if (el) { document.querySelectorAll('#s-orders .cat-tab').forEach(b=>b.classList.remove('active')); el.classList.add('active'); }
-  // Show/hide date range for history
   const rangeEl = document.getElementById('admin-hist-daterange');
   if (rangeEl) rangeEl.style.display = tab === 'history' ? '' : 'none';
   if (tab === 'history') {
@@ -517,20 +518,19 @@ async function loadOrders(tab, el) {
     if (fromEl && !fromEl.value) fromEl.value = today;
     if (toEl   && !toEl.value)   toEl.value   = today;
   }
-  const list = document.getElementById('admin-orders-list');
-  list.innerHTML = '<div class="loader"><div class="spinner"></div></div>';
-  let orders = await dbQuery('orders','venueId','==',VENUE.id);
-  if (tab === 'active')
-    orders = orders.filter(o=>['pending','accepted','cooking','searching_courier','courier_assigned','ready_for_courier','delivering','ready'].includes(o.status));
-  else if (tab === 'pending')
-    orders = orders.filter(o=>o.status==='pending');
-  else {
-    orders = orders.filter(o=>['delivered','cancelled','issued'].includes(o.status));
+  let orders;
+  if (tab === 'active') {
+    orders = _allOrders.filter(o => _ACTIVE_STATUSES.includes(o.status));
+  } else if (tab === 'pending') {
+    orders = _allOrders.filter(o => o.status === 'pending');
+  } else {
     const fromEl = document.getElementById('admin-hist-from'), toEl = document.getElementById('admin-hist-to');
     const today = new Date().toISOString().slice(0,10);
     const f = fromEl?.value || today, t = toEl?.value || today;
-    orders = orders.filter(o => { const d=(o.createdAt||'').slice(0,10); return d>=f && d<=t; });
-    orders = orders.sort((a,b)=>(b.createdAt||'').localeCompare(a.createdAt||''));
+    orders = _allOrders
+      .filter(o => ['delivered','cancelled','issued'].includes(o.status))
+      .filter(o => { const d=(o.createdAt||'').slice(0,10); return d>=f && d<=t; })
+      .sort((a,b) => (b.createdAt||'').localeCompare(a.createdAt||''));
   }
   renderOrdersList(orders);
 }
@@ -551,9 +551,13 @@ function renderOrdersList(orders) {
     </div>`).join('');
 }
 
+function _patchAllOrders(orderId, patch) {
+  const idx = _allOrders.findIndex(o => o.id === orderId);
+  if (idx >= 0) _allOrders[idx] = { ..._allOrders[idx], ...patch };
+}
+
 async function openOrderDetail(orderId) {
-  const orders=await dbQuery('orders','venueId','==',VENUE.id);
-  const order=orders.find(o=>o.id===orderId);
+  const order=_allOrders.find(o=>o.id===orderId);
   if (!order) return;
   const addr=order.address;
   const addrStr=typeof addr==='string'?addr:(addr?((`${addr.street||''} ${addr.house||''}${addr.apt?', кв.'+addr.apt:''}`).trim()||'—'):'—');
@@ -613,48 +617,53 @@ function renderAdminOrderActions(order) {
 
 async function adminAcceptOrder(orderId) {
   const mins=VENUE.deliveryTime||60;
-  await dbSet('orders',orderId,{ status:'accepted', acceptedAt:new Date().toISOString(), operatorUid:STATE.uid, deliveryMinutes:mins, estimatedAt:new Date(Date.now()+mins*60000).toISOString(), clientNotification:{type:'accepted',seen:false} });
-  tgHaptic('success'); closeOrderSheet(); showToast('Заказ принят','success');
-  await loadOrders(_ordersTab);
+  const patch={ status:'accepted', acceptedAt:new Date().toISOString(), operatorUid:STATE.uid, deliveryMinutes:mins, estimatedAt:new Date(Date.now()+mins*60000).toISOString(), clientNotification:{type:'accepted',seen:false} };
+  await dbSet('orders',orderId,patch);
+  _patchAllOrders(orderId,patch);
+  tgHaptic('success'); closeOrderSheet(); showToast('Заказ принят','success'); loadOrders(_ordersTab);
 }
 
 async function adminCancelOrder(orderId) {
-  const doCancel=async()=>{ await dbSet('orders',orderId,{status:'cancelled',cancelledAt:new Date().toISOString(),cancelledBy:'admin',clientNotification:{type:'cancelled',seen:false,message:'Ваш заказ отменён администратором.'}}); tgHaptic('light'); closeOrderSheet(); showToast('Заказ отменён','info'); await loadOrders(_ordersTab); };
+  const doCancel=async()=>{
+    const patch={status:'cancelled',cancelledAt:new Date().toISOString(),cancelledBy:'admin',cancelledBotNotified:true,clientNotification:{type:'cancelled',seen:false,message:'Ваш заказ отменён администратором.'}};
+    await dbSet('orders',orderId,patch); _patchAllOrders(orderId,patch);
+    tgHaptic('light'); closeOrderSheet(); showToast('Заказ отменён','info'); loadOrders(_ordersTab);
+  };
   if (tg?.showConfirm) tg.showConfirm('Отменить заказ?',ok=>{if(ok)doCancel();});
   else if (confirm('Отменить заказ?')) await doCancel();
 }
 
 async function adminSearchCourier(orderId) {
-  await dbSet('orders',orderId,{status:'searching_courier',courierUid:null,courierName:null,searchStartedAt:new Date().toISOString()});
-  tgHaptic('success'); showToast('Курьеры уведомлены','success'); closeOrderSheet(); await loadOrders(_ordersTab);
+  const patch={status:'searching_courier',courierUid:null,courierName:null,courierBotNotified:false,searchStartedAt:new Date().toISOString()};
+  await dbSet('orders',orderId,patch); _patchAllOrders(orderId,patch);
+  tgHaptic('success'); showToast('Заказ выставлен в пул курьеров','success'); closeOrderSheet(); loadOrders(_ordersTab);
 }
 
 async function adminHandOverCourier(orderId) {
-  const orders=await dbQuery('orders','venueId','==',VENUE.id);
-  const order=orders.find(o=>o.id===orderId);
+  const order=_allOrders.find(o=>o.id===orderId);
   const courierName=order?.courierName||'Курьер';
   const courierPhone=order?.courierPhone||'';
-  await dbSet('orders',orderId,{status:'delivering',handedOverAt:new Date().toISOString(),clientNotification:{type:'delivering',seen:false,message:`Курьер ${courierName}${courierPhone?' · '+courierPhone:''} везёт ваш заказ!`}});
-  closeOrderSheet(); tgHaptic('success'); showToast(`Заказ передан курьеру ${courierName}`,'success');
-  await loadOrders(_ordersTab);
+  const patch={status:'delivering',handedOverAt:new Date().toISOString(),clientNotification:{type:'delivering',seen:false,message:`Курьер ${courierName}${courierPhone?' · '+courierPhone:''} везёт ваш заказ!`}};
+  await dbSet('orders',orderId,patch); _patchAllOrders(orderId,patch);
+  closeOrderSheet(); tgHaptic('success'); showToast(`Заказ передан курьеру ${courierName}`,'success'); loadOrders(_ordersTab);
 }
 
 async function adminMarkReadyForCourier(orderId) {
-  await dbSet('orders', orderId, { status:'ready_for_courier', readyForCourierAt:new Date().toISOString() });
-  closeOrderSheet(); tgHaptic('success'); showToast('Заказ помечен готовым — курьеры кафе видят его','success');
-  await loadOrders(_ordersTab);
+  const patch={ status:'ready_for_courier', readyForCourierAt:new Date().toISOString(), courierBotNotified:false };
+  await dbSet('orders',orderId,patch); _patchAllOrders(orderId,patch);
+  closeOrderSheet(); tgHaptic('success'); showToast('Заказ готов — курьеры заведения уведомлены','success'); loadOrders(_ordersTab);
 }
 
 async function adminMarkReady(orderId) {
-  await dbSet('orders', orderId, { status:'ready', readyAt:new Date().toISOString(), clientNotification:{type:'ready',seen:false,message:'Ваш заказ готов! Приходите забирать.'} });
-  closeOrderSheet(); tgHaptic('success'); showToast('Заказ готов ✅','success');
-  await loadOrders(_ordersTab);
+  const patch={ status:'ready', readyAt:new Date().toISOString(), clientNotification:{type:'ready',seen:false,message:'Ваш заказ готов! Приходите забирать.'} };
+  await dbSet('orders',orderId,patch); _patchAllOrders(orderId,patch);
+  closeOrderSheet(); tgHaptic('success'); showToast('Заказ готов ✅','success'); loadOrders(_ordersTab);
 }
 
 async function adminIssueOrder(orderId) {
-  await dbSet('orders', orderId, { status:'issued', issuedAt:new Date().toISOString(), opNotified:false, clientNotification:{type:'issued',seen:false,message:'Заказ выдан. Приятного аппетита!'} });
-  closeOrderSheet(); tgHaptic('success'); showToast('Заказ выдан клиенту 📦','success');
-  await loadOrders(_ordersTab);
+  const patch={ status:'issued', issuedAt:new Date().toISOString(), clientNotification:{type:'issued',seen:false,message:'Заказ выдан. Приятного аппетита!'} };
+  await dbSet('orders',orderId,patch); _patchAllOrders(orderId,patch);
+  closeOrderSheet(); tgHaptic('success'); showToast('Заказ выдан клиенту 📦','success'); loadOrders(_ordersTab);
 }
 
 // ══════════════════════════════════════════════════════════
@@ -691,9 +700,9 @@ async function findHandoffCourier() {
   if (!checkRateLimit('findHandoffCourier', 1, 3000)) { showToast('Слишком часто', 'warning'); return; }
   const phone=normPhone(document.getElementById('handoff-phone').value.trim());
   if (!phone) { showToast('Введите номер телефона','warning'); return; }
-  const links=await dbGetAll('user_links');
-  const link=links.find(l=>normPhone(l.phone)===phone);
-  if (!link) { showToast('Курьер не найден','error'); return; }
+  const phoneKey=phone.replace(/\D/g,'');
+  const link=await dbGet('uid_index',phoneKey);
+  if (!link?.uid) { showToast('Курьер не найден','error'); return; }
   const courier=await dbGet('couriers',link.uid);
   if (!courier) { showToast('Этот пользователь не является курьером','error'); return; }
   _handoffCourier={ ...courier, uid: link.id };
@@ -744,11 +753,12 @@ async function confirmHandoff() {
   const cName=_handoffCourier.name||'Курьер';
   const cPhone=_handoffCourier.phone||'';
   for (const orderId of _handoffSelectedOrders) {
-    await dbSet('orders',orderId,{ status:'delivering', courierUid:_handoffCourier.uid, courierName:cName, courierPhone:cPhone, handedOverAt:new Date().toISOString(), clientNotification:{type:'delivering',seen:false,message:`Курьер ${cName}${cPhone?' · '+cPhone:''} везёт ваш заказ!`} });
+    const patch={ status:'delivering', courierUid:_handoffCourier.uid, courierName:cName, courierPhone:cPhone, handedOverAt:new Date().toISOString(), clientNotification:{type:'delivering',seen:false,message:`Курьер ${cName}${cPhone?' · '+cPhone:''} везёт ваш заказ!`} };
+    await dbSet('orders',orderId,patch); _patchAllOrders(orderId,patch);
   }
   closeCourierSheet(); tgHaptic('success');
   showToast(`Передано курьеру ${cName}: ${_handoffSelectedOrders.size} заказов`,'success');
-  await loadOrders(_ordersTab);
+  loadOrders(_ordersTab);
 }
 
 function closeOrderSheet(e) {
@@ -779,8 +789,8 @@ async function moPhoneInput(input) {
   const val=input.value.trim();
   if (val.length<7) { document.getElementById('mo-autocomplete').style.display='none'; return; }
   const norm=normPhone(val);
-  const links=await dbGetAll('user_links');
-  const matches=links.filter(l=>normPhone(l.phone||'').includes(norm.replace('+',''))).slice(0,5);
+  if (!_linksCache) _linksCache=await dbGetAll('user_links');
+  const matches=_linksCache.filter(l=>normPhone(l.phone||'').includes(norm.replace('+',''))).slice(0,5);
   const dd=document.getElementById('mo-autocomplete');
   if (!matches.length) { dd.style.display='none'; return; }
   dd.style.display='';
@@ -825,7 +835,8 @@ async function submitManualOrder() {
     status:'accepted', isManual:true,
     createdAt:new Date().toISOString(),
     acceptedAt:new Date().toISOString(),
-    clientNotification:{type:'accepted',seen:false}
+    clientNotification:{type:'accepted',seen:false},
+    adminBotNotified:true, courierBotNotified:false, cancelledBotNotified:false
   });
   closeManualOrder(); tgHaptic('success'); showToast('Заказ создан','success');
   await loadOrders('active');
@@ -1012,9 +1023,9 @@ async function addPermCourier() {
   if (!checkRateLimit('addPermCourier', 1, 10000)) { showToast('Слишком часто', 'warning'); return; }
   const phone=document.getElementById('courier-phone').value.trim();
   if (!phone) { showToast('Введите телефон','warning'); return; }
-  const links=await dbGetAll('user_links');
-  const link=_findLinkByPhone(links,phone);
-  if (!link) { showToast('Курьер с таким номером не найден','error'); return; }
+  const phoneKey=normPhone(phone).replace(/\D/g,'');
+  const link=await dbGet('uid_index',phoneKey);
+  if (!link?.uid) { showToast('Курьер с таким номером не найден','error'); return; }
   const courier=await dbGet('couriers',link.uid);
   if (!courier) { showToast('Этот пользователь не является курьером','error'); return; }
   await dbSet('courier_venue_links',link.uid,{uid:link.uid,venueId:VENUE.id,venueName:VENUE.name,status:'pending',invitedAt:new Date().toISOString()});
@@ -1053,9 +1064,9 @@ async function adminBlacklistClient(clientUid,clientPhone) {
 async function addToBlacklistByPhone() {
   const phone=document.getElementById('bl-phone').value.trim();
   if (!phone) { showToast('Введите телефон','warning'); return; }
-  const links=await dbGetAll('user_links');
-  const link=_findLinkByPhone(links,phone);
-  if (!link) { showToast('Пользователь не найден','error'); return; }
+  const phoneKey=normPhone(phone).replace(/\D/g,'');
+  const link=await dbGet('uid_index',phoneKey);
+  if (!link?.uid) { showToast('Пользователь не найден','error'); return; }
   await dbSet('venue_blacklist',VENUE.id+'_'+link.uid,{venueId:VENUE.id,clientUid:link.uid,clientPhone:link.phone,addedAt:new Date().toISOString(),adminUid:STATE.uid});
   document.getElementById('bl-phone').value='';
   tgHaptic('success'); showToast('Клиент добавлен в ЧС','success'); await loadBlacklist();

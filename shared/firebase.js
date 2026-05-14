@@ -379,43 +379,15 @@ function renderQrCode(elementId, text, size = 180) {
   new QRCode(el, { text: data, width: size, height: size, colorDark: '#000000', colorLight: '#ffffff' });
 }
 
-// ─────────────────────── Country/City cache ───────────────────────
-let _countriesCache = null;
-
-async function loadCountries(force = false) {
-  if (_countriesCache && !force) return _countriesCache;
-  try {
-    const docs = await dbGetAll('countries', 'name', 'asc', 200);
-    _countriesCache = docs;
-    return docs;
-  } catch { return []; }
-}
-
-async function getCitiesForCountry(countryId) {
-  try { return await dbQuery('cities', 'countryId', '==', countryId); }
-  catch { return []; }
-}
-
-async function getAllCities() {
-  try { return await dbGetAll('cities', 'name', 'asc', 500); }
-  catch { return []; }
-}
-
-async function getCurrencyForCity(cityId) {
-  try {
-    const city = await dbGet('cities', cityId);
-    if (!city?.countryId) return '₸';
-    const country = await dbGet('countries', city.countryId);
-    return country?.currency || '₸';
-  } catch { return '₸'; }
-}
-
-async function getDeliveryPriceForCity(cityId) {
-  try {
-    const city = await dbGet('cities', cityId);
-    return city?.deliveryPrice ?? 1000;
-  } catch { return 1000; }
-}
+// ─────────────────────── Venue categories (hard-coded) ───────────────────────
+const VENUE_CATEGORIES = [
+  { id: 'cafe',     name: 'Кафе',      icon: '🍛', order: 1 },
+  { id: 'coffee',   name: 'Кофейня',   icon: '☕', order: 2 },
+  { id: 'pizza',    name: 'Пиццерия',  icon: '🍕', order: 3 },
+  { id: 'sushi',    name: 'Суши',      icon: '🍣', order: 4 },
+  { id: 'fastfood', name: 'Fast Food', icon: '🍔', order: 5 },
+  { id: 'flowers',  name: 'Цветочный', icon: '🌸', order: 6 },
+];
 
 // ─────────────────────── PIN helpers ───────────────────────
 const PIN_DEFAULTS = { admin:'0000', operator:'0000', master:'0000', superadmin:'0000' };

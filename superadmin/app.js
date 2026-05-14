@@ -4,12 +4,7 @@
    ============================================================ */
 
 const STATE = { uid: null, user: null };
-let ALL_CATS     = [];
-let ALL_COUNTRIES = [];
-let ALL_CITIES   = [];
-let _editCatId   = null;
-let _editCountryId = null;
-let _editCityId  = null;
+let ALL_CATS = [];
 let _pinBuffer   = '';
 let _saStatsPeriod = 7; // days; 0 = all time; -1 = custom range
 let _saEditVenueId    = null;
@@ -161,212 +156,15 @@ function setNav(el) {
 // ══════════════════════════════════════════════════════════
 async function loadCategories() {
   const list = document.getElementById('categories-list');
-  list.innerHTML = '<div class="loader"><div class="spinner"></div></div>';
-  ALL_CATS = await dbGetAll('categories','order','asc');
-  if (!ALL_CATS.length) {
-    list.innerHTML = '<div class="empty"><div class="empty-icon">📂</div><div class="empty-text">Категорий нет.<br>Добавьте первую.</div></div>';
-    return;
-  }
+  ALL_CATS = VENUE_CATEGORIES;
   list.innerHTML = ALL_CATS.map(c => `
     <div class="list-item">
       <div class="li-icon yellow" style="font-size:24px">${c.icon||'📦'}</div>
-      <div class="li-body"><div class="li-title">${c.name}</div><div class="li-sub">Порядок: ${c.order||0}</div></div>
-      <div style="display:flex;gap:6px">
-        <button class="btn btn-icon btn-ghost" onclick="openEditCategory('${c.id}')">✏️</button>
-        <button class="btn btn-icon btn-danger" onclick="deleteCategory('${c.id}')">🗑</button>
-      </div>
+      <div class="li-body"><div class="li-title">${c.name}</div></div>
     </div>`).join('');
 }
 
-function openAddCategory() {
-  _editCatId = null;
-  document.getElementById('cat-sheet-title').textContent = 'Новая категория';
-  document.getElementById('cat-name').value  = '';
-  document.getElementById('cat-icon').value  = '';
-  document.getElementById('cat-order').value = '10';
-  document.getElementById('cat-overlay').classList.add('open');
-}
 
-function openEditCategory(catId) {
-  const c = ALL_CATS.find(x => x.id === catId);
-  if (!c) return;
-  _editCatId = catId;
-  document.getElementById('cat-sheet-title').textContent = 'Редактировать категорию';
-  document.getElementById('cat-name').value  = c.name||'';
-  document.getElementById('cat-icon').value  = c.icon||'';
-  document.getElementById('cat-order').value = c.order||10;
-  document.getElementById('cat-overlay').classList.add('open');
-}
-
-async function saveCategory() {
-  const name  = document.getElementById('cat-name').value.trim();
-  const icon  = document.getElementById('cat-icon').value.trim();
-  const order = parseInt(document.getElementById('cat-order').value)||10;
-  if (!name) { showToast('Введите название', 'warning'); return; }
-  const catId = _editCatId || genId();
-  await dbSet('categories', catId, { id: catId, name, icon, order });
-  closeCatSheet(); tgHaptic('success');
-  showToast(_editCatId ? 'Категория обновлена' : 'Категория добавлена', 'success');
-  await loadCategories();
-}
-
-async function deleteCategory(catId) {
-  const cat    = ALL_CATS.find(c => c.id === catId);
-  const venues = await dbQuery('venues','categoryId','==',catId);
-  if (!confirm(`Удалить категорию "${cat?.name}"?${venues.length ? `\n\n${venues.length} заведений потеряют категорию.` : ''}`)) return;
-  await dbDelete('categories', catId);
-  tgHaptic('light'); showToast('Категория удалена', 'info');
-  await loadCategories();
-}
-
-function closeCatSheet(e) {
-  if (e && e.target !== document.getElementById('cat-overlay')) return;
-  document.getElementById('cat-overlay').classList.remove('open');
-}
-
-// ══════════════════════════════════════════════════════════
-//  GEOGRAPHY — COUNTRIES & CITIES
-// ══════════════════════════════════════════════════════════
-async function loadGeo() {
-  const list = document.getElementById('geo-list');
-  list.innerHTML = '<div class="loader"><div class="spinner"></div></div>';
-  ALL_COUNTRIES = await dbGetAll('countries','name','asc');
-  ALL_CITIES    = await dbGetAll('cities','name','asc');
-  _countriesCache = ALL_COUNTRIES; // sync shared cache
-
-  if (!ALL_COUNTRIES.length) {
-    list.innerHTML = '<div class="empty"><div class="empty-icon">🌍</div><div class="empty-text">Стран нет.<br>Добавьте первую страну.</div></div>';
-    return;
-  }
-
-  list.innerHTML = ALL_COUNTRIES.map(country => {
-    const cities = ALL_CITIES.filter(c => c.countryId === country.id);
-    return `
-      <div class="country-card">
-        <div class="country-card-hdr">
-          <div>
-            <div class="country-card-name">🏳 ${country.name}</div>
-            <div class="country-currency">${country.currency} · ${cities.length} ${pluralCity(cities.length)}</div>
-          </div>
-          <div style="display:flex;gap:6px">
-            <button class="btn btn-xs btn-outline" onclick="openAddCity('${country.id}')">+ Город</button>
-            <button class="btn btn-icon btn-ghost" style="width:32px;height:32px;font-size:14px" onclick="openEditCountry('${country.id}')">✏️</button>
-            <button class="btn btn-icon" style="width:32px;height:32px;font-size:14px;background:var(--danger-soft);color:var(--danger);border:none;border-radius:8px;cursor:pointer" onclick="deleteCountry('${country.id}')">🗑</button>
-          </div>
-        </div>
-        ${cities.length ? cities.map(city => `
-          <div class="city-row">
-            <div>
-              <div class="city-row-name">📍 ${city.name}</div>
-            </div>
-            <div style="display:flex;align-items:center;gap:8px">
-              <div class="city-row-price">${fmtPrice(city.deliveryPrice, country.currency)}</div>
-              <button class="btn btn-icon btn-ghost" style="width:28px;height:28px;font-size:13px" onclick="openEditCity('${city.id}','${country.id}')">✏️</button>
-              <button class="btn btn-icon" style="width:28px;height:28px;font-size:13px;background:var(--danger-soft);color:var(--danger);border:none;border-radius:8px;cursor:pointer" onclick="deleteCity('${city.id}')">🗑</button>
-            </div>
-          </div>`).join('') : `<div style="padding:12px 15px;font-size:13px;color:var(--text-muted)">Городов нет — добавьте первый</div>`}
-      </div>`;
-  }).join('');
-}
-
-function pluralCity(n) {
-  if (n % 10 === 1 && n % 100 !== 11) return 'город';
-  if ([2,3,4].includes(n % 10) && ![12,13,14].includes(n % 100)) return 'города';
-  return 'городов';
-}
-
-// COUNTRY CRUD
-function openAddCountry() {
-  _editCountryId = null;
-  document.getElementById('country-sheet-title').textContent = 'Новая страна';
-  document.getElementById('country-name').value     = '';
-  document.getElementById('country-currency').value = '';
-  document.getElementById('country-overlay').classList.add('open');
-}
-
-function openEditCountry(countryId) {
-  const c = ALL_COUNTRIES.find(x => x.id === countryId);
-  if (!c) return;
-  _editCountryId = countryId;
-  document.getElementById('country-sheet-title').textContent = 'Редактировать страну';
-  document.getElementById('country-name').value     = c.name||'';
-  document.getElementById('country-currency').value = c.currency||'';
-  document.getElementById('country-overlay').classList.add('open');
-}
-
-async function saveCountry() {
-  const name     = document.getElementById('country-name').value.trim();
-  const currency = document.getElementById('country-currency').value.trim();
-  if (!name)     { showToast('Введите название страны', 'warning'); return; }
-  if (!currency) { showToast('Введите символ валюты', 'warning'); return; }
-  const countryId = _editCountryId || genId();
-  await dbSet('countries', countryId, { id: countryId, name, currency });
-  closeCountrySheet(); tgHaptic('success');
-  showToast(_editCountryId ? 'Страна обновлена' : 'Страна добавлена', 'success');
-  await loadGeo();
-}
-
-async function deleteCountry(countryId) {
-  const c = ALL_COUNTRIES.find(x => x.id === countryId);
-  const cities = ALL_CITIES.filter(x => x.countryId === countryId);
-  if (!confirm(`Удалить страну "${c?.name}"?${cities.length ? `\n\n${cities.length} городов также будут удалены.` : ''}`)) return;
-  await dbDelete('countries', countryId);
-  for (const city of cities) await dbDelete('cities', city.id);
-  tgHaptic('light'); showToast('Страна удалена', 'info');
-  await loadGeo();
-}
-
-function closeCountrySheet(e) {
-  if (e && e.target !== document.getElementById('country-overlay')) return;
-  document.getElementById('country-overlay').classList.remove('open');
-}
-
-// CITY CRUD
-function openAddCity(countryId) {
-  _editCityId = null;
-  document.getElementById('city-sheet-title').textContent = 'Новый город';
-  document.getElementById('city-name').value           = '';
-  document.getElementById('city-delivery-price').value = '1000';
-  document.getElementById('city-country-id').value    = countryId;
-  document.getElementById('city-overlay').classList.add('open');
-}
-
-function openEditCity(cityId, countryId) {
-  const c = ALL_CITIES.find(x => x.id === cityId);
-  if (!c) return;
-  _editCityId = cityId;
-  document.getElementById('city-sheet-title').textContent = 'Редактировать город';
-  document.getElementById('city-name').value           = c.name||'';
-  document.getElementById('city-delivery-price').value = c.deliveryPrice||1000;
-  document.getElementById('city-country-id').value    = countryId || c.countryId || '';
-  document.getElementById('city-overlay').classList.add('open');
-}
-
-async function saveCity() {
-  const name          = document.getElementById('city-name').value.trim();
-  const deliveryPrice = parseInt(document.getElementById('city-delivery-price').value)||1000;
-  const countryId     = document.getElementById('city-country-id').value;
-  if (!name)      { showToast('Введите название города', 'warning'); return; }
-  if (!countryId) { showToast('Не выбрана страна', 'warning'); return; }
-  const cityId = _editCityId || genId();
-  await dbSet('cities', cityId, { id: cityId, name, countryId, deliveryPrice });
-  closeCitySheet(); tgHaptic('success');
-  showToast(_editCityId ? 'Город обновлён' : 'Город добавлен', 'success');
-  await loadGeo();
-}
-
-async function deleteCity(cityId) {
-  const c = ALL_CITIES.find(x => x.id === cityId);
-  if (!confirm(`Удалить город "${c?.name}"?`)) return;
-  await dbDelete('cities', cityId);
-  tgHaptic('light'); showToast('Город удалён', 'info');
-  await loadGeo();
-}
-
-function closeCitySheet(e) {
-  if (e && e.target !== document.getElementById('city-overlay')) return;
-  document.getElementById('city-overlay').classList.remove('open');
-}
 
 // ══════════════════════════════════════════════════════════
 //  VENUES
@@ -379,7 +177,7 @@ async function loadAllVenues() {
     list.innerHTML = '<div class="empty"><div class="empty-icon">🏪</div><div class="empty-text">Заведений нет.<br>Нажмите «+ Добавить».</div></div>';
     return;
   }
-  const cats = await dbGetAll('categories');
+  const cats = VENUE_CATEGORIES;
   list.innerHTML = venues.sort((a,b)=>(a.name||'').localeCompare(b.name||'')).map(v => {
     const cat = cats.find(c=>c.id===v.categoryId);
     const badges = [];
@@ -402,9 +200,6 @@ async function loadAllVenues() {
 function _renderSaVenueSheetHtml(venue) {
   const isEdit = !!venue;
   const catsOpts = ALL_CATS.map(c => `<option value="${c.id}" ${venue?.categoryId===c.id?'selected':''}>${c.icon||''} ${c.name}</option>`).join('');
-  const countryOpts = ALL_COUNTRIES.map(c => `<option value="${c.id}" ${venue?.countryId===c.id?'selected':''}>${c.name}</option>`).join('');
-  const filteredCities = venue?.countryId ? ALL_CITIES.filter(c=>c.countryId===venue.countryId) : ALL_CITIES;
-  const cityOpts = filteredCities.map(c => `<option value="${c.id}" ${venue?.cityId===c.id?'selected':''}>${c.name}</option>`).join('');
   _saVenPayMethods = { cash: venue?.paymentMethods?.cash!==false, card: venue?.paymentMethods?.card!==false };
   const onlineChecked = venue?.onlineOrdersEnabled !== false ? 'checked' : '';
   const venId = venue?.id || '';
@@ -417,8 +212,7 @@ function _renderSaVenueSheetHtml(venue) {
       <div class="field"><label>Описание</label><textarea class="inp" id="sa-ven-desc" rows="2" maxlength="500">${venue?.description||''}</textarea></div>
 
       <div class="section-title">Расположение</div>
-      <div class="field"><label>Страна *</label><select class="inp" id="sa-ven-country" onchange="saVenCountryChange()"><option value="">Выберите страну...</option>${countryOpts}</select></div>
-      <div class="field"><label>Город *</label><select class="inp" id="sa-ven-city"><option value="">Выберите город...</option>${cityOpts}</select></div>
+      <div class="field"><label>Город</label><input class="inp" id="sa-ven-city" placeholder="Алматы" value="${venue?.cityName||''}" maxlength="60"></div>
       <div class="inp-row">
         <div class="field"><label>Улица *</label><input class="inp" id="sa-ven-street" placeholder="ул. Абая" value="${venue?.addrStreet||''}"></div>
         <div class="field" style="max-width:88px"><label>Дом *</label><input class="inp" id="sa-ven-house" placeholder="10" value="${venue?.addrHouse||''}"></div>
@@ -517,11 +311,8 @@ async function openSaVenueEdit(venueId) {
 }
 
 async function _ensureSaVenueData() {
-  const promises = [];
-  if (!ALL_CATS.length)     promises.push(dbGetAll('categories','order','asc').then(d=>ALL_CATS=d));
-  if (!ALL_COUNTRIES.length) promises.push(dbGetAll('countries','name','asc').then(d=>{ALL_COUNTRIES=d;}));
-  if (!ALL_CITIES.length)    promises.push(dbGetAll('cities','name','asc').then(d=>ALL_CITIES=d));
-  if (promises.length) await Promise.all(promises);
+  // Categories are now hard-coded — no Firestore read needed
+  if (!ALL_CATS.length) ALL_CATS = VENUE_CATEGORIES;
 }
 
 async function _loadSaVenueAssignees(venue) {
@@ -564,13 +355,6 @@ async function _loadSaVenueCouriers(venueId) {
     </div>`).join('');
 }
 
-function saVenCountryChange(preselectCityId) {
-  const countryId = document.getElementById('sa-ven-country')?.value;
-  const citySelect = document.getElementById('sa-ven-city');
-  if (!citySelect) return;
-  const cities = ALL_CITIES.filter(c => !countryId || c.countryId === countryId);
-  citySelect.innerHTML = '<option value="">Выберите город...</option>' + cities.map(c => `<option value="${c.id}" ${c.id === preselectCityId ? 'selected' : ''}>${c.name}</option>`).join('');
-}
 
 function toggleSaVenPayTag(method) {
   _saVenPayMethods[method] = !_saVenPayMethods[method];
@@ -595,8 +379,7 @@ async function saveSaVenue(venueId) {
   const name    = document.getElementById('sa-ven-name').value.trim();
   const catId   = document.getElementById('sa-ven-cat').value;
   const desc    = document.getElementById('sa-ven-desc').value.trim();
-  const countryId = document.getElementById('sa-ven-country').value;
-  const cityId  = document.getElementById('sa-ven-city').value;
+  const cityName = document.getElementById('sa-ven-city').value.trim();
   const street  = document.getElementById('sa-ven-street').value.trim();
   const house   = document.getElementById('sa-ven-house').value.trim();
   const office  = document.getElementById('sa-ven-office').value.trim();
@@ -613,8 +396,6 @@ async function saveSaVenue(venueId) {
   if (!catId)  { showToast('Выберите категорию', 'warning'); return; }
   if (!street || !house) { showToast('Введите улицу и дом', 'warning'); return; }
 
-  const city    = ALL_CITIES.find(c => c.id === cityId);
-  const country = ALL_COUNTRIES.find(c => c.id === countryId);
   const addrParts = [street, house, office ? 'оф. ' + office : ''].filter(Boolean);
   const address = addrParts.join(', ');
 
@@ -623,9 +404,7 @@ async function saveSaVenue(venueId) {
   const data = {
     id: vId, name, categoryId: catId, description: desc,
     addrStreet: street, addrHouse: house, addrOffice: office,
-    address, phone,
-    countryId: countryId||'', countryName: country?.name||'',
-    cityId: cityId||'', cityName: city?.name||'',
+    address, phone, cityName,
     workOpen: open, workClose: close,
     deliveryTime: delTime, deliveryPrice: delPrice, minOrder: minOrd,
     paymentMethods: _saVenPayMethods,
@@ -650,9 +429,9 @@ async function saToggleVenueBlock(venueId, currentlyBlocked) {
 async function saAssignAdminToVenue(venueId) {
   const phone = document.getElementById('sa-ven-admin-phone')?.value.trim();
   if (!phone) { showToast('Введите телефон', 'warning'); return; }
-  const links = await dbGetAll('user_links');
-  const link  = links.find(l => normPhone(l.phone||'') === normPhone(phone));
-  if (!link)  { showToast('Пользователь не найден', 'error'); return; }
+  const phoneKey = normPhone(phone).replace(/\D/g, '');
+  const link = await dbGet('uid_index', phoneKey);
+  if (!link?.uid) { showToast('Пользователь не найден', 'error'); return; }
   const venue = await dbGet('venues', venueId);
   // Store invite keyed by venueId so multiple admins per venue work; use adminUid field
   await dbSet('admin_invites', link.uid, { uid: link.uid, venueId, venueName: venue?.name||'', venueAddress: venue?.address||'', saUid: STATE.uid, status: 'pending', createdAt: new Date().toISOString() });
@@ -688,9 +467,9 @@ function saScanQrAdmin(venueId) {
 async function saAddCourierToVenue(venueId) {
   const phone = document.getElementById('sa-ven-courier-phone')?.value.trim();
   if (!phone) { showToast('Введите телефон', 'warning'); return; }
-  const links = await dbGetAll('user_links');
-  const link  = links.find(l => normPhone(l.phone||'') === normPhone(phone));
-  if (!link)  { showToast('Пользователь не найден', 'error'); return; }
+  const phoneKey = normPhone(phone).replace(/\D/g, '');
+  const link = await dbGet('uid_index', phoneKey);
+  if (!link?.uid) { showToast('Пользователь не найден', 'error'); return; }
   const courier = await dbGet('couriers', link.uid);
   if (!courier) { showToast('Этот пользователь не является курьером', 'error'); return; }
   const venue = await dbGet('venues', venueId);

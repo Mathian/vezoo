@@ -17,7 +17,9 @@ let _acceptOrderId    = null;
 let _acceptOrderIds   = [];
 let _acceptFromPool   = 'available'; // 'available' | 'venue'
 let _myHistory        = [];
-let _myHistPage       = 10;
+const _HIST_KEY       = 'vez_courier_hist';
+function _loadHistoryFromStorage() { try { return JSON.parse(localStorage.getItem(_HIST_KEY)||'[]'); } catch { return []; } }
+function _saveHistoryToStorage(h)  { try { localStorage.setItem(_HIST_KEY, JSON.stringify(h)); } catch {} }
 let _shownImportant   = new Set();
 let _openMyOrderId    = null;
 
@@ -161,6 +163,7 @@ function initMain() {
     document.getElementById('primary-venue-label').textContent = COURIER_DATA.primaryVenueName;
   }
 
+  _myHistory = _loadHistoryFromStorage(); // restore from localStorage before listener fires
   watchMyOrders();
   watchAvailableOrders();
   watchVenueOrders();
@@ -474,9 +477,18 @@ function watchMyOrders() {
     _myOrders = orders
       .filter(o => o.status === 'courier_assigned' || o.status === 'delivering')
       .sort((a, b) => (a.createdAt || '').localeCompare(b.createdAt || ''));
-    _myHistory = orders
-      .filter(o => o.status === 'delivered' && o.courierUid === STATE.uid)
-      .sort((a, b) => (b.deliveredAt || b.createdAt || '').localeCompare(a.deliveredAt || a.createdAt || ''));
+
+    // Merge newly delivered orders into localStorage history (no extra Firebase query)
+    const freshDelivered = orders.filter(o => o.status === 'delivered');
+    if (freshDelivered.length) {
+      const existingIds = new Set(_myHistory.map(o => o.id));
+      const newOnes = freshDelivered.filter(o => !existingIds.has(o.id));
+      if (newOnes.length) {
+        _myHistory = [...newOnes, ..._myHistory]
+          .sort((a, b) => (b.deliveredAt || b.createdAt || '').localeCompare(a.deliveredAt || a.createdAt || ''));
+        _saveHistoryToStorage(_myHistory);
+      }
+    }
     const cnt = _myOrders.length;
     document.getElementById('my-badge').textContent = cnt;
     document.getElementById('my-badge').classList.toggle('hidden', cnt === 0);
@@ -536,6 +548,28 @@ function renderMyOrders() {
   if (!html) {
     html = '<div class="empty" style="padding-top:40px"><div class="empty-icon">📦</div><div class="empty-text">Нет активных доставок</div></div>';
   }
+
+  // History section (from localStorage — no Firebase query)
+  if (_myHistory.length) {
+    const dayEarnings = _myHistory.reduce((s,o)=>s+(o.deliveryPrice||0),0);
+    html += `<div class="section-title" style="padding:4px 4px 4px;margin-top:8px">
+      История (${_myHistory.length}) · <span class="text-primary font-bold">${fmtPrice(dayEarnings)}</span>
+    </div>`;
+    html += _myHistory.slice(0, 30).map(o => `
+      <div class="delivery-card" style="opacity:.85">
+        <div class="delivery-card-hdr">
+          <div>
+            <div class="font-bold" style="font-size:13px">${o.venueName||'Заведение'}</div>
+            <div class="text-xs text-dim">${fmtTime(o.deliveredAt||o.createdAt)} · #${(o.id||'').slice(-6)}</div>
+          </div>
+          <div class="text-success font-bold">${fmtPrice(o.deliveryPrice||0)}</div>
+        </div>
+        <div class="delivery-card-body text-sm text-dim">
+          ${o.address?`📍 ${o.address.street} ${o.address.house}`:'🏪 Самовывоз'}
+        </div>
+      </div>`).join('');
+  }
+
   list.innerHTML = html;
 }
 
@@ -669,59 +703,6 @@ async function loadCourierProfile() {
     venueCard.innerHTML = `<div class="text-dim text-sm">Не привязан к заведению</div>`;
   }
 
-  // Set today's date by default in history picker
-  const histDate = document.getElementById('cr-hist-date');
-  if (!histDate.value) {
-    histDate.value = new Date().toISOString().slice(0, 10);
-  }
-  await loadCourierHistory();
-}
-
-async function loadCourierHistory() {
-  const list = document.getElementById('courier-history-list');
-  list.innerHTML = '<div class="loader"><div class="spinner"></div></div>';
-
-  const dateStr = document.getElementById('cr-hist-date').value;
-  let orders = (await dbQuery('orders', 'courierUid', '==', STATE.uid))
-    .filter(o => o.status === 'delivered');
-
-  if (dateStr) {
-    orders = orders.filter(o => {
-      const d = (o.deliveredAt || o.createdAt || '').slice(0, 10);
-      return d === dateStr;
-    });
-  }
-  orders.sort((a, b) => (b.deliveredAt || b.createdAt || '').localeCompare(a.deliveredAt || a.createdAt || ''));
-
-  if (!orders.length) {
-    list.innerHTML = '<div class="empty" style="padding:16px 0"><div class="empty-icon">📋</div><div class="empty-text">Нет доставок за этот день</div></div>';
-    return;
-  }
-
-  let dayEarnings = 0;
-  orders.forEach(o => { dayEarnings += o.deliveryPrice || 0; });
-
-  list.innerHTML = `
-    <div class="flex justify-between" style="padding:8px 4px;border-bottom:1px solid var(--border);margin-bottom:4px">
-      <span class="text-dim text-sm">${orders.length} ${orders.length === 1 ? 'доставка' : orders.length < 5 ? 'доставки' : 'доставок'}</span>
-      <span class="font-bold text-primary">${fmtPrice(dayEarnings)}</span>
-    </div>` +
-    orders.map(o => `
-      <div class="delivery-card">
-        <div class="delivery-card-hdr">
-          <div>
-            <div class="font-bold" style="font-size:13px">${o.venueName || 'Заведение'}</div>
-            <div class="text-xs text-dim">${fmtTime(o.deliveredAt || o.createdAt)} · #${(o.id || '').slice(-6)}</div>
-          </div>
-          <div>
-            <div class="text-success font-bold">${fmtPrice(o.deliveryPrice || 0)}</div>
-          </div>
-        </div>
-        <div class="delivery-card-body text-sm">
-          <div>${o.address ? `📍 ${o.address.street} ${o.address.house}` : '🏪 Самовывоз'}</div>
-          <div class="text-dim">${(o.items || []).slice(0, 2).map(i => `${i.emoji || '🍽️'} ${i.name} ×${i.qty}`).join(', ')}</div>
-        </div>
-      </div>`).join('');
 }
 
 async function courierLeaveVenue() {

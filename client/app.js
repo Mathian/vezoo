@@ -113,12 +113,9 @@ function initMain() {
 //  HOME — Venue list
 // ══════════════════════════════════════════════════════════
 async function loadVenues() {
-  const [venues, cats] = await Promise.all([
-    dbGetAll('venues', 'name', 'asc'),
-    dbGetAll('categories', 'order', 'asc')
-  ]);
+  const venues = await dbGetAll('venues', 'name', 'asc');
   VENUES     = venues.filter(v => v.status === 'approved' && !v.blocked && v.onlineOrdersEnabled !== false);
-  CATEGORIES = cats;
+  CATEGORIES = VENUE_CATEGORIES;
   renderCatTabs();
   renderVenues(null);
 }
@@ -601,7 +598,8 @@ async function submitOrder() {
     address: isPickup ? null : { street, house, apt, hasIntercom: _intercomChecked },
     payment: _paymentMethod, deliveryType: _deliveryType, comment,
     status: 'pending', createdAt: new Date().toISOString(),
-    clientNotification: { type: '', seen: true }
+    clientNotification: { type: '', seen: true },
+    adminBotNotified: false, courierBotNotified: false, cancelledBotNotified: false
   };
 
   try {

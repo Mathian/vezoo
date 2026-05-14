@@ -75,18 +75,8 @@
 <div id="s-categories" class="screen">
   <div class="page-hdr">
     <h2>Категории</h2>
-    <div class="page-hdr-end"><button class="btn btn-primary btn-sm" onclick="openAddCategory()">+ Добавить</button></div>
   </div>
   <div id="categories-list" style="display:flex;flex-direction:column;gap:8px;padding:12px 20px 16px"></div>
-</div>
-
-<!-- GEOGRAPHY -->
-<div id="s-geography" class="screen">
-  <div class="page-hdr">
-    <h2>География</h2>
-    <div class="page-hdr-end"><button class="btn btn-primary btn-sm" onclick="openAddCountry()">+ Страна</button></div>
-  </div>
-  <div id="geo-list" style="display:flex;flex-direction:column;gap:10px;padding:12px 20px 16px"></div>
 </div>
 
 <!-- VENUES -->
@@ -164,9 +154,6 @@
   <div class="nav-item active" id="nav-cats" onclick="showScreen('s-categories');setNav(this);loadCategories()">
     <div class="nav-icon">📂</div><div class="nav-label">Категории</div>
   </div>
-  <div class="nav-item" id="nav-geo" onclick="showScreen('s-geography');setNav(this);loadGeo()">
-    <div class="nav-icon">🌍</div><div class="nav-label">Города</div>
-  </div>
   <div class="nav-item" id="nav-venues" onclick="showScreen('s-venues');setNav(this);loadAllVenues()">
     <div class="nav-icon">🏪</div><div class="nav-label">Заведения</div>
   </div>
@@ -179,55 +166,6 @@
   </div>
 </div>
 
-<!-- CATEGORY SHEET -->
-<div class="overlay" id="cat-overlay" onclick="closeCatSheet(event)">
-  <div class="sheet">
-    <div class="sheet-handle"></div>
-    <div class="sheet-title" id="cat-sheet-title">Новая категория</div>
-    <div style="display:flex;flex-direction:column;gap:12px">
-      <div class="field"><label>Название *</label><input class="inp" id="cat-name" placeholder="Еда" maxlength="40"></div>
-      <div class="field"><label>Иконка (эмодзи)</label><input class="inp" id="cat-icon" placeholder="🍕" maxlength="4" style="font-size:24px;text-align:center"></div>
-      <div class="field"><label>Порядок сортировки</label><input class="inp" id="cat-order" type="number" value="10" min="1"></div>
-      <div class="btn-row">
-        <button class="btn btn-ghost" onclick="closeCatSheet()">Отмена</button>
-        <button class="btn btn-primary" onclick="saveCategory()">Сохранить</button>
-      </div>
-    </div>
-  </div>
-</div>
-
-<!-- COUNTRY SHEET -->
-<div class="overlay" id="country-overlay" onclick="closeCountrySheet(event)">
-  <div class="sheet">
-    <div class="sheet-handle"></div>
-    <div class="sheet-title" id="country-sheet-title">Новая страна</div>
-    <div style="display:flex;flex-direction:column;gap:12px">
-      <div class="field"><label>Название страны *</label><input class="inp" id="country-name" placeholder="Казахстан" maxlength="60"></div>
-      <div class="field"><label>Символ валюты *</label><input class="inp" id="country-currency" placeholder="₸" maxlength="5" style="font-size:22px;text-align:center"></div>
-      <div class="btn-row">
-        <button class="btn btn-ghost" onclick="closeCountrySheet()">Отмена</button>
-        <button class="btn btn-primary" onclick="saveCountry()">Сохранить</button>
-      </div>
-    </div>
-  </div>
-</div>
-
-<!-- CITY SHEET -->
-<div class="overlay" id="city-overlay" onclick="closeCitySheet(event)">
-  <div class="sheet">
-    <div class="sheet-handle"></div>
-    <div class="sheet-title" id="city-sheet-title">Новый город</div>
-    <div style="display:flex;flex-direction:column;gap:12px">
-      <div class="field"><label>Название города *</label><input class="inp" id="city-name" placeholder="Алматы" maxlength="60"></div>
-      <div class="field"><label>Цена доставки (в валюте страны)</label><input class="inp" id="city-delivery-price" type="number" value="1000" min="0"></div>
-      <input type="hidden" id="city-country-id">
-      <div class="btn-row">
-        <button class="btn btn-ghost" onclick="closeCitySheet()">Отмена</button>
-        <button class="btn btn-primary" onclick="saveCity()">Сохранить</button>
-      </div>
-    </div>
-  </div>
-</div>
 
 <!-- VENUE DETAIL SHEET -->
 <div class="overlay" id="venue-overlay" onclick="closeVenueSheet(event)">
