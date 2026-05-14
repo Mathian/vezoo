@@ -831,6 +831,7 @@ async function submitManualOrder() {
     id:ordId, venueId:VENUE.id, venueName:VENUE.name,
     clientPhone:phone, clientName, clientUid:'manual_'+genId(),
     address:{street,house,apt}, payment, total:amount,
+    deliveryPrice: VENUE.deliveryPrice || 0,
     items:[], comment,
     status:'accepted', isManual:true,
     createdAt:new Date().toISOString(),

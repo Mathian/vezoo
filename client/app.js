@@ -115,7 +115,8 @@ function initMain() {
 async function loadVenues() {
   const venues = await dbGetAll('venues', 'name', 'asc');
   VENUES     = venues.filter(v => v.status === 'approved' && !v.blocked && v.onlineOrdersEnabled !== false);
-  CATEGORIES = VENUE_CATEGORIES;
+  const usedCatIds = new Set(VENUES.map(v => v.categoryId).filter(Boolean));
+  CATEGORIES = VENUE_CATEGORIES.filter(c => usedCatIds.has(c.id));
   renderCatTabs();
   renderVenues(null);
 }
