@@ -705,7 +705,7 @@ async function findHandoffCourier() {
   if (!link?.uid) { showToast('Курьер не найден','error'); return; }
   const courier=await dbGet('couriers',link.uid);
   if (!courier) { showToast('Этот пользователь не является курьером','error'); return; }
-  _handoffCourier={ ...courier, uid: link.id };
+  _handoffCourier={ ...courier, uid: link.uid };
   const foundEl=document.getElementById('handoff-courier-found');
   foundEl.style.display='';
   foundEl.innerHTML=`
