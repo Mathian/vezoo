@@ -50,17 +50,6 @@
   </div>
 </div>
 
-<!-- CITY SELECT -->
-<div id="s-city-select" class="screen no-nav">
-  <div class="content" style="padding-top:60px;gap:20px;max-width:480px;margin:0 auto">
-    <div class="logo" style="justify-content:center"><div class="logo-icon">🚀</div><div class="logo-text"><span>Vezoo</span></div></div>
-    <h2 style="text-align:center">Выберите город</h2>
-    <p class="text-dim" style="text-align:center;font-size:14px">Мы покажем заведения рядом с вами</p>
-    <div id="city-select-list" style="display:flex;flex-direction:column;gap:8px"></div>
-    <div class="loader" id="city-select-loader"><div class="spinner"></div></div>
-  </div>
-</div>
-
 <!-- HOME — Список заведений -->
 <div id="s-home" class="screen">
   <div class="page-hdr">
@@ -69,7 +58,6 @@
       <div class="logo-text"><span>Vezoo</span></div>
     </div>
     <div class="page-hdr-end" style="display:flex;align-items:center;gap:8px;flex:1;justify-content:flex-end;min-width:0;overflow:hidden">
-      <button onclick="openCityChange()" id="city-btn" title="Город">📍—</button>
       <button class="btn-icon btn-ghost" onclick="toggleFavFilter()" id="fav-filter-btn" title="Избранное" style="flex-shrink:0">🤍</button>
     </div>
   </div>
@@ -180,17 +168,7 @@
         <div>
           <div class="font-bold" id="profile-name">—</div>
           <div class="text-sm text-dim" id="profile-phone">—</div>
-          <div class="text-sm text-dim" id="profile-city-label" style="margin-top:2px">📍 —</div>
         </div>
-      </div>
-    </div>
-
-    <!-- City change -->
-    <div class="section">
-      <div class="section-title">Мой город</div>
-      <div class="flex items-center gap-2">
-        <span class="text-dim" id="settings-city-name">—</span>
-        <button class="btn btn-ghost btn-sm" onclick="openCityChange()">Изменить</button>
       </div>
     </div>
 

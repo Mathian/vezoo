@@ -6,7 +6,6 @@
 const STATE = { uid: null, user: null };
 let VENUES        = [];
 let CATEGORIES    = [];
-let ALL_CITIES    = [];
 let CURRENT_VENUE = null;
 let VENUE_MENU    = [];
 let CART          = {};
@@ -20,8 +19,7 @@ let _deliveryType    = 'delivery';
 let _intercomChecked = false;
 let _favFilter       = false;
 let _cartOpenedFrom  = 'venue';
-let _selectedCityId  = null;
-let _selectedCurrency = '₸';
+const _selectedCurrency = '₸';
 
 // ══════════════════════════════════════════════════════════
 //  BOOT
@@ -69,14 +67,6 @@ window.addEventListener('DOMContentLoaded', async () => {
     existing.name = autoName;
   }
   STATE.user = existing; _saveClientState();
-
-  // City check
-  if (!existing.cityId) {
-    await _showCitySelect();
-    return;
-  }
-  _selectedCityId   = existing.cityId;
-  _selectedCurrency = await getCurrencyForCity(_selectedCityId);
   initMain();
 });
 
@@ -107,61 +97,13 @@ async function submitAgree() {
   _saveClientState();
   if (btn) { btn.disabled = false; btn.classList.remove('btn-loading'); }
   document.getElementById('s-agree').style.display = 'none';
-  await _showCitySelect();
-}
-
-// ── City select ──
-async function _showCitySelect() {
-  showScreen('s-city-select');
-  document.getElementById('city-select-loader').style.display = 'flex';
-  document.getElementById('city-select-list').innerHTML = '';
-  ALL_CITIES = await getAllCities();
-  const countries = await loadCountries();
-  document.getElementById('city-select-loader').style.display = 'none';
-  if (!ALL_CITIES.length) {
-    document.getElementById('city-select-list').innerHTML =
-      '<div class="text-dim text-sm" style="text-align:center">Города ещё не добавлены.<br>Обратитесь к администратору.</div>';
-    return;
-  }
-  const grouped = {};
-  ALL_CITIES.forEach(c => {
-    const cid = c.countryId || '__';
-    if (!grouped[cid]) grouped[cid] = [];
-    grouped[cid].push(c);
-  });
-  let html = '';
-  for (const [cid, cities] of Object.entries(grouped)) {
-    const country = countries.find(c => c.id === cid);
-    if (country) html += `<div class="country-group-title">${country.name}</div>`;
-    html += cities.map(city => `
-      <div class="city-item" onclick="selectCity('${city.id}','${(city.name||'').replace(/'/g,"\\'")}','${country?.currency||'₸'}')">
-        <span class="font-bold">${city.name}</span>
-      </div>`).join('');
-  }
-  document.getElementById('city-select-list').innerHTML = html;
-}
-
-async function selectCity(cityId, cityName, currency) {
-  _selectedCityId   = cityId;
-  _selectedCurrency = currency || '₸';
-  STATE.user = { ...STATE.user, cityId, cityName };
-  await dbSet('users', STATE.uid, { cityId, cityName });
-  _saveClientState();
-  document.getElementById('city-btn').textContent = '📍 ' + cityName;
   initMain();
-}
-
-function openCityChange() {
-  _showCitySelect();
 }
 
 // ── Init main ──
 function initMain() {
   document.getElementById('main-nav').style.display = 'flex';
   FAVORITES = JSON.parse(localStorage.getItem('vez_favorites') || '[]');
-  if (STATE.user?.cityName) {
-    document.getElementById('city-btn').textContent = '📍 ' + STATE.user.cityName;
-  }
   loadVenues();
   watchActiveOrders();
   showScreen('s-home');
@@ -177,11 +119,6 @@ async function loadVenues() {
   ]);
   VENUES     = venues.filter(v => v.status === 'approved' && !v.blocked && v.onlineOrdersEnabled !== false);
   CATEGORIES = cats;
-  // Filter by city if selected
-  if (_selectedCityId) {
-    const cityVenues = VENUES.filter(v => v.cityId === _selectedCityId);
-    if (cityVenues.length) VENUES = cityVenues;
-  }
   renderCatTabs();
   renderVenues(null);
 }
@@ -658,7 +595,7 @@ async function submitOrder() {
     id: orderId, venueId, venueName: CURRENT_VENUE.name,
     clientUid: STATE.uid, clientName: STATE.user?.name || '', clientPhone: STATE.user?.phone || '',
     clientTgId: STATE.user?.tgId || '',
-    cityId: _selectedCityId || '', currency: _selectedCurrency,
+    currency: _selectedCurrency,
     items: recalcItems.map(c => ({ id: c.id, name: c.name, price: c.price, qty: c.qty, emoji: c.emoji, variantName: c.variantName || null })),
     total: freshTotal, deliveryPrice,
     address: isPickup ? null : { street, house, apt, hasIntercom: _intercomChecked },
@@ -973,9 +910,6 @@ function loadSettings2() {
   document.getElementById('profile-name').textContent   = u.name   || '—';
   document.getElementById('profile-phone').textContent  = u.phone  || '—';
   document.getElementById('profile-avatar').textContent = (u.name || '?')[0].toUpperCase();
-  document.getElementById('profile-city-label').textContent = u.cityName ? '📍 ' + u.cityName : '📍 —';
-  document.getElementById('settings-city-name').textContent  = u.cityName || '—';
-
   const saved = u.savedAddress;
   if (saved) {
     document.getElementById('saved-street').value = saved.street || '';
@@ -1011,7 +945,7 @@ async function saveAddress() {
 //  NAVIGATION
 // ══════════════════════════════════════════════════════════
 const _navHistory = [];
-const _NO_HISTORY_SCREENS = ['s-splash', 's-blocked', 's-no-uid', 's-agree', 's-city-select'];
+const _NO_HISTORY_SCREENS = ['s-splash', 's-blocked', 's-no-uid', 's-agree'];
 const _rawShowScreen = id => {
   document.querySelectorAll('.screen').forEach(s => s.classList.remove('active'));
   const el = document.getElementById(id);

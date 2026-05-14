@@ -8,13 +8,11 @@ let VENUE           = null;
 let MENU_ITEMS      = [];
 let MENU_CATS       = [];
 let ALL_CATS        = [];
-let ALL_CITIES      = [];
 let _editItemId     = null;
 let _variants       = [];
 let _hasVariants    = false;
 let _ordersUnsub    = null;
 let _coverDataUrl   = null;
-let _itemImgDataUrl = null;
 let _setCoverDataUrl = null;
 let _pinTarget      = null;
 let _sectionPinBuffer = '';
@@ -205,10 +203,7 @@ async function changeAdminPin() {
 //  VENUE CHECK
 // ══════════════════════════════════════════════════════════
 async function checkVenueAndInit() {
-  [ALL_CATS, ALL_CITIES] = await Promise.all([
-    dbGetAll('categories','order','asc'),
-    getAllCities()
-  ]);
+  ALL_CATS = await dbGetAll('categories','order','asc');
 
   // Check for pending admin invite
   const invite = await dbGet('admin_invites', STATE.uid);
@@ -265,31 +260,6 @@ async function declineAdminInvite() {
   const invite = await dbGet('admin_invites', STATE.uid);
   if (invite) await dbSet('admin_invites', STATE.uid, { status: 'declined' });
   showNoVenueScreen();
-}
-
-function _populateCitySelect(selId, currentCityId) {
-  const sel = document.getElementById(selId);
-  if (!sel) return;
-  // Group by country
-  const byCountry = {};
-  ALL_CITIES.forEach(c => {
-    if (!byCountry[c.countryId]) byCountry[c.countryId] = [];
-    byCountry[c.countryId].push(c);
-  });
-  let html = '<option value="">Выберите город...</option>';
-  Object.entries(byCountry).forEach(([cid, cities]) => {
-    const country = cities[0];
-    html += `<optgroup label="— ${cities[0]?.countryName||cid} —">`;
-    cities.forEach(city => {
-      html += `<option value="${city.id}" ${city.id === currentCityId ? 'selected' : ''}>${city.name}</option>`;
-    });
-    html += '</optgroup>';
-  });
-  // Fallback if no countries grouping available — just list cities
-  if (!html.includes('<option value="')) {
-    html = '<option value="">Выберите город...</option>' + ALL_CITIES.map(c => `<option value="${c.id}" ${c.id===currentCityId?'selected':''}>${c.name}</option>`).join('');
-  }
-  sel.innerHTML = html;
 }
 
 function previewCover(input, wrapId) {
@@ -395,16 +365,16 @@ function renderMenuItems(cat) {
   if (!items.length) { list.innerHTML='<div class="empty"><div class="empty-icon">🍽️</div><div class="empty-text">Нет позиций в меню.<br>Нажмите «+ Добавить».</div></div>'; return; }
   list.innerHTML = items.map(item => {
     const priceStr = item.variants?.length
-      ? item.variants.map(v=>`${v.name}: ${fmtPrice(v.price)}`).join('<br>')
+      ? item.variants.map(v=>`${v.name}: ${fmtPrice(v.price)}`).join(' · ')
       : fmtPrice(item.price);
-    const imgEl = item.imageUrl
-      ? `<div class="admin-item-img"><img src="${item.imageUrl}" onerror="this.parentElement.innerHTML='<span style=font-size:26px>${item.emoji||'🍽️'}</span>'"></div>`
-      : `<div class="admin-item-img"><span style="font-size:26px">${item.emoji||'🍽️'}</span></div>`;
+    const hiddenBadge = item.available===false
+      ? `<span style="display:inline-block;margin-left:6px;background:var(--danger-soft);color:var(--danger);font-size:10px;padding:1px 6px;border-radius:4px;font-weight:700;vertical-align:middle">Скрыт</span>`
+      : '';
     return `
       <div class="admin-item">
-        ${imgEl}
+        <div class="admin-item-emoji">${item.emoji||'🍽️'}</div>
         <div class="admin-item-body">
-          <div class="admin-item-name">${item.name}${item.available===false?' <span class="badge badge-cancelled" style="font-size:10px;padding:2px 6px">Скрыт</span>':''}</div>
+          <div class="admin-item-name">${item.name}${hiddenBadge}</div>
           <div class="admin-item-price">${priceStr}</div>
           ${item.category?`<div class="text-xs text-dim" style="margin-top:2px">${item.category}</div>`:''}
         </div>
@@ -417,16 +387,14 @@ function renderMenuItems(cat) {
 }
 
 function openAddItem() {
-  _editItemId=null; _variants=[]; _hasVariants=false; _itemImgDataUrl=null;
+  _editItemId=null; _variants=[]; _hasVariants=false;
   document.getElementById('item-sheet-title').textContent='Добавить позицию';
   document.getElementById('it-name').value='';
   document.getElementById('it-emoji').value='';
   document.getElementById('it-desc').value='';
-  document.getElementById('it-img-url').value='';
   document.getElementById('it-price').value='';
   _refreshCatSelect();
   document.getElementById('it-cat-custom').style.display='none';
-  document.getElementById('it-img-upload').innerHTML=`<input type="file" id="it-img-file" accept="image/*" onchange="previewItemImg(this)"><span class="img-upload-txt">📷 Загрузить фото</span>`;
   document.getElementById('variants-check-box').textContent='';
   document.getElementById('simple-price-wrap').style.display='';
   document.getElementById('variants-wrap').style.display='none';
@@ -437,19 +405,13 @@ function openAddItem() {
 async function openEditItem(itemId) {
   const item = MENU_ITEMS.find(i=>i.id===itemId);
   if (!item) return;
-  _editItemId=itemId; _variants=[...(item.variants||[])]; _hasVariants=_variants.length>0; _itemImgDataUrl=null;
+  _editItemId=itemId; _variants=[...(item.variants||[])]; _hasVariants=_variants.length>0;
   document.getElementById('item-sheet-title').textContent='Редактировать позицию';
   document.getElementById('it-name').value=item.name||'';
   document.getElementById('it-emoji').value=item.emoji||'';
   document.getElementById('it-desc').value=item.description||'';
-  document.getElementById('it-img-url').value=item.imageUrl||'';
   document.getElementById('it-price').value=item.price||'';
   _refreshCatSelect(item.category||'');
-  if (item.imageUrl) {
-    document.getElementById('it-img-upload').innerHTML=`<img src="${item.imageUrl}" style="position:absolute;inset:0;width:100%;height:100%;object-fit:cover"><input type="file" id="it-img-file" accept="image/*" onchange="previewItemImg(this)" style="position:absolute;inset:0;opacity:0;cursor:pointer">`;
-  } else {
-    document.getElementById('it-img-upload').innerHTML=`<input type="file" id="it-img-file" accept="image/*" onchange="previewItemImg(this)"><span class="img-upload-txt">📷 Загрузить фото</span>`;
-  }
   if (_hasVariants) {
     document.getElementById('variants-check-box').textContent='✓';
     document.getElementById('simple-price-wrap').style.display='none';
@@ -462,17 +424,6 @@ async function openEditItem(itemId) {
 function closeItemSheet(e) {
   if (e && e.target!==document.getElementById('item-overlay')) return;
   document.getElementById('item-overlay').classList.remove('open');
-}
-
-function previewItemImg(input) {
-  const file=input.files[0]; if (!file) return;
-  const reader=new FileReader();
-  reader.onload=e=>{
-    _itemImgDataUrl=e.target.result;
-    const wrap=document.getElementById('it-img-upload');
-    wrap.innerHTML=`<img src="${_itemImgDataUrl}" style="position:absolute;inset:0;width:100%;height:100%;object-fit:cover"><input type="file" id="it-img-file" accept="image/*" onchange="previewItemImg(this)" style="position:absolute;inset:0;opacity:0;cursor:pointer">`;
-  };
-  reader.readAsDataURL(file);
 }
 
 function toggleVariants() {
@@ -501,7 +452,6 @@ async function saveItem() {
   const cat   = _getCatValue();
   const emoji = document.getElementById('it-emoji').value.trim()||'🍽️';
   const desc  = document.getElementById('it-desc').value.trim();
-  const imgUrl = document.getElementById('it-img-url').value.trim()||_itemImgDataUrl||'';
   if (!name) { showToast('Введите название','warning'); return; }
   let price=0, variants=[];
   if (_hasVariants) {
@@ -513,7 +463,7 @@ async function saveItem() {
   const btn=document.getElementById('save-item-btn'); btn.disabled=true;
   const itemId=_editItemId||genId();
   const itemData = { id:itemId, venueId:VENUE.id, name, category:cat, emoji, description:desc,
-    imageUrl:imgUrl, price, variants, createdAt:new Date().toISOString() };
+    price, variants, createdAt:new Date().toISOString() };
   await dbSet('menu_items',itemId, itemData);
   // Update localStorage
   if (_editItemId) {
@@ -1026,11 +976,9 @@ async function saveVenueInfo() {
   const phone   =normPhone(document.getElementById('set-phone').value.trim());
   const desc    =document.getElementById('set-desc').value.trim();
   const cover   =document.getElementById('set-cover').value.trim()||_setCoverDataUrl||VENUE.coverUrl||'';
-  const cityId  =document.getElementById('set-city').value;
-  const city    =ALL_CITIES.find(c=>c.id===cityId);
   if (!name||!address) { showToast('Введите название и адрес','warning'); return; }
-  await dbSet('venues',VENUE.id,{ name,address,phone,description:desc,coverUrl:cover,cityId:cityId||'',cityName:city?.name||'' });
-  VENUE={...VENUE,name,address,phone,description:desc,coverUrl:cover,cityId,cityName:city?.name||''};
+  await dbSet('venues',VENUE.id,{ name,address,phone,description:desc,coverUrl:cover });
+  VENUE={...VENUE,name,address,phone,description:desc,coverUrl:cover};
   tgHaptic('success'); showToast('Сохранено','success');
 }
 
