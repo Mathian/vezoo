@@ -135,8 +135,8 @@ async function checkCourierStatus() {
 async function acceptVenueInvite() {
   if (!_venueInvite) return;
   await dbSet('courier_venue_links', STATE.uid, { status: 'confirmed', confirmedAt: new Date().toISOString() });
-  await dbSet('couriers', STATE.uid, { primaryVenueId: _venueInvite.venueId });
   COURIER_DATA = { ...COURIER_DATA, primaryVenueId: _venueInvite.venueId };
+  await dbSet('couriers', STATE.uid, COURIER_DATA);
   tgHaptic('success'); showToast('Вы теперь постоянный курьер этого кафе', 'success');
   _venueInvite = null; initMain();
 }
@@ -603,8 +603,8 @@ async function courierDeliver(orderId) {
     });
     // Increment total deliveries (from local data, no extra Firestore read)
     const total = (COURIER_DATA?.totalDeliveries || 0) + 1;
-    await dbSet('couriers', STATE.uid, { totalDeliveries: total });
     COURIER_DATA = { ...COURIER_DATA, totalDeliveries: total };
+    await dbSet('couriers', STATE.uid, COURIER_DATA);
     try { localStorage.setItem('vez_courier_data', JSON.stringify(COURIER_DATA)); } catch {}
     closeMyOrderSheet();
     tgHaptic('success'); showToast('Заказ доставлен!', 'success');
@@ -730,8 +730,8 @@ async function courierLeaveVenue() {
     else resolve(confirm('Отвязаться от заведения?'));
   });
   if (!ok) return;
-  await dbSet('couriers', STATE.uid, { primaryVenueId: null, primaryVenueName: null });
   COURIER_DATA = { ...COURIER_DATA, primaryVenueId: null, primaryVenueName: null };
+  await dbSet('couriers', STATE.uid, COURIER_DATA);
   document.getElementById('primary-venue-label').textContent = '—';
   if (_venueUnsub) { _venueUnsub(); _venueUnsub = null; }
   _venueOrders = [];
