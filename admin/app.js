@@ -99,6 +99,11 @@ function openStatsWithPin() {
   _openSectionPin();
 }
 
+function openChangePinWithPin() {
+  _pinTarget = 'changepin';
+  _openSectionPin();
+}
+
 function _openSectionPin() {
   const lockSec = isPinLockedOut('admin');
   if (lockSec > 0) { showToast(`Заблокировано на ${lockSec} сек.`, 'warning'); return; }
@@ -147,6 +152,8 @@ async function checkSectionPin() {
     } else if (_pinTarget === 'stats') {
       document.getElementById('stats-overlay').classList.add('open');
       loadStats();
+    } else if (_pinTarget === 'changepin') {
+      document.getElementById('change-pin-overlay').classList.add('open');
     }
     _pinTarget = null;
   } else {
@@ -176,6 +183,11 @@ function closeStatsOverlay(e) {
   document.getElementById('stats-overlay').classList.remove('open');
 }
 
+function closeChangePinOverlay(e) {
+  if (e && e.target !== document.getElementById('change-pin-overlay')) return;
+  document.getElementById('change-pin-overlay').classList.remove('open');
+}
+
 // ── Menu localStorage helpers ──
 function _loadMenuFromStorage() { try { return JSON.parse(localStorage.getItem('vez_admin_menu_' + (VENUE?.id||'')) || '[]'); } catch { return []; } }
 function _saveMenuToStorage(items) { try { localStorage.setItem('vez_admin_menu_' + (VENUE?.id||''), JSON.stringify(items)); } catch {} }
@@ -185,6 +197,7 @@ async function changeAdminPin() {
   if (val.length !== 4 || !/^\d{4}$/.test(val)) { showToast('PIN должен быть 4 цифры', 'warning'); return; }
   await savePin('admin', val);
   document.getElementById('new-pin-input').value = '';
+  document.getElementById('change-pin-overlay').classList.remove('open');
   tgHaptic('success'); showToast('PIN изменён', 'success');
 }
 
@@ -670,7 +683,8 @@ async function adminHandOverCourier(orderId) {
   const orders=await dbQuery('orders','venueId','==',VENUE.id);
   const order=orders.find(o=>o.id===orderId);
   const courierName=order?.courierName||'Курьер';
-  await dbSet('orders',orderId,{status:'delivering',handedOverAt:new Date().toISOString(),clientNotification:{type:'delivering',seen:false,message:`Курьер ${courierName} везёт ваш заказ!`}});
+  const courierPhone=order?.courierPhone||'';
+  await dbSet('orders',orderId,{status:'delivering',handedOverAt:new Date().toISOString(),clientNotification:{type:'delivering',seen:false,message:`Курьер ${courierName}${courierPhone?' · '+courierPhone:''} везёт ваш заказ!`}});
   closeOrderSheet(); tgHaptic('success'); showToast(`Заказ передан курьеру ${courierName}`,'success');
   await loadOrders(_ordersTab);
 }
@@ -702,7 +716,6 @@ function openHandoffFlow() {
   document.getElementById('handoff-courier-found').style.display='none';
   document.getElementById('handoff-orders-section').style.display='none';
   document.getElementById('handoff-phone').value='';
-  document.getElementById('handoff-warn').style.display='none';
   closeOrderSheet();
   _openSheet('courier-overlay');
 }
@@ -753,7 +766,7 @@ async function findHandoffCourier() {
   document.getElementById('handoff-orders-section').style.display='';
   const ordList=document.getElementById('handoff-orders-list');
   ordList.innerHTML=orders.map(o=>`
-    <div class="handoff-order-row" id="ho_${o.id}" onclick="toggleHandoffOrder('${o.id}','${(o.courierUid||'')}')">
+    <div class="handoff-order-row" id="ho_${o.id}" onclick="toggleHandoffOrder('${o.id}')">
       <div style="flex:1">
         <div style="font-weight:600;font-size:14px">#${(o.id||'').slice(-6)} — ${o.clientName||'Клиент'}</div>
         <div style="font-size:12px;color:var(--text-dim)">${statusLabel(o.status)} · ${fmtPrice((o.total||0)+(o.deliveryPrice||0))}</div>
@@ -762,7 +775,7 @@ async function findHandoffCourier() {
     </div>`).join('');
 }
 
-function toggleHandoffOrder(orderId, existingCourierUid) {
+function toggleHandoffOrder(orderId) {
   if (_handoffSelectedOrders.has(orderId)) {
     _handoffSelectedOrders.delete(orderId);
     document.getElementById('ho_'+orderId).classList.remove('selected');
@@ -773,11 +786,6 @@ function toggleHandoffOrder(orderId, existingCourierUid) {
     document.getElementById('ho_'+orderId).classList.add('selected');
     document.getElementById('ho_chk_'+orderId).textContent='●';
     document.getElementById('ho_chk_'+orderId).style.color='var(--primary)';
-    // Warn if order already assigned to different courier
-    if (existingCourierUid && existingCourierUid !== _handoffCourier?.uid) {
-      const warnEl=document.getElementById('handoff-warn');
-      warnEl.style.display=''; warnEl.textContent='⚠️ Один из заказов уже назначен другому курьеру. Переназначение отменит предыдущее назначение.';
-    }
   }
 }
 
@@ -786,7 +794,7 @@ async function confirmHandoff() {
   const cName=_handoffCourier.name||'Курьер';
   const cPhone=_handoffCourier.phone||'';
   for (const orderId of _handoffSelectedOrders) {
-    await dbSet('orders',orderId,{ status:'delivering', courierUid:_handoffCourier.uid, courierName:cName, courierPhone:cPhone, handedOverAt:new Date().toISOString(), clientNotification:{type:'delivering',seen:false,message:`Курьер ${cName} везёт ваш заказ!`} });
+    await dbSet('orders',orderId,{ status:'delivering', courierUid:_handoffCourier.uid, courierName:cName, courierPhone:cPhone, handedOverAt:new Date().toISOString(), clientNotification:{type:'delivering',seen:false,message:`Курьер ${cName}${cPhone?' · '+cPhone:''} везёт ваш заказ!`} });
   }
   closeCourierSheet(); tgHaptic('success');
   showToast(`Передано курьеру ${cName}: ${_handoffSelectedOrders.size} заказов`,'success');
@@ -909,23 +917,6 @@ async function loadStats() {
     <div class="stat-card"><div class="stat-val text-warning">${todayReturns.length}</div><div class="stat-lbl">Возвраты</div></div>
     <div class="stat-card" style="grid-column:span 2"><div class="stat-val text-primary">${fmtPrice(todayDelSum)}</div><div class="stat-lbl">Сумма доставок</div></div>`;
 
-  // TOP-10 positions today
-  const itemFreq = {};
-  for (const o of todayDelivered) {
-    for (const it of (o.items||[])) {
-      const key = `${it.category||''}||${it.name}||${it.variantName||''}`;
-      if (!itemFreq[key]) itemFreq[key] = { category:it.category||'', name:it.name, variant:it.variantName||'', count:0 };
-      itemFreq[key].count += it.qty||1;
-    }
-  }
-  const top10 = Object.values(itemFreq).sort((a,b)=>b.count-a.count).slice(0,10);
-  const topEl = document.getElementById('stats-top-items');
-  topEl.innerHTML = top10.length
-    ? top10.map(it => {
-        const label = (it.category ? it.category+' ' : '') + it.name + (it.variant?' ('+it.variant+')':'');
-        return `<div class="list-item" style="cursor:default"><div class="li-body"><div class="li-title">${label}</div></div><div class="li-price">${it.count} шт</div></div>`;
-      }).join('')
-    : '<div class="text-dim text-sm" style="padding:8px 0">Нет данных за сегодня</div>';
 }
 
 async function generateAdminReport() {
@@ -1025,12 +1016,6 @@ function copyAdminReport() {
 // ══════════════════════════════════════════════════════════
 async function loadSettingsScreen() {
   if (!VENUE) return;
-
-  // QR code
-  const phone = STATE.user?.phone || '';
-  renderQrCode('admin-qr-img', phone || STATE.uid, 180);
-  document.getElementById('admin-qr-phone').textContent = phone || '—';
-
   await loadPermCouriers();
   await loadBlacklist();
 }

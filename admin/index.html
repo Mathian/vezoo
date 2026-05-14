@@ -107,14 +107,6 @@
       <button class="btn btn-secondary" style="width:100%" onclick="openStatsWithPin()">📊 Статистика</button>
     </div>
     <div class="section">
-      <div class="section-title">Мой QR-код</div>
-      <div class="qr-container" id="admin-qr-container">
-        <img class="qr-code-img" id="admin-qr-img" src="" alt="QR">
-        <div class="qr-label">Код для передачи суперадминистратору</div>
-        <div class="qr-phone" id="admin-qr-phone">—</div>
-      </div>
-    </div>
-    <div class="section">
       <div class="section-title">Постоянные курьеры</div>
       <div id="perm-couriers-list" style="display:flex;flex-direction:column;gap:6px;margin-bottom:10px"></div>
       <div class="field">
@@ -138,11 +130,7 @@
     </div>
     <div class="section">
       <div class="section-title">Безопасность</div>
-      <div class="card card-body" style="display:flex;flex-direction:column;gap:10px">
-        <div style="font-weight:600;font-size:14px">Сменить PIN</div>
-        <div class="field"><label>Новый PIN (4 цифры)</label><input class="inp" id="new-pin-input" type="number" inputmode="numeric" maxlength="4" placeholder="0000" style="letter-spacing:8px;font-size:20px;text-align:center"></div>
-        <button class="btn btn-outline btn-sm" onclick="changeAdminPin()">Сохранить PIN</button>
-      </div>
+      <button class="btn btn-secondary" style="width:100%" onclick="openChangePinWithPin()">🔑 Сменить ПИН</button>
     </div>
   </div>
 </div>
@@ -158,128 +146,13 @@
   </div>
 </div>
 
-<!-- ITEM SHEET -->
-<div class="overlay" id="item-overlay" onclick="closeItemSheet(event)">
-  <div class="sheet" id="item-sheet">
-    <div class="sheet-handle"></div>
-    <div class="sheet-title" id="item-sheet-title">Добавить позицию</div>
-    <div style="display:flex;flex-direction:column;gap:12px">
-      <div class="field"><label>Название *</label><input class="inp" id="it-name" placeholder="Название блюда" maxlength="100"></div>
-      <div class="inp-row">
-        <div class="field">
-          <label>Категория меню</label>
-          <select class="inp" id="it-cat" onchange="handleCatChange(this)"></select>
-          <input class="inp" id="it-cat-custom" placeholder="Название новой категории..." style="display:none;margin-top:6px" maxlength="40">
-        </div>
-        <div class="field"><label>Эмодзи</label><input class="inp" id="it-emoji" placeholder="🍕" maxlength="4" style="text-align:center;font-size:22px"></div>
-      </div>
-      <div class="field"><label>Описание</label><textarea class="inp" id="it-desc" rows="2" placeholder="Краткое описание..." maxlength="300"></textarea></div>
-<div class="field"><label>Ссылка на фото</label><input class="inp" id="it-img-url" placeholder="https://..." type="url"></div>
-      <div class="img-upload" id="it-img-upload" onclick="document.getElementById('it-img-file').click()">
-        <input type="file" id="it-img-file" accept="image/*" onchange="previewItemImg(this)">
-        <span class="img-upload-txt">📷 Загрузить фото</span>
-      </div>
-      <!-- Price or Variants -->
-      <div>
-        <div class="flex items-center justify-between" style="margin-bottom:8px">
-          <span class="section-title">Цена</span>
-          <label class="check-row" id="variants-toggle-row" onclick="toggleVariants()">
-            <div class="check-box" id="variants-check-box" style="width:18px;height:18px;font-size:11px"></div>
-            <span class="check-label text-sm">С вариантами</span>
-          </label>
-        </div>
-        <div id="simple-price-wrap">
-          <div class="field"><label>Цена</label><input class="inp" id="it-price" type="number" placeholder="1500" min="0"></div>
-        </div>
-        <div id="variants-wrap" style="display:none">
-          <div id="variants-list" style="display:flex;flex-direction:column;gap:6px;margin-bottom:8px"></div>
-          <button class="btn btn-ghost btn-sm" onclick="addVariant()">+ Добавить вариант</button>
-        </div>
-      </div>
-      <div class="btn-row">
-        <button class="btn btn-ghost" onclick="closeItemSheet()">Отмена</button>
-        <button class="btn btn-primary" id="save-item-btn" onclick="saveItem()">Сохранить</button>
-      </div>
-    </div>
-  </div>
-</div>
-
-<!-- ORDER DETAIL SHEET -->
-<div class="overlay" id="order-overlay" onclick="closeOrderSheet(event)">
-  <div class="sheet">
-    <div class="sheet-handle"></div>
-    <div id="order-detail-content"></div>
-  </div>
-</div>
-
-<!-- COURIER SELECT SHEET (handoff) -->
-<div class="overlay" id="courier-overlay" onclick="closeCourierSheet(event)">
-  <div class="sheet">
-    <div class="sheet-handle"></div>
-    <div class="sheet-title">Передать курьеру</div>
-    <div id="handoff-courier-section">
-      <div class="btn-row" style="margin-bottom:14px">
-        <button class="btn btn-secondary btn-sm" onclick="handoffEnterManual()">✏️ Ввести вручную</button>
-        <button class="btn btn-primary btn-sm" onclick="handoffScanQr()">📷 Сканировать QR</button>
-      </div>
-      <div id="handoff-manual-wrap" style="display:none;margin-bottom:12px">
-        <div class="field">
-          <label>Телефон курьера</label>
-          <input class="inp" id="handoff-phone" type="tel" placeholder="+7 (777) 000-00-00">
-          <button class="btn btn-secondary btn-sm" style="margin-top:8px;width:100%" onclick="findHandoffCourier()">Найти курьера</button>
-        </div>
-      </div>
-      <div id="handoff-courier-found" style="display:none;margin-bottom:14px"></div>
-    </div>
-    <div id="handoff-orders-section" style="display:none">
-      <div class="section-title" style="margin-bottom:8px">Выберите заказы для передачи</div>
-      <div id="handoff-orders-list" style="display:flex;flex-direction:column;gap:6px;margin-bottom:12px"></div>
-      <div id="handoff-warn" style="display:none" class="handoff-warn" style="margin-bottom:10px"></div>
-      <button class="btn btn-primary" onclick="confirmHandoff()">✅ Передать выбранные</button>
-    </div>
-  </div>
-</div>
-
-<!-- MANUAL ORDER OVERLAY -->
-<div class="overlay" id="manual-order-overlay" onclick="closeManualOrder(event)">
-  <div class="sheet">
-    <div class="sheet-handle"></div>
-    <div class="sheet-title">Заказ по телефону</div>
-    <div style="display:flex;flex-direction:column;gap:12px">
-      <div class="field">
-        <label>Телефон клиента *</label>
-        <input class="inp" id="mo-phone" type="tel" placeholder="+7 (777) 000-00-00" oninput="moPhoneInput(this)">
-        <div id="mo-autocomplete" class="autocomplete-dropdown" style="display:none"></div>
-      </div>
-      <div class="field"><label>Имя клиента</label><input class="inp" id="mo-client-name" placeholder="Имя"></div>
-      <div class="inp-row">
-        <div class="field"><label>Улица *</label><input class="inp" id="mo-street" placeholder="ул. Абая"></div>
-        <div class="field" style="max-width:88px"><label>Дом *</label><input class="inp" id="mo-house" placeholder="10"></div>
-        <div class="field" style="max-width:76px"><label>Кв.</label><input class="inp" id="mo-apt" placeholder="5" type="number" min="1"></div>
-      </div>
-      <div class="field"><label>Сумма заказа *</label><input class="inp" id="mo-amount" type="number" placeholder="0" min="0"></div>
-      <div class="field"><label>Способ оплаты</label>
-        <select class="inp" id="mo-payment">
-          <option value="cash">💵 Наличные</option>
-          <option value="card">💳 Карта</option>
-        </select>
-      </div>
-      <div class="field"><label>Комментарий</label><textarea class="inp" id="mo-comment" rows="2" placeholder="Пожелания к заказу..."></textarea></div>
-      <div class="btn-row">
-        <button class="btn btn-ghost" onclick="closeManualOrder()">Отмена</button>
-        <button class="btn btn-primary" onclick="submitManualOrder()">Оформить заказ</button>
-      </div>
-    </div>
-  </div>
-</div>
-
 <!-- MENU OVERLAY (fullscreen) -->
 <div class="overlay" id="menu-overlay" onclick="closeMenuOverlay(event)">
   <div class="sheet" style="height:92vh;display:flex;flex-direction:column;overflow:hidden">
     <div class="sheet-handle"></div>
     <div style="display:flex;align-items:center;justify-content:space-between;padding:0 4px 12px">
       <h2 style="margin:0;font-size:18px">Меню</h2>
-      <button class="btn btn-primary btn-sm" onclick="openAddItem()">+ Добавить</button>
+      <button class="btn btn-primary btn-sm" style="flex-shrink:0;width:auto" onclick="openAddItem()">+ Добавить</button>
     </div>
     <div id="menu-cats-tabs" class="cat-tabs" style="margin:0 0 8px;flex-shrink:0"></div>
     <div id="menu-items-list" style="display:flex;flex-direction:column;gap:8px;padding:0 0 16px;overflow-y:auto;flex:1"></div>
@@ -295,7 +168,7 @@
       <div class="section-title">Сегодня</div>
       <div class="stats-grid" id="stats-today-grid"></div>
       <div class="section-title" style="margin-top:4px">Отчёт за день</div>
-      <div class="card card-body" style="padding:10px 14px">
+      <div class="card card-body" style="padding:10px 14px;flex-shrink:0">
         <label style="font-size:11px;color:var(--text-dim)">Дата</label>
         <input class="inp" type="date" id="rep-date" style="padding:6px 10px;font-size:13px;margin-top:4px">
       </div>
@@ -304,8 +177,6 @@
         <pre id="admin-report-text" style="white-space:pre-wrap;font-family:monospace;font-size:12px;background:var(--card-bg);border:1px solid var(--border);border-radius:12px;padding:14px;line-height:1.7;overflow-x:auto;margin:0"></pre>
         <button class="btn btn-ghost btn-sm" onclick="copyAdminReport()">📋 Копировать отчёт</button>
       </div>
-      <div class="section-title" style="margin-top:4px">ТОП-10 позиций за сегодня</div>
-      <div id="stats-top-items"></div>
     </div>
   </div>
 </div>
@@ -323,7 +194,7 @@
       <div class="pin-dot" id="spd2"></div>
       <div class="pin-dot" id="spd3"></div>
     </div>
-    <div class="pin-pad">
+    <div class="pin-pad" style="max-width:240px;margin:0 auto">
       <button class="pin-btn" onclick="sectionPinInput('1')">1</button>
       <button class="pin-btn" onclick="sectionPinInput('2')">2</button>
       <button class="pin-btn" onclick="sectionPinInput('3')">3</button>
@@ -338,6 +209,135 @@
       <button class="pin-btn del" onclick="sectionPinDelete()">⌫</button>
     </div>
     <button class="btn btn-ghost btn-sm" style="width:100%;margin-top:12px" onclick="closeSectionPin()">Отмена</button>
+  </div>
+</div>
+
+<!-- CHANGE PIN OVERLAY -->
+<div class="overlay" id="change-pin-overlay" onclick="closeChangePinOverlay(event)">
+  <div class="sheet">
+    <div class="sheet-handle"></div>
+    <div class="sheet-title">Сменить PIN</div>
+    <div style="display:flex;flex-direction:column;gap:12px">
+      <div class="field">
+        <label>Новый PIN (4 цифры)</label>
+        <input class="inp" id="new-pin-input" type="number" inputmode="numeric" maxlength="4" placeholder="0000" style="letter-spacing:8px;font-size:20px;text-align:center">
+      </div>
+      <div class="btn-row">
+        <button class="btn btn-ghost" onclick="closeChangePinOverlay()">Отмена</button>
+        <button class="btn btn-primary" onclick="changeAdminPin()">Сохранить PIN</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ITEM OVERLAY -->
+<div class="overlay" id="item-overlay" onclick="closeItemSheet(event)">
+  <div class="sheet" style="max-height:90vh;overflow-y:auto">
+    <div class="sheet-handle"></div>
+    <div class="sheet-title" id="item-sheet-title">Добавить позицию</div>
+    <div style="display:flex;flex-direction:column;gap:12px">
+      <div class="field"><label>Название *</label><input class="inp" id="it-name" placeholder="Пицца Маргарита" maxlength="60"></div>
+      <div class="field"><label>Эмодзи</label><input class="inp" id="it-emoji" placeholder="🍕" maxlength="4" style="font-size:24px;text-align:center"></div>
+      <div class="field"><label>Описание</label><textarea class="inp" id="it-desc" rows="2" placeholder="Краткое описание..." style="resize:none"></textarea></div>
+      <div class="field">
+        <label>Фото</label>
+        <div id="it-img-upload" style="position:relative;width:100%;height:100px;border:2px dashed var(--border);border-radius:12px;display:flex;align-items:center;justify-content:center;overflow:hidden;cursor:pointer">
+          <input type="file" id="it-img-file" accept="image/*" onchange="previewItemImg(this)">
+          <span class="img-upload-txt">📷 Загрузить фото</span>
+        </div>
+      </div>
+      <div class="field"><label>URL фото (необязательно)</label><input class="inp" id="it-img-url" placeholder="https://..." type="url"></div>
+      <div class="field">
+        <label>Категория</label>
+        <select class="inp" id="it-cat" onchange="handleCatChange(this)">
+          <option value="">— без категории —</option>
+          <option value="__new__">✏️ Новая категория...</option>
+        </select>
+        <input class="inp" id="it-cat-custom" placeholder="Новая категория" style="display:none;margin-top:6px">
+      </div>
+      <label style="cursor:pointer;display:flex;align-items:center;gap:8px;padding:8px 0" onclick="toggleVariants()">
+        <div class="check-box" id="variants-check-box" style="width:20px;height:20px;border-radius:6px;border:2px solid var(--border);display:flex;align-items:center;justify-content:center;font-size:13px;color:var(--primary);flex-shrink:0"></div>
+        <span style="font-size:14px">Варианты (разные цены)</span>
+      </label>
+      <div id="simple-price-wrap" class="field"><label>Цена *</label><input class="inp" id="it-price" type="number" min="0" placeholder="0"></div>
+      <div id="variants-wrap" style="display:none;flex-direction:column;gap:8px">
+        <div id="variants-list"></div>
+        <button class="btn btn-ghost btn-sm" onclick="addVariant()">+ Добавить вариант</button>
+      </div>
+      <div class="btn-row">
+        <button class="btn btn-ghost" onclick="document.getElementById('item-overlay').classList.remove('open')">Отмена</button>
+        <button class="btn btn-primary" id="save-item-btn" onclick="saveItem()">Сохранить</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ORDER DETAIL OVERLAY -->
+<div class="overlay" id="order-overlay" onclick="closeOrderSheet(event)">
+  <div class="sheet" style="max-height:90vh;overflow-y:auto">
+    <div class="sheet-handle"></div>
+    <div id="order-detail-content"></div>
+  </div>
+</div>
+
+<!-- COURIER HANDOFF OVERLAY -->
+<div class="overlay" id="courier-overlay" onclick="closeCourierSheet(event)">
+  <div class="sheet">
+    <div class="sheet-handle"></div>
+    <h2 style="font-size:17px;margin-bottom:16px">Передать заказ курьеру</h2>
+    <div style="display:flex;gap:8px;margin-bottom:12px">
+      <button class="btn btn-secondary btn-sm" style="flex:1" onclick="handoffEnterManual()">📱 Ввести номер</button>
+      <button class="btn btn-secondary btn-sm" style="flex:1" onclick="handoffScanQr()">📷 Сканировать QR</button>
+    </div>
+    <div id="handoff-manual-wrap" style="display:none;margin-bottom:12px">
+      <div class="field" style="margin:0">
+        <label>Телефон курьера</label>
+        <div style="display:flex;gap:8px;align-items:flex-start">
+          <input class="inp" id="handoff-phone" type="tel" placeholder="+7 (777) 000-00-00" style="flex:1">
+          <button class="btn btn-secondary btn-sm btn-icon" onclick="findHandoffCourier()" style="height:46px;width:46px;flex-shrink:0;margin-top:0;font-size:18px">🔍</button>
+        </div>
+      </div>
+    </div>
+    <div id="handoff-courier-found" style="display:none;margin-bottom:12px"></div>
+    <div id="handoff-orders-section" style="display:none">
+      <div class="section-title" style="margin-bottom:8px">Выберите заказы</div>
+      <div id="handoff-orders-list" style="display:flex;flex-direction:column;gap:6px;margin-bottom:12px"></div>
+      <button class="btn btn-primary" onclick="confirmHandoff()">✅ Передать выбранные</button>
+    </div>
+  </div>
+</div>
+
+<!-- MANUAL ORDER OVERLAY -->
+<div class="overlay" id="manual-order-overlay" onclick="closeManualOrder(event)">
+  <div class="sheet" style="max-height:90vh;overflow-y:auto">
+    <div class="sheet-handle"></div>
+    <div class="sheet-title">Создать заказ вручную</div>
+    <div style="display:flex;flex-direction:column;gap:12px">
+      <div class="field">
+        <label>Телефон клиента *</label>
+        <input class="inp" id="mo-phone" type="tel" placeholder="+7 (777) 000-00-00" oninput="moPhoneInput(this)">
+        <div id="mo-autocomplete" style="display:none;background:var(--card-bg);border:1px solid var(--border);border-radius:10px;margin-top:4px;overflow:hidden"></div>
+      </div>
+      <div class="field"><label>Имя клиента</label><input class="inp" id="mo-client-name" placeholder="Иван"></div>
+      <div class="field"><label>Улица *</label><input class="inp" id="mo-street" placeholder="ул. Абая"></div>
+      <div style="display:flex;gap:8px">
+        <div class="field" style="flex:1;margin:0"><label>Дом *</label><input class="inp" id="mo-house" placeholder="10"></div>
+        <div class="field" style="flex:1;margin:0"><label>Кв./офис</label><input class="inp" id="mo-apt" placeholder="5"></div>
+      </div>
+      <div class="field"><label>Сумма заказа *</label><input class="inp" id="mo-amount" type="number" min="0" placeholder="0"></div>
+      <div class="field">
+        <label>Оплата</label>
+        <select class="inp" id="mo-payment">
+          <option value="cash">💵 Наличные</option>
+          <option value="card">💳 Карта</option>
+        </select>
+      </div>
+      <div class="field"><label>Комментарий</label><textarea class="inp" id="mo-comment" rows="2" placeholder="Примечания..." style="resize:none"></textarea></div>
+      <div class="btn-row">
+        <button class="btn btn-ghost" onclick="closeManualOrder()">Отмена</button>
+        <button class="btn btn-primary" onclick="submitManualOrder()">Создать заказ</button>
+      </div>
+    </div>
   </div>
 </div>
 
