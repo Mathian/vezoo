@@ -4,13 +4,13 @@
    ============================================================ */
 
 const FIREBASE_CONFIG = {
-  apiKey:            "AIzaSyB76Z0ZjEo_liUmqp_De-Eg5WhaOo9fXDA",
-  authDomain:        "floressa-f3f6a.firebaseapp.com",
-  projectId:         "floressa-f3f6a",
-  storageBucket:     "floressa-f3f6a.firebasestorage.app",
-  messagingSenderId: "347021419809",
-  appId:             "1:347021419809:web:acfd49b2b500ce3f9b4a60",
-  measurementId:     "G-FDF6GSNPWR"
+  apiKey:            "AIzaSyCVawrhK5yZCwb6wCfmZ9fiD7_nolsiwak",
+  authDomain:        "vezoo-delivery.firebaseapp.com",
+  projectId:         "vezoo-delivery",
+  storageBucket:     "vezoo-delivery.firebasestorage.app",
+  messagingSenderId: "619257731960",
+  appId:             "1:619257731960:web:ddd1500325d6c1b462868d",
+  measurementId:     "G-LSKS6HCHPV"
 };
 
 const WEBAPP_BASE = "https://mathian.github.io/vezoo";
@@ -54,6 +54,46 @@ async function dbDelete(col, id) {
   if (!_fbR) return;
   try { await db.collection(col).doc(String(id)).delete(); }
   catch (e) { console.warn(`[DB] del ${col}/${id}:`, e.message); }
+}
+
+// ── Update (dot-notation nested fields) ──
+async function dbUpdate(col, id, dotFields) {
+  // Update localStorage cache
+  try {
+    const key = `${PFX}${col}_${id}`;
+    const cached = JSON.parse(localStorage.getItem(key) || '{}');
+    for (const [k, v] of Object.entries(dotFields)) {
+      const parts = k.split('.');
+      let obj = cached;
+      for (let i = 0; i < parts.length - 1; i++) {
+        if (!obj[parts[i]] || typeof obj[parts[i]] !== 'object') obj[parts[i]] = {};
+        obj = obj[parts[i]];
+      }
+      obj[parts[parts.length - 1]] = v;
+    }
+    localStorage.setItem(key, JSON.stringify(cached));
+  } catch {}
+  if (!_fbR) return;
+  try { await db.collection(col).doc(String(id)).update(dotFields); }
+  catch (e) {
+    // Doc may not exist yet — fall back to set+merge
+    if (e.code === 'not-found' || (e.message && e.message.includes('No document'))) {
+      const plain = {};
+      for (const [k, v] of Object.entries(dotFields)) {
+        const parts = k.split('.');
+        let obj = plain;
+        for (let i = 0; i < parts.length - 1; i++) {
+          if (!obj[parts[i]]) obj[parts[i]] = {};
+          obj = obj[parts[i]];
+        }
+        obj[parts[parts.length - 1]] = v;
+      }
+      try { await db.collection(col).doc(String(id)).set(plain, { merge: true }); }
+      catch (e2) { console.warn(`[DB] update/set ${col}/${id}:`, e2.message); }
+    } else {
+      console.warn(`[DB] update ${col}/${id}:`, e.message);
+    }
+  }
 }
 
 // ── Read one ──
@@ -140,7 +180,7 @@ function onDocSnap(col, id, cb) {
     const d = await dbGet(col, id);
     const j = JSON.stringify(d);
     if (j !== last) { last = j; cb(d); }
-  }, 2000);
+  }, 15000);
   return () => clearInterval(t);
 }
 
@@ -154,7 +194,7 @@ function onQuerySnap(col, field, op, value, cb) {
       );
     } catch {}
   }
-  const t = setInterval(async () => cb(await dbQuery(col, field, op, value)), 2000);
+  const t = setInterval(async () => cb(await dbQuery(col, field, op, value)), 15000);
   return () => clearInterval(t);
 }
 
@@ -170,8 +210,69 @@ function onColSnap(col, cb, orderBy = null, dir = 'asc') {
       );
     } catch {}
   }
-  const t = setInterval(async () => cb(await dbGetAll(col, orderBy, dir)), 3000);
+  const t = setInterval(async () => cb(await dbGetAll(col, orderBy, dir)), 15000);
   return () => clearInterval(t);
+}
+
+// ── Real-time query listener (multiple conditions) ──
+// NOTE: Requires composite Firestore index for multi-field queries.
+// E.g. for orders: venueId ASC + active ASC
+function onQuerySnapWhere(col, conditions, cb) {
+  if (_fbR) {
+    try {
+      let q = db.collection(col);
+      for (const [f, op, v] of conditions) q = q.where(f, op, v);
+      return q.onSnapshot(
+        s => cb(s.docs.map(d => ({ id: d.id, ...d.data() }))),
+        e => console.warn('[DB] qSnapWhere:', e.message)
+      );
+    } catch {}
+  }
+  const t = setInterval(async () => cb(await dbQueryWhere(col, conditions)), 15000);
+  return () => clearInterval(t);
+}
+
+// ── Courier helpers (Дыра №7) ──
+// Each courier keeps its individual doc (needed for status queries in superadmin).
+// Additionally, all couriers are mirrored into couriers/all: { couriers: { uid: {...} } }
+// for fast bulk lookups (avoids N separate Firestore reads per courier list).
+async function getCourier(uid) {
+  // Try batch document first (one cached read covers many couriers)
+  const all = await dbGet('couriers', 'all');
+  if (all?.couriers?.[uid]) return all.couriers[uid];
+  // Fallback: individual doc
+  return await dbGet('couriers', uid);
+}
+async function getCourierAll() {
+  const doc = await dbGet('couriers', 'all');
+  if (doc?.couriers && Object.keys(doc.couriers).length > 0) return doc.couriers;
+  // Rebuild from locally cached individual courier docs
+  const map = {};
+  for (let i = 0; i < localStorage.length; i++) {
+    const key = localStorage.key(i);
+    if (!key || !key.startsWith(`${PFX}couriers_`) || key === `${PFX}couriers_all`) continue;
+    try { const c = JSON.parse(localStorage.getItem(key)); if (c?.uid) map[c.uid] = c; } catch {}
+  }
+  return map;
+}
+async function setCourier(uid, data) {
+  const payload = { ...data, _upd: new Date().toISOString() };
+  // Write to individual doc (superadmin queries by status)
+  await dbSet('couriers', uid, payload);
+  // Mirror into batch doc (fast bulk lookup for admin/courier apps)
+  await dbUpdate('couriers', 'all', { [`couriers.${uid}`]: payload });
+}
+
+// ── Version bumping (Дыры №2, №3, №4) ──
+// field examples: 'venues', 'menu_venueId'
+async function bumpVersion(field) {
+  if (!_fbR) return;
+  try {
+    await db.collection('settings').doc('versions').set(
+      { [field]: firebase.firestore.FieldValue.increment(1) },
+      { merge: true }
+    );
+  } catch (e) { console.warn('[Version] bump failed:', e.message); }
 }
 
 // ── Generate unique ID ──

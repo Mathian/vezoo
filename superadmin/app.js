@@ -346,7 +346,9 @@ async function _loadSaVenueCouriers(venueId) {
   if (!listEl) return;
   const links = await dbQuery('courier_venue_links','venueId','==',venueId);
   if (!links.length) { listEl.innerHTML = '<div class="text-dim text-sm">Нет постоянных курьеров</div>'; return; }
-  const rows = await Promise.all(links.map(async l => { const c = await dbGet('couriers',l.uid); return {...l, courierName:c?.name||l.uid, phone:c?.phone||''}; }));
+  // Дыра №7: one read for all couriers (couriers/all batch doc)
+  const allCouriers = await getCourierAll();
+  const rows = links.map(l => { const c = allCouriers[l.uid]; return {...l, courierName:c?.name||l.uid, phone:c?.phone||''}; });
   listEl.innerHTML = rows.map(r => `
     <div class="flex items-center gap-2">
       <div class="li-icon yellow" style="width:34px;height:34px;font-size:16px">🚴</div>
@@ -413,6 +415,7 @@ async function saveSaVenue(venueId) {
     ...(isNew ? { createdAt: new Date().toISOString() } : {})
   };
   await dbSet('venues', vId, data);
+  bumpVersion('venues'); // Дыра №4: invalidate client venue cache
   closeVenueSheet(); tgHaptic('success');
   showToast(isNew ? 'Заведение создано' : 'Заведение обновлено', 'success');
   await loadAllVenues();
@@ -421,6 +424,7 @@ async function saveSaVenue(venueId) {
 async function saToggleVenueBlock(venueId, currentlyBlocked) {
   if (!confirm(currentlyBlocked?'Разблокировать заведение?':'Заблокировать заведение?')) return;
   await dbSet('venues', venueId, { blocked: !currentlyBlocked });
+  bumpVersion('venues'); // Дыра №4
   closeVenueSheet(); tgHaptic('light');
   showToast(currentlyBlocked?'Разблокировано':'Заблокировано', 'info');
   loadAllVenues();
@@ -470,7 +474,7 @@ async function saAddCourierToVenue(venueId) {
   const phoneKey = normPhone(phone).replace(/\D/g, '');
   const link = await dbGet('uid_index', phoneKey);
   if (!link?.uid) { showToast('Пользователь не найден', 'error'); return; }
-  const courier = await dbGet('couriers', link.uid);
+  const courier = await getCourier(link.uid); // Дыра №7
   if (!courier) { showToast('Этот пользователь не является курьером', 'error'); return; }
   const venue = await dbGet('venues', venueId);
   await dbSet('courier_venue_links', link.uid, { uid: link.uid, venueId, venueName: venue?.name||'', status: 'pending', invitedAt: new Date().toISOString() });
@@ -523,7 +527,7 @@ async function loadCouriersByStatus(status, el) {
 }
 
 async function openSaCourier(courierUid) {
-  const courier = await dbGet('couriers', courierUid);
+  const courier = await getCourier(courierUid); // Дыра №7
   if (!courier) return;
   const deliveredOrders = (await dbQuery('orders','courierUid','==',courierUid)).filter(o=>o.status==='delivered');
   const totalRev = deliveredOrders.reduce((s,o)=>s+(o.total||0),0);
@@ -550,7 +554,7 @@ async function openSaCourier(courierUid) {
 }
 
 async function saApproveCourier(uid) {
-  await dbSet('couriers', uid, { status: 'active', approvedAt: new Date().toISOString() });
+  await setCourier(uid, { status: 'active', approvedAt: new Date().toISOString() }); // Дыра №7
   await dbSet('users',   uid, { role: 'courier' });
   await dbSet('admin_events', `courier_approved_${uid}`, { type:'courier_approved', uid, ts: new Date().toISOString() });
   closeCourierDetailSheet(); tgHaptic('success'); showToast('Курьер одобрен', 'success');
@@ -559,7 +563,7 @@ async function saApproveCourier(uid) {
 
 async function saBlockCourier(uid) {
   if (!confirm('Заблокировать / отклонить курьера?')) return;
-  await dbSet('couriers', uid, { status: 'blocked', blockedAt: new Date().toISOString() });
+  await setCourier(uid, { status: 'blocked', blockedAt: new Date().toISOString() }); // Дыра №7
   await dbSet('users',   uid, { blocked: true });
   await dbSet('admin_events', `courier_blocked_${uid}`, { type:'courier_blocked', uid, ts: new Date().toISOString() });
   closeCourierDetailSheet(); tgHaptic('light'); showToast('Курьер заблокирован', 'info');
@@ -695,7 +699,7 @@ async function loadUsersByRole(role, el) {
 }
 
 async function openSaUser(uid) {
-  const [user, courierData] = await Promise.all([dbGet('users', uid), dbGet('couriers', uid)]);
+  const [user, courierData] = await Promise.all([dbGet('users', uid), getCourier(uid)]); // Дыра №7
   if (!user) return;
   const roleIcons = [];
   if (user.agreedClient   || user.role==='client')     roleIcons.push('👤 Клиент');
@@ -722,9 +726,9 @@ async function saToggleUserBlock(uid, currentlyBlocked) {
   if (!confirm(currentlyBlocked?'Разблокировать пользователя?':'Заблокировать пользователя?')) return;
   await dbSet('users', uid, { blocked: !currentlyBlocked });
   // If this user is also a courier, sync courier status
-  const courierData = await dbGet('couriers', uid);
+  const courierData = await getCourier(uid); // Дыра №7
   if (courierData) {
-    await dbSet('couriers', uid, { status: currentlyBlocked ? 'active' : 'blocked' });
+    await setCourier(uid, { status: currentlyBlocked ? 'active' : 'blocked' });
   }
   closeUserSheet(); tgHaptic('light');
   showToast(currentlyBlocked?'Разблокирован':'Заблокирован', 'info');

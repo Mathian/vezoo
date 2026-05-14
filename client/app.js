@@ -21,6 +21,27 @@ let _favFilter       = false;
 let _cartOpenedFrom  = 'venue';
 const _selectedCurrency = '₸';
 
+// ── App version cache (Дыры №2, №3, №4) ──
+let _appVersions    = {};
+let _appVersionsTs  = 0;
+async function _getAppVersions() {
+  const now = Date.now();
+  if (_appVersionsTs > 0 && now - _appVersionsTs < 5 * 60 * 1000) return _appVersions;
+  try { _appVersions = await dbGet('settings', 'versions') || {}; } catch {}
+  _appVersionsTs = now;
+  return _appVersions;
+}
+
+// ── Venue cache helpers (Дыра №4) ──
+function _loadVenuesCache()        { try { return JSON.parse(localStorage.getItem('vez_venues_data') || '[]'); } catch { return []; } }
+function _saveVenuesCache(arr, v)  { try { localStorage.setItem('vez_venues_data', JSON.stringify(arr)); localStorage.setItem('vez_local_venues_v', String(v)); } catch {} }
+function _getLocalVenuesVersion()  { return parseInt(localStorage.getItem('vez_local_venues_v') || '0'); }
+
+// ── Menu cache helpers (Дыры №2, №3) ──
+function _loadMenuCache(venueId)       { try { return JSON.parse(localStorage.getItem('vez_menu_data_' + venueId) || '[]'); } catch { return []; } }
+function _saveMenuCache(venueId, arr, v) { try { localStorage.setItem('vez_menu_data_' + venueId, JSON.stringify(arr)); localStorage.setItem('vez_local_menu_v_' + venueId, String(v)); } catch {} }
+function _getLocalMenuVersion(venueId) { return parseInt(localStorage.getItem('vez_local_menu_v_' + venueId) || '0'); }
+
 // ══════════════════════════════════════════════════════════
 //  BOOT
 // ══════════════════════════════════════════════════════════
@@ -101,9 +122,11 @@ async function submitAgree() {
 }
 
 // ── Init main ──
-function initMain() {
+async function initMain() {
   document.getElementById('main-nav').style.display = 'flex';
   FAVORITES = JSON.parse(localStorage.getItem('vez_favorites') || '[]');
+  // Pre-load app versions for cache validation
+  await _getAppVersions();
   loadVenues();
   watchActiveOrders();
   showScreen('s-home');
@@ -113,8 +136,27 @@ function initMain() {
 //  HOME — Venue list
 // ══════════════════════════════════════════════════════════
 async function loadVenues() {
-  const venues = await dbGetAll('venues', 'name', 'asc');
-  VENUES     = venues.filter(v => v.status === 'approved' && !v.blocked && v.onlineOrdersEnabled !== false);
+  // Дыра №4: version-based localStorage cache
+  const versions  = await _getAppVersions();
+  const remoteV   = versions.venues || 0;
+  const localV    = _getLocalVenuesVersion();
+
+  let allVenues;
+  if (remoteV > 0 && remoteV === localV) {
+    // Use localStorage cache — no Firestore read
+    allVenues = _loadVenuesCache();
+    if (!allVenues.length) {
+      // Cache corrupt/empty — force refresh
+      allVenues = await dbGetAll('venues', 'name', 'asc');
+      _saveVenuesCache(allVenues, remoteV);
+    }
+  } else {
+    // Fetch fresh from Firestore and update cache
+    allVenues = await dbGetAll('venues', 'name', 'asc');
+    _saveVenuesCache(allVenues, remoteV);
+  }
+
+  VENUES     = allVenues.filter(v => v.status === 'approved' && !v.blocked && v.onlineOrdersEnabled !== false);
   const usedCatIds = new Set(VENUES.map(v => v.categoryId).filter(Boolean));
   CATEGORIES = VENUE_CATEGORIES.filter(c => usedCatIds.has(c.id));
   renderCatTabs();
@@ -242,7 +284,25 @@ function toggleCurrentVenueFav() { if (!CURRENT_VENUE) return; toggleFav(CURRENT
 async function loadVenueMenu(venueId) {
   const grid = document.getElementById('venue-menu-grid');
   grid.innerHTML = '<div class="loader" style="grid-column:1/-1"><div class="spinner"></div></div>';
-  VENUE_MENU = (await dbQuery('menu_items', 'venueId', '==', venueId)).filter(i => i.available !== false);
+
+  // Дыры №2 и №3: version-based localStorage cache
+  const versions = await _getAppVersions();
+  const remoteV  = versions['menu_' + venueId] || 0;
+  const localV   = _getLocalMenuVersion(venueId);
+
+  let allItems;
+  if (remoteV > 0 && remoteV === localV) {
+    allItems = _loadMenuCache(venueId);
+    if (!allItems.length) {
+      allItems = await dbQuery('menu_items', 'venueId', '==', venueId);
+      _saveMenuCache(venueId, allItems, remoteV);
+    }
+  } else {
+    allItems = await dbQuery('menu_items', 'venueId', '==', venueId);
+    _saveMenuCache(venueId, allItems, remoteV);
+  }
+
+  VENUE_MENU = allItems.filter(i => i.available !== false);
   const menuCats = ['Все', ...new Set(VENUE_MENU.map(i => i.category).filter(Boolean))];
   document.getElementById('venue-cat-tabs').innerHTML = menuCats.map((c, i) =>
     `<button class="cat-tab${i === 0 ? ' active' : ''}" onclick="filterVenueMenu(this,'${c}')">${c}</button>`
@@ -418,13 +478,16 @@ async function openCartFromOverview(venueId) {
   if (!venue) { showToast('Заведение не найдено', 'warning'); return; }
   CURRENT_VENUE = venue;
   if (!VENUE_MENU.length || VENUE_MENU[0]?.venueId !== venueId) {
-    VENUE_MENU = (await dbQuery('menu_items', 'venueId', '==', venueId)).filter(i => i.available !== false);
+    // Use localStorage cache (Дыра №2)
+    const cached = _loadMenuCache(venueId);
+    VENUE_MENU = cached.length
+      ? cached.filter(i => i.available !== false)
+      : (await dbQuery('menu_items', 'venueId', '==', venueId)).filter(i => i.available !== false);
   }
   _cartOpenedFrom = 'overview';
   renderCartScreen();
   showScreen('s-cart');
   document.getElementById('cart-venue-name').textContent = venue.name;
-  // Show available payment methods
   _renderPaymentOpts(venue);
 }
 
@@ -571,6 +634,7 @@ async function submitOrder() {
 
   const orderId = genOrderId();
   const deliveryPrice = isPickup ? 0 : (CURRENT_VENUE.deliveryPrice || 0);
+  const _orderDate = new Date().toISOString().slice(0, 10);
   const order = {
     id: orderId, venueId, venueName: CURRENT_VENUE.name,
     clientUid: STATE.uid, clientName: STATE.user?.name || '', clientPhone: STATE.user?.phone || '',
@@ -581,6 +645,9 @@ async function submitOrder() {
     address: isPickup ? null : { street, house, apt, hasIntercom: _intercomChecked },
     payment: _paymentMethod, deliveryType: _deliveryType, comment,
     status: 'pending', createdAt: new Date().toISOString(),
+    // Дыры №5, №9, №10: index fields
+    active: true,                               // false when delivered/cancelled/issued
+    venueDateKey: venueId + '_' + _orderDate,   // for date-specific queries
     clientNotification: { type: '', seen: true },
     adminBotNotified: false, courierBotNotified: false, cancelledBotNotified: false
   };
@@ -800,7 +867,11 @@ async function reorderFromHistory(orderId) {
   const btn = document.querySelector('#history-detail-content .btn-primary');
   if (btn) { btn.disabled = true; btn.textContent = 'Загружаем меню...'; }
 
-  const menuItems = (await dbQuery('menu_items', 'venueId', '==', o.venueId)).filter(i => i.available !== false);
+  // Use localStorage menu cache (Дыра №2)
+  const cachedMenu = _loadMenuCache(o.venueId);
+  const menuItems = cachedMenu.length
+    ? cachedMenu.filter(i => i.available !== false)
+    : (await dbQuery('menu_items', 'venueId', '==', o.venueId)).filter(i => i.available !== false);
 
   CART[o.venueId] = [];
   let addedCount = 0;
@@ -885,7 +956,7 @@ function renderOrderCard(o) {
 async function clientCancelOrder(orderId) {
   const doCancel = async () => {
     await dbSet('orders', orderId, {
-      status: 'cancelled',
+      status: 'cancelled', active: false,
       cancelledAt: new Date().toISOString(),
       cancelledBy: 'client',
       clientNotification: { type: 'cancelled', seen: true, message: 'Вы отменили заказ.' }

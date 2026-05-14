@@ -8,11 +8,11 @@ let VENUE           = null;
 let MENU_ITEMS      = [];
 let MENU_CATS       = [];
 let _allOrders      = [];
-let _linksCache     = null;
 let _editItemId     = null;
 let _variants       = [];
 let _hasVariants    = false;
 let _ordersUnsub    = null;
+let _histOrders     = [];   // history orders fetched separately
 let _coverDataUrl   = null;
 let _setCoverDataUrl = null;
 let _pinTarget      = null;
@@ -473,6 +473,8 @@ async function saveItem() {
     MENU_ITEMS.push(itemData);
   }
   _saveMenuToStorage(MENU_ITEMS);
+  // Дыра №2: bump menu version so clients know to refresh
+  bumpVersion('menu_' + VENUE.id);
   document.getElementById('item-overlay').classList.remove('open');
   btn.disabled=false;
   tgHaptic('success');
@@ -486,6 +488,7 @@ async function deleteItem(itemId) {
   await dbDelete('menu_items',itemId);
   MENU_ITEMS = MENU_ITEMS.filter(i => i.id !== itemId);
   _saveMenuToStorage(MENU_ITEMS);
+  bumpVersion('menu_' + VENUE.id); // Дыра №2
   tgHaptic('light');
   MENU_CATS = [...new Set(MENU_ITEMS.map(i => i.category).filter(Boolean))];
   renderMenuCatTabs(); renderMenuItems(null); _refreshCatSelect();
@@ -496,43 +499,68 @@ async function deleteItem(itemId) {
 // ══════════════════════════════════════════════════════════
 const _ACTIVE_STATUSES = ['pending','accepted','cooking','searching_courier','courier_assigned','ready_for_courier','delivering','ready'];
 
+// Дыра №5: Only listen to active orders.
+// REQUIRES Firestore composite index: orders — venueId ASC + active ASC
 function watchNewOrders() {
-  _ordersUnsub = onQuerySnap('orders','venueId','==',VENUE.id, orders => {
+  _ordersUnsub = onQuerySnapWhere('orders', [
+    ['venueId', '==', VENUE.id],
+    ['active', '==', true]
+  ], orders => {
     _allOrders = orders;
     const pending = orders.filter(o => o.status === 'pending').length;
     const badge = document.getElementById('orders-badge');
     badge.textContent = pending; badge.classList.toggle('hidden', pending === 0);
-    if (document.getElementById('s-orders').classList.contains('active'))
+    if (document.getElementById('s-orders').classList.contains('active') && _ordersTab !== 'history')
       loadOrders(_ordersTab);
   });
 }
 
-function loadOrders(tab, el) {
+// Дыра №9 helper: fetch history using venueDateKey (day-by-day, max 7 days)
+async function _fetchHistoryOrders(from, to) {
+  const seenIds = new Set();
+  const orders  = [];
+  let current   = new Date(from + 'T00:00:00');
+  const end     = new Date(to   + 'T00:00:00');
+  let days = 0;
+  while (current <= end && days < 7) {
+    const dateStr = current.toISOString().slice(0, 10);
+    try {
+      const dayOrds = await dbQuery('orders', 'venueDateKey', '==', VENUE.id + '_' + dateStr);
+      for (const o of dayOrds) {
+        if (!seenIds.has(o.id)) { seenIds.add(o.id); orders.push(o); }
+      }
+    } catch {}
+    current.setDate(current.getDate() + 1);
+    days++;
+  }
+  return orders
+    .filter(o => ['delivered','cancelled','issued'].includes(o.status))
+    .sort((a,b) => (b.createdAt||'').localeCompare(a.createdAt||''));
+}
+
+async function loadOrders(tab, el) {
   _ordersTab = tab;
   if (el) { document.querySelectorAll('#s-orders .cat-tab').forEach(b=>b.classList.remove('active')); el.classList.add('active'); }
   const rangeEl = document.getElementById('admin-hist-daterange');
   if (rangeEl) rangeEl.style.display = tab === 'history' ? '' : 'none';
-  if (tab === 'history') {
+
+  if (tab === 'active') {
+    renderOrdersList(_allOrders.filter(o => _ACTIVE_STATUSES.includes(o.status)));
+  } else if (tab === 'pending') {
+    renderOrdersList(_allOrders.filter(o => o.status === 'pending'));
+  } else {
+    // History — separate Firestore query (Дыра №9)
     const today = new Date().toISOString().slice(0,10);
     const fromEl = document.getElementById('admin-hist-from'), toEl = document.getElementById('admin-hist-to');
     if (fromEl && !fromEl.value) fromEl.value = today;
     if (toEl   && !toEl.value)   toEl.value   = today;
-  }
-  let orders;
-  if (tab === 'active') {
-    orders = _allOrders.filter(o => _ACTIVE_STATUSES.includes(o.status));
-  } else if (tab === 'pending') {
-    orders = _allOrders.filter(o => o.status === 'pending');
-  } else {
-    const fromEl = document.getElementById('admin-hist-from'), toEl = document.getElementById('admin-hist-to');
-    const today = new Date().toISOString().slice(0,10);
     const f = fromEl?.value || today, t = toEl?.value || today;
-    orders = _allOrders
-      .filter(o => ['delivered','cancelled','issued'].includes(o.status))
-      .filter(o => { const d=(o.createdAt||'').slice(0,10); return d>=f && d<=t; })
-      .sort((a,b) => (b.createdAt||'').localeCompare(a.createdAt||''));
+
+    const list = document.getElementById('admin-orders-list');
+    if (list) list.innerHTML = '<div class="loader"><div class="spinner"></div></div>';
+    _histOrders = await _fetchHistoryOrders(f, t);
+    renderOrdersList(_histOrders);
   }
-  renderOrdersList(orders);
 }
 
 function renderOrdersList(orders) {
@@ -625,7 +653,7 @@ async function adminAcceptOrder(orderId) {
 
 async function adminCancelOrder(orderId) {
   const doCancel=async()=>{
-    const patch={status:'cancelled',cancelledAt:new Date().toISOString(),cancelledBy:'admin',cancelledBotNotified:true,clientNotification:{type:'cancelled',seen:false,message:'Ваш заказ отменён администратором.'}};
+    const patch={status:'cancelled',active:false,cancelledAt:new Date().toISOString(),cancelledBy:'admin',cancelledBotNotified:true,clientNotification:{type:'cancelled',seen:false,message:'Ваш заказ отменён администратором.'}};
     await dbSet('orders',orderId,patch); _patchAllOrders(orderId,patch);
     tgHaptic('light'); closeOrderSheet(); showToast('Заказ отменён','info'); loadOrders(_ordersTab);
   };
@@ -643,6 +671,7 @@ async function adminHandOverCourier(orderId) {
   const order=_allOrders.find(o=>o.id===orderId);
   const courierName=order?.courierName||'Курьер';
   const courierPhone=order?.courierPhone||'';
+  // Note: delivering is still active — courier is on the way
   const patch={status:'delivering',handedOverAt:new Date().toISOString(),clientNotification:{type:'delivering',seen:false,message:`Курьер ${courierName}${courierPhone?' · '+courierPhone:''} везёт ваш заказ!`}};
   await dbSet('orders',orderId,patch); _patchAllOrders(orderId,patch);
   closeOrderSheet(); tgHaptic('success'); showToast(`Заказ передан курьеру ${courierName}`,'success'); loadOrders(_ordersTab);
@@ -661,7 +690,7 @@ async function adminMarkReady(orderId) {
 }
 
 async function adminIssueOrder(orderId) {
-  const patch={ status:'issued', issuedAt:new Date().toISOString(), clientNotification:{type:'issued',seen:false,message:'Заказ выдан. Приятного аппетита!'} };
+  const patch={ status:'issued', active:false, issuedAt:new Date().toISOString(), clientNotification:{type:'issued',seen:false,message:'Заказ выдан. Приятного аппетита!'} };
   await dbSet('orders',orderId,patch); _patchAllOrders(orderId,patch);
   closeOrderSheet(); tgHaptic('success'); showToast('Заказ выдан клиенту 📦','success'); loadOrders(_ordersTab);
 }
@@ -703,7 +732,8 @@ async function findHandoffCourier() {
   const phoneKey=phone.replace(/\D/g,'');
   const link=await dbGet('uid_index',phoneKey);
   if (!link?.uid) { showToast('Курьер не найден','error'); return; }
-  const courier=await dbGet('couriers',link.uid);
+  // Дыра №7: read from single couriers document
+  const courier=await getCourier(link.uid);
   if (!courier) { showToast('Этот пользователь не является курьером','error'); return; }
   _handoffCourier={ ...courier, uid: link.uid };
   const foundEl=document.getElementById('handoff-courier-found');
@@ -717,8 +747,8 @@ async function findHandoffCourier() {
       </div>
     </div>`;
 
-  // Load active delivery orders (exclude pickup)
-  const orders=(await dbQuery('orders','venueId','==',VENUE.id))
+  // Дыра №5: Use already-loaded _allOrders (no extra Firestore query)
+  const orders=_allOrders
     .filter(o=>['accepted','cooking','searching_courier','courier_assigned','ready_for_courier'].includes(o.status) && o.deliveryType!=='pickup');
   if (!orders.length) { showToast('Нет активных заказов для передачи','info'); return; }
 
@@ -785,16 +815,36 @@ async function openManualOrder() {
   _openSheet('manual-order-overlay');
 }
 
-async function moPhoneInput(input) {
-  const val=input.value.trim();
-  if (val.length<7) { document.getElementById('mo-autocomplete').style.display='none'; return; }
-  const norm=normPhone(val);
-  if (!_linksCache) _linksCache=await dbGetAll('user_links');
-  const matches=_linksCache.filter(l=>normPhone(l.phone||'').includes(norm.replace('+',''))).slice(0,5);
-  const dd=document.getElementById('mo-autocomplete');
-  if (!matches.length) { dd.style.display='none'; return; }
-  dd.style.display='';
-  dd.innerHTML=matches.map(l=>`<div class="autocomplete-item" onclick="moSelectClient('${(l.phone||'').replace(/'/g,'')}','${(l.firstName||'').replace(/'/g,'')}','${(l.uid||'').replace(/'/g,'')}')"><span style="font-family:monospace">${l.phone}</span> <span style="color:var(--text-dim)">${l.firstName||''} ${l.lastName||''}</span></div>`).join('');
+// Дыра №11: search user_links only from localStorage — no full-collection Firestore read
+function moPhoneInput(input) {
+  const val = input.value.trim();
+  const dd  = document.getElementById('mo-autocomplete');
+  if (val.length < 7) { dd.style.display = 'none'; return; }
+  const norm = val.replace(/\D/g, '');
+  if (!norm) { dd.style.display = 'none'; return; }
+
+  // Search localStorage keys that were cached by individual dbGet('user_links', uid) calls
+  const matches = [];
+  for (let i = 0; i < localStorage.length && matches.length < 5; i++) {
+    const key = localStorage.key(i);
+    if (!key || !key.startsWith('vez_user_links_')) continue;
+    try {
+      const link = JSON.parse(localStorage.getItem(key));
+      if (link && link.phone) {
+        const ln = link.phone.replace(/\D/g, '');
+        if (ln.includes(norm) || norm.includes(ln.slice(-7))) matches.push(link);
+      }
+    } catch {}
+  }
+
+  if (!matches.length) { dd.style.display = 'none'; return; }
+  dd.style.display = '';
+  dd.innerHTML = matches.map(l =>
+    `<div class="autocomplete-item" onclick="moSelectClient('${(l.phone||'').replace(/'/g,'')}','${(l.firstName||'').replace(/'/g,'')}','${(l.uid||'').replace(/'/g,'')}')">
+      <span style="font-family:monospace">${l.phone}</span>
+      <span style="color:var(--text-dim)">${l.firstName||''} ${l.lastName||''}</span>
+    </div>`
+  ).join('');
 }
 
 async function moSelectClient(phone, name, uid) {
@@ -827,6 +877,7 @@ async function submitManualOrder() {
   if (!street||!house) { showToast('Введите улицу и дом','warning'); return; }
   if (!amount) { showToast('Введите сумму заказа','warning'); return; }
   const ordId=genOrderId();
+  const _manDate=new Date().toISOString().slice(0,10);
   await dbSet('orders',ordId,{
     id:ordId, venueId:VENUE.id, venueName:VENUE.name,
     clientPhone:phone, clientName, clientUid:'manual_'+genId(),
@@ -834,6 +885,7 @@ async function submitManualOrder() {
     deliveryPrice: VENUE.deliveryPrice || 0,
     items:[], comment,
     status:'accepted', isManual:true,
+    active:true, venueDateKey:VENUE.id+'_'+_manDate,
     createdAt:new Date().toISOString(),
     acceptedAt:new Date().toISOString(),
     clientNotification:{type:'accepted',seen:false},
@@ -865,8 +917,8 @@ function scanQrCourier() {
 // ══════════════════════════════════════════════════════════
 async function loadStats() {
   const today = new Date().toISOString().slice(0,10);
-  const allOrd = await dbQuery('orders','venueId','==',VENUE.id);
-  const todayOrd    = allOrd.filter(o=>(o.createdAt||'').startsWith(today));
+  // Дыра №9: query only today's orders via venueDateKey — no full-collection scan
+  const todayOrd = await dbQuery('orders', 'venueDateKey', '==', VENUE.id + '_' + today);
   const todayOnline    = todayOrd.filter(o=>!o.isManual);
   const todayDelivered = todayOrd.filter(o=>o.status==='delivered'||o.status==='issued');
   const todayCancelled = todayOrd.filter(o=>o.status==='cancelled');
@@ -889,8 +941,8 @@ async function generateAdminReport() {
   const btn = document.querySelector('[onclick="generateAdminReport()"]');
   if (btn) { btn.disabled=true; btn.textContent='⏳ Формирую...'; }
   try {
-    const allOrders = await dbQuery('orders','venueId','==',VENUE.id);
-    const orders = allOrders.filter(o=>{ const d=(o.createdAt||'').slice(0,10); return d === repDate; });
+    // Дыра №10: query only the specific date via venueDateKey — no full-collection scan
+    const orders = await dbQuery('orders', 'venueDateKey', '==', VENUE.id + '_' + repDate);
 
     // Permanent couriers
     const permLinks = await dbQuery('courier_venue_links','venueId','==',VENUE.id);
@@ -991,6 +1043,7 @@ async function saveVenueInfo() {
   if (!name||!address) { showToast('Введите название и адрес','warning'); return; }
   await dbSet('venues',VENUE.id,{ name,address,phone,description:desc,coverUrl:cover });
   VENUE={...VENUE,name,address,phone,description:desc,coverUrl:cover};
+  bumpVersion('venues'); // Дыра №4
   tgHaptic('success'); showToast('Сохранено','success');
 }
 
@@ -998,6 +1051,7 @@ async function saveWorkHours() {
   const open=document.getElementById('set-open').value, close=document.getElementById('set-close').value;
   await dbSet('venues',VENUE.id,{workOpen:open,workClose:close});
   VENUE={...VENUE,workOpen:open,workClose:close};
+  bumpVersion('venues'); // Дыра №4
   tgHaptic('success'); showToast('Часы сохранены','success');
 }
 
@@ -1006,6 +1060,7 @@ async function saveDeliverySettings() {
   const minOrd  = parseInt(document.getElementById('set-min-order').value)||0;
   await dbSet('venues', VENUE.id, { deliveryTime: delTime, minOrder: minOrd, paymentMethods: _payMethods });
   VENUE = { ...VENUE, deliveryTime: delTime, minOrder: minOrd, paymentMethods: _payMethods };
+  bumpVersion('venues'); // Дыра №4
   tgHaptic('success'); showToast('Настройки сохранены', 'success');
 }
 
@@ -1013,6 +1068,7 @@ async function saveOnlineOrdersToggle(enabled) {
   if (!VENUE) return;
   await dbSet('venues', VENUE.id, { onlineOrdersEnabled: enabled });
   VENUE = { ...VENUE, onlineOrdersEnabled: enabled };
+  bumpVersion('venues'); // Дыра №4
   tgHaptic('light');
   showToast(enabled ? 'Онлайн заказы включены' : 'Онлайн заказы выключены', 'info');
 }
@@ -1027,7 +1083,8 @@ async function addPermCourier() {
   const phoneKey=normPhone(phone).replace(/\D/g,'');
   const link=await dbGet('uid_index',phoneKey);
   if (!link?.uid) { showToast('Курьер с таким номером не найден','error'); return; }
-  const courier=await dbGet('couriers',link.uid);
+  // Дыра №7: read from single couriers document
+  const courier=await getCourier(link.uid);
   if (!courier) { showToast('Этот пользователь не является курьером','error'); return; }
   await dbSet('courier_venue_links',link.uid,{uid:link.uid,venueId:VENUE.id,venueName:VENUE.name,status:'pending',invitedAt:new Date().toISOString()});
   tgHaptic('success'); showToast('Приглашение отправлено курьеру','success');
@@ -1039,7 +1096,9 @@ async function loadPermCouriers() {
   const links=await dbQuery('courier_venue_links','venueId','==',VENUE.id);
   const listEl=document.getElementById('perm-couriers-list');
   if (!links.length) { listEl.innerHTML='<div class="text-dim text-sm">Нет постоянных курьеров</div>'; return; }
-  const rows=await Promise.all(links.map(async l=>{ const c=await dbGet('couriers',l.uid); return {...l,courierName:c?.name||l.uid,phone:c?.phone||''}; }));
+  // Дыра №7: one read for all couriers instead of N individual reads
+  const allCouriers=await getCourierAll();
+  const rows=links.map(l=>{ const c=allCouriers[l.uid]; return {...l,courierName:c?.name||l.uid,phone:c?.phone||''}; });
   listEl.innerHTML=rows.map(r=>`
     <div class="flex items-center gap-2">
       <div class="li-icon yellow" style="width:34px;height:34px;font-size:16px">🚴</div>

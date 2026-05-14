@@ -5,6 +5,31 @@
 
 const STATE = { uid: null, user: null };
 let COURIER_DATA      = null;
+
+// ── Venue cache for courier (Дыра №8) ──
+let _courierVenueCache = {};
+async function _refreshCourierVenueCache() {
+  try {
+    const versions = await dbGet('settings', 'versions') || {};
+    const remoteV  = versions.venues || 0;
+    const localV   = parseInt(localStorage.getItem('vez_local_venues_v') || '0');
+    const cached   = JSON.parse(localStorage.getItem('vez_venues_data') || '[]');
+    if (remoteV > 0 && remoteV === localV && cached.length) {
+      for (const v of cached) _courierVenueCache[v.id] = v;
+      return;
+    }
+    const venues = await dbGetAll('venues', 'name', 'asc');
+    localStorage.setItem('vez_venues_data', JSON.stringify(venues));
+    localStorage.setItem('vez_local_venues_v', String(remoteV));
+    for (const v of venues) _courierVenueCache[v.id] = v;
+  } catch {}
+}
+async function _getVenueCached(venueId) {
+  if (_courierVenueCache[venueId]) return _courierVenueCache[venueId];
+  const v = await dbGet('venues', venueId);
+  if (v) _courierVenueCache[venueId] = v;
+  return v;
+}
 let _availUnsub       = null;
 let _venueUnsub       = null;
 let _myUnsub          = null;
@@ -90,9 +115,10 @@ async function submitAgree() {
     createdAt: new Date().toISOString()
   };
   await dbSet('users', STATE.uid, STATE.user);
-  const existingCourier = await dbGet('couriers', STATE.uid);
+  // Дыра №7: single couriers document
+  const existingCourier = await getCourier(STATE.uid);
   if (!existingCourier) {
-    await dbSet('couriers', STATE.uid, {
+    await setCourier(STATE.uid, {
       uid: STATE.uid, name: autoName, phone: linkData?.phone || '',
       status: 'pending', totalDeliveries: 0, createdAt: new Date().toISOString()
     });
@@ -104,7 +130,8 @@ async function submitAgree() {
 
 // ── Check courier status ──
 async function checkCourierStatus() {
-  const courier = await dbGet('couriers', STATE.uid);
+  // Дыра №7: read from single couriers document
+  const courier = await getCourier(STATE.uid);
   // Preserve locally-tracked totalDeliveries if it's higher (offline-safe)
   const localRaw = (() => { try { return JSON.parse(localStorage.getItem('vez_courier_data') || 'null'); } catch { return null; } })();
   const localDeliveries = localRaw?.totalDeliveries || 0;
@@ -138,7 +165,7 @@ async function acceptVenueInvite() {
   if (!_venueInvite) return;
   await dbSet('courier_venue_links', STATE.uid, { status: 'confirmed', confirmedAt: new Date().toISOString() });
   COURIER_DATA = { ...COURIER_DATA, primaryVenueId: _venueInvite.venueId };
-  await dbSet('couriers', STATE.uid, COURIER_DATA);
+  await setCourier(STATE.uid, COURIER_DATA); // Дыра №7
   tgHaptic('success'); showToast('Вы теперь постоянный курьер этого кафе', 'success');
   _venueInvite = null; initMain();
 }
@@ -150,7 +177,7 @@ async function declineVenueInvite() {
 }
 
 // ── Init main ──
-function initMain() {
+async function initMain() {
   document.getElementById('main-nav').style.display = 'flex';
 
   // City label
@@ -162,6 +189,9 @@ function initMain() {
   if (COURIER_DATA?.primaryVenueName) {
     document.getElementById('primary-venue-label').textContent = COURIER_DATA.primaryVenueName;
   }
+
+  // Дыра №8: warm up venue cache
+  _refreshCourierVenueCache();
 
   _myHistory = _loadHistoryFromStorage(); // restore from localStorage before listener fires
   watchMyOrders();
@@ -357,7 +387,7 @@ async function openAcceptSheet(orderId, pool) {
   if (!order) return;
   const addr = order.address;
   let venueAddr = '—';
-  try { venueAddr = (await dbGet('venues', order.venueId))?.address || '—'; } catch {}
+  try { venueAddr = (await _getVenueCached(order.venueId))?.address || '—'; } catch {} // Дыра №8
   const content = document.getElementById('accept-order-content');
   content.innerHTML = `
     <div class="sheet-title">Принять заказ?</div>
@@ -410,7 +440,7 @@ async function openBundleAcceptSheet(orderIdsStr, pool) {
 
   const first = orders[0];
   let venueAddr = '—';
-  try { venueAddr = (await dbGet('venues', first.venueId))?.address || '—'; } catch {}
+  try { venueAddr = (await _getVenueCached(first.venueId))?.address || '—'; } catch {} // Дыра №8
 
   const totalDelivery = orders.reduce((s,o)=>s+(o.deliveryPrice||0),0);
 
@@ -581,7 +611,8 @@ async function openMyOrder(orderId) {
   let venueAddr = '—';
   let venuePhone = null;
   try {
-    const venueData = await dbGet('venues', order.venueId);
+    // Дыра №8: use cached venue data
+    const venueData = await _getVenueCached(order.venueId);
     venueAddr = venueData?.address || '—';
     venuePhone = venueData?.phone || null;
   } catch {}
@@ -631,14 +662,14 @@ async function openMyOrder(orderId) {
 async function courierDeliver(orderId) {
   const doDeliver = async () => {
     await dbSet('orders', orderId, {
-      status: 'delivered',
+      status: 'delivered', active: false,       // Дыра №5
       deliveredAt: new Date().toISOString(),
       clientNotification: { type: 'delivered', seen: false }
     });
     // Increment total deliveries (from local data, no extra Firestore read)
     const total = (COURIER_DATA?.totalDeliveries || 0) + 1;
     COURIER_DATA = { ...COURIER_DATA, totalDeliveries: total };
-    await dbSet('couriers', STATE.uid, COURIER_DATA);
+    await setCourier(STATE.uid, COURIER_DATA); // Дыра №7
     try { localStorage.setItem('vez_courier_data', JSON.stringify(COURIER_DATA)); } catch {}
     closeMyOrderSheet();
     tgHaptic('success'); showToast('Заказ доставлен!', 'success');
@@ -691,7 +722,7 @@ async function loadCourierProfile() {
   const venueCard = document.getElementById('courier-venue-card');
   if (courier.primaryVenueId) {
     try {
-      const venue = await dbGet('venues', courier.primaryVenueId);
+      const venue = await _getVenueCached(courier.primaryVenueId); // Дыра №8
       venueCard.innerHTML = `
         <div class="font-bold">${venue?.name || courier.primaryVenueId}</div>
         <div class="text-dim text-sm mt-1">${venue?.address || ''}</div>
@@ -712,7 +743,7 @@ async function courierLeaveVenue() {
   });
   if (!ok) return;
   COURIER_DATA = { ...COURIER_DATA, primaryVenueId: null, primaryVenueName: null };
-  await dbSet('couriers', STATE.uid, COURIER_DATA);
+  await setCourier(STATE.uid, COURIER_DATA); // Дыра №7
   document.getElementById('primary-venue-label').textContent = '—';
   if (_venueUnsub) { _venueUnsub(); _venueUnsub = null; }
   _venueOrders = [];
