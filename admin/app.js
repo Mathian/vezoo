@@ -211,16 +211,8 @@ async function changeAdminPin() {
 //  VENUE CHECK
 // ══════════════════════════════════════════════════════════
 async function checkVenueAndInit() {
-  // Check for pending admin invite
-  const invite = await dbGet('admin_invites', STATE.uid);
-  if (invite && invite.status === 'pending') {
-    document.getElementById('admin-invite-venue-name').textContent = invite.venueName || 'Заведение';
-    document.getElementById('admin-invite-venue-addr').textContent = invite.venueAddress || '—';
-    showScreen('s-confirm-venue');
-    return;
-  }
-
-  // Check for assigned venue (new field: adminUid)
+  // Superadmin assigns admin directly — no invite/confirmation step needed.
+  // Just look for a venue where adminUid equals this user.
   let venues = await dbQuery('venues', 'adminUid', '==', STATE.uid);
   if (!venues.length) {
     // Backward compat: check old ownerId field
@@ -1094,19 +1086,8 @@ function _normPhone(p) { return String(p||'').replace(/\D/g,''); }
 function _findLinkByPhone(links,phone) { const n=_normPhone(phone); return links.find(l=>_normPhone(l.phone)===n); }
 
 async function addPermCourier() {
-  if (!checkRateLimit('addPermCourier', 1, 10000)) { showToast('Слишком часто', 'warning'); return; }
-  const phone=document.getElementById('courier-phone').value.trim();
-  if (!phone) { showToast('Введите телефон','warning'); return; }
-  const phoneKey=normPhone(phone).replace(/\D/g,'');
-  const link=await dbGet('uid_index',phoneKey);
-  if (!link?.uid) { showToast('Курьер с таким номером не найден','error'); return; }
-  // Дыра №7: read from single couriers document
-  const courier=await getCourier(link.uid);
-  if (!courier) { showToast('Этот пользователь не является курьером','error'); return; }
-  await dbSet('courier_venue_links',link.uid,{uid:link.uid,venueId:VENUE.id,venueName:VENUE.name,venueAddress:VENUE.address||'',status:'pending',invitedAt:new Date().toISOString()});
-  tgHaptic('success'); showToast('Приглашение отправлено курьеру','success');
-  document.getElementById('courier-phone').value='';
-  await loadPermCouriers();
+  // Управление постоянными курьерами — только суперадмин.
+  showToast('Назначение курьеров выполняется суперадмином', 'info');
 }
 
 async function loadPermCouriers() {
@@ -1125,8 +1106,8 @@ async function loadPermCouriers() {
 }
 
 async function removePermCourier(uid) {
-  await dbDelete('courier_venue_links',uid);
-  showToast('Курьер удалён','info'); await loadPermCouriers();
+  // Управление постоянными курьерами — только суперадмин.
+  showToast('Удаление курьеров выполняется суперадмином', 'info');
 }
 
 // ══════════════════════════════════════════════════════════

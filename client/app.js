@@ -136,9 +136,13 @@ async function submitAgree() {
 // never fired. This sync corrects the mismatch so the client sees the right status.
 async function _ensureOrderHistory() {
   try {
+    // No orderBy — a single equality filter needs no composite index.
+    // Adding orderBy('createdAt') would require a composite index (clientUid+createdAt)
+    // that does not yet exist; if the query throws, history never updates.
+    // We sort in JS instead.
     const recent = await dbQueryWhere('orders',
       [['clientUid', '==', STATE.uid]],
-      'createdAt', 'desc', 50
+      null, 'desc', 50
     );
     if (!recent.length) return;
     const existing = _loadOrdersFromStorage();

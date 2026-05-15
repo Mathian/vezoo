@@ -335,15 +335,9 @@ async function _loadSaVenueAssignees(venue) {
       adminEl.className = 'alert-box success';
       if (removeAdminBtn) removeAdminBtn.style.display = '';
     } else {
-      // Check pending invite
-      const invite = await dbGet('admin_invites', venue.id);
-      if (invite && invite.status === 'pending') {
-        adminEl.textContent = 'Приглашение отправлено, ожидает подтверждения';
-        adminEl.className = 'alert-box info';
-      } else {
-        adminEl.textContent = 'Администратор не назначен';
-        adminEl.className = 'alert-box info';
-      }
+      adminEl.textContent = 'Администратор не назначен';
+      adminEl.className = 'alert-box info';
+      if (removeAdminBtn) removeAdminBtn.style.display = 'none';
     }
   }
   // Couriers list
@@ -361,7 +355,7 @@ async function _loadSaVenueCouriers(venueId) {
   listEl.innerHTML = rows.map(r => `
     <div class="flex items-center gap-2">
       <div class="li-icon yellow" style="width:34px;height:34px;font-size:16px">🚴</div>
-      <div style="flex:1"><div class="font-bold text-sm">${r.courierName}</div><div class="text-xs text-dim">${r.phone} · ${r.status==='confirmed'?'<span style="color:var(--success)">Подтвердил</span>':'Ожидает'}</div></div>
+      <div style="flex:1"><div class="font-bold text-sm">${r.courierName}</div><div class="text-xs text-dim">${r.phone} · <span style="color:var(--success)">Постоянный</span></div></div>
       <button class="btn btn-xs" style="background:var(--danger-soft);color:var(--danger);border:none;padding:4px 8px;border-radius:6px;cursor:pointer" onclick="saRemoveCourierFromVenue('${r.uid}','${venueId}')">×</button>
     </div>`).join('');
 }
@@ -447,13 +441,18 @@ async function saAssignAdminToVenue(venueId) {
   const phoneKey = normPhone(phone).replace(/\D/g, '');
   const link = await dbGet('uid_index', phoneKey);
   if (!link?.uid) { showToast('Пользователь не найден', 'error'); return; }
-  const venue = await dbGet('venues', venueId);
-  // Store invite keyed by venueId so multiple admins per venue work; use adminUid field
-  await dbSet('admin_invites', link.uid, { uid: link.uid, venueId, venueName: venue?.name||'', venueAddress: venue?.address||'', saUid: STATE.uid, status: 'pending', createdAt: new Date().toISOString() });
-  tgHaptic('success'); showToast('Приглашение отправлено', 'success');
+  const user = await dbGet('users', link.uid);
+  if (!user?.agreedAdmin) { showToast('Пользователь не зарегистрирован как администратор', 'error'); return; }
+  // Direct assignment — no invite/confirmation needed
+  await dbSet('venues', venueId, { adminUid: link.uid, adminName: user.name || '' });
+  // Clean up any stale invite document
+  try { await dbDelete('admin_invites', link.uid); } catch {}
+  tgHaptic('success'); showToast('Администратор назначен', 'success');
   if (document.getElementById('sa-ven-admin-phone')) document.getElementById('sa-ven-admin-phone').value = '';
   const adminEl = document.getElementById('sa-ven-admin-info');
-  if (adminEl) { adminEl.textContent = 'Приглашение отправлено, ожидает подтверждения'; adminEl.className = 'alert-box info'; }
+  const removeAdminBtn = document.getElementById('sa-ven-remove-admin-btn');
+  if (adminEl) { adminEl.textContent = `Администратор: ${user.name||'—'} (${user.phone||phone})`; adminEl.className = 'alert-box success'; }
+  if (removeAdminBtn) removeAdminBtn.style.display = '';
 }
 
 async function saRemoveAdminFromVenue(venueId) {
@@ -488,8 +487,14 @@ async function saAddCourierToVenue(venueId) {
   const courier = await getCourier(link.uid); // Дыра №7
   if (!courier) { showToast('Этот пользователь не является курьером', 'error'); return; }
   const venue = await dbGet('venues', venueId);
-  await dbSet('courier_venue_links', link.uid, { uid: link.uid, venueId, venueName: venue?.name||'', venueAddress: venue?.address||'', status: 'pending', invitedAt: new Date().toISOString() });
-  tgHaptic('success'); showToast('Приглашение курьеру отправлено', 'success');
+  // Direct assignment — confirmed immediately, no invite/confirmation step
+  await dbSet('courier_venue_links', link.uid, {
+    uid: link.uid, venueId, venueName: venue?.name||'', venueAddress: venue?.address||'',
+    status: 'confirmed', assignedAt: new Date().toISOString()
+  });
+  // Also update courier doc so they see venue orders immediately
+  await setCourier(link.uid, { ...courier, primaryVenueId: venueId, primaryVenueName: venue?.name||'' });
+  tgHaptic('success'); showToast('Курьер прикреплён к заведению', 'success');
   if (document.getElementById('sa-ven-courier-phone')) document.getElementById('sa-ven-courier-phone').value = '';
   await _loadSaVenueCouriers(venueId);
 }

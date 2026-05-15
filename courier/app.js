@@ -37,7 +37,6 @@ let _availOrders      = [];
 let _venueOrders      = [];
 let _myOrders         = [];
 let _shownAssigned    = new Set();
-let _venueInvite      = null;
 let _acceptOrderId    = null;
 let _acceptOrderIds   = [];
 let _acceptFromPool   = 'available'; // 'available' | 'venue'
@@ -165,47 +164,23 @@ async function checkCourierStatus() {
   if (courier.status === 'pending')     { showScreen('s-pending'); return; }
   if (courier.status === 'blocked')     { showScreen('s-blocked'); return; }
 
-  // Check for pending venue invite
-  const invite = await dbGet('courier_venue_links', STATE.uid);
-  if (invite && invite.status === 'pending') {
-    _venueInvite = invite;
-    document.getElementById('venue-invite-name').textContent = invite.venueName || 'Заведение';
-    document.getElementById('venue-invite-addr').textContent = invite.venueAddress || '';
-    const notice = document.getElementById('current-primary-notice');
-    if (courier.primaryVenueId && courier.primaryVenueId !== invite.venueId) {
-      const pv = await dbGet('venues', courier.primaryVenueId);
-      notice.textContent = `Сейчас ваше постоянное кафе: ${pv?.name || courier.primaryVenueId}. При принятии — оно сменится.`;
-      notice.classList.remove('hidden');
-    }
-    showScreen('s-venue-invite'); return;
-  }
-
+  // Superadmin assigns couriers directly with status='confirmed' — no invite screen needed.
   initMain();
 }
 
-async function acceptVenueInvite() {
-  if (!_venueInvite) return;
-  await dbSet('courier_venue_links', STATE.uid, { status: 'confirmed', confirmedAt: new Date().toISOString() });
-  COURIER_DATA = { ...COURIER_DATA, primaryVenueId: _venueInvite.venueId };
-  await setCourier(STATE.uid, COURIER_DATA); // Дыра №7
-  tgHaptic('success'); showToast('Вы теперь постоянный курьер этого кафе', 'success');
-  _venueInvite = null; initMain();
-}
-
-async function declineVenueInvite() {
-  if (!_venueInvite) return;
-  await dbDelete('courier_venue_links', STATE.uid);
-  _venueInvite = null; initMain();
-}
+// acceptVenueInvite / declineVenueInvite removed — superadmin assigns couriers directly.
 
 // ── Boot history sync — merge Firestore delivered orders into local history ──
 // Runs every boot (not just when empty) so deliveries completed while the app
 // was closed are added to history without waiting for a docChanges() event.
 async function _ensureDeliveryHistory() {
   try {
+    // No orderBy — the existing composite index covers (courierUid + active).
+    // Adding orderBy('createdAt') would require a 3-field index that doesn't exist.
+    // Sort in JS after fetching.
     const recent = await dbQueryWhere('orders',
       [['courierUid', '==', STATE.uid], ['active', '==', false]],
-      'createdAt', 'desc', 50
+      null, 'desc', 50
     );
     const delivered = recent.filter(o => o.status === 'delivered');
     if (!delivered.length) return;
@@ -327,10 +302,9 @@ function watchVenueOrders() {
     ['venueId', '==', myVenue],
     ['active', '==', true]
   ], orders => {
-    _venueOrders = orders.filter(o =>
-      o.status === 'ready_for_courier' ||
-      (o.status === 'searching_courier' && !o.courierUid)
-    );
+    // Only ready_for_courier orders belong in the venue "important" section.
+    // searching_courier (general pool) is visible to ALL couriers in watchAvailableOrders.
+    _venueOrders = orders.filter(o => o.status === 'ready_for_courier');
     // Haptic + sound for newly ready orders
     _venueOrders.filter(o => o.status === 'ready_for_courier').forEach(o => {
       if (!_shownImportant.has(o.id)) {
@@ -355,25 +329,15 @@ function renderVenueOrders() {
     return;
   }
 
-  const important = _venueOrders.filter(o => o.status === 'ready_for_courier');
-  const pool      = _venueOrders.filter(o => o.status === 'searching_courier' && !o.courierUid);
-
-  if (!important.length && !pool.length) {
+  // Venue tab only shows ready_for_courier orders for this venue's permanent couriers.
+  // General pool (searching_courier) is in the separate Pool tab visible to all couriers.
+  if (!_venueOrders.length) {
     list.innerHTML = '<div class="empty"><div class="empty-icon">✅</div><div class="empty-text">Нет ожидающих заказов</div></div>';
     return;
   }
 
-  let html = '';
-  if (important.length) {
-    html += `<div class="section-title" style="padding:0 4px;margin-bottom:6px">⚡ Готовы к выдаче (${important.length})</div>`;
-    html += important.map(o => _importantOrderCard(o)).join('');
-  }
-  if (pool.length) {
-    if (important.length) html += `<div class="section-title" style="padding:0 4px;margin:12px 0 6px">📭 Из общего пула (${pool.length})</div>`;
-    const byVenue = {};
-    for (const o of pool) { if (!byVenue[o.venueId]) byVenue[o.venueId] = []; byVenue[o.venueId].push(o); }
-    html += Object.values(byVenue).map(g => _poolBundleCard(g, myVenue)).join('');
-  }
+  let html = `<div class="section-title" style="padding:0 4px;margin-bottom:6px">⚡ Готовы к выдаче (${_venueOrders.length})</div>`;
+  html += _venueOrders.map(o => _importantOrderCard(o)).join('');
   list.innerHTML = html;
 }
 
