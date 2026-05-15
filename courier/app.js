@@ -260,6 +260,18 @@ function setNav(el) {
 }
 
 // ══════════════════════════════════════════════════════════
+//  VENUE LOCK HELPER
+// ══════════════════════════════════════════════════════════
+// Returns the venueId the courier is currently committed to (has active orders from),
+// or null if they have no active orders.
+// Rule: a courier may only hold orders from ONE venue at a time from the general pool.
+// They must complete (or return) all orders from that venue before accepting from another.
+function _getCourierLockedVenueId() {
+  if (!_myOrders.length) return null;
+  return _myOrders[0].venueId || null;
+}
+
+// ══════════════════════════════════════════════════════════
 //  AVAILABLE ORDERS (общий пул)
 // ══════════════════════════════════════════════════════════
 function watchAvailableOrders() {
@@ -279,14 +291,23 @@ function renderAvailableOrders() {
     list.innerHTML = '<div class="empty"><div class="empty-icon">📭</div><div class="empty-text">Нет доступных заказов</div></div>';
     return;
   }
-  const myVenue = COURIER_DATA?.primaryVenueId;
+  const myVenue      = COURIER_DATA?.primaryVenueId;
+  const lockedVenueId = _getCourierLockedVenueId();
   const byVenue = {};
   for (const o of _availOrders) {
     if (!byVenue[o.venueId]) byVenue[o.venueId] = [];
     byVenue[o.venueId].push(o);
   }
-  const groups = Object.values(byVenue).sort((a,b) => (a[0].venueId===myVenue?-1:1)-(b[0].venueId===myVenue?-1:1));
-  list.innerHTML = groups.map(g => _poolBundleCard(g, myVenue)).join('');
+  // Sort: locked venue first (if any), then own venue, then rest
+  const groups = Object.values(byVenue).sort((a, b) => {
+    const aId = a[0].venueId, bId = b[0].venueId;
+    if (lockedVenueId) {
+      if (aId === lockedVenueId && bId !== lockedVenueId) return -1;
+      if (bId === lockedVenueId && aId !== lockedVenueId) return  1;
+    }
+    return (aId === myVenue ? -1 : 1) - (bId === myVenue ? -1 : 1);
+  });
+  list.innerHTML = groups.map(g => _poolBundleCard(g, myVenue, lockedVenueId)).join('');
 }
 
 // ══════════════════════════════════════════════════════════
@@ -363,21 +384,44 @@ function _importantOrderCard(order) {
     </div>`;
 }
 
-function _poolBundleCard(orders, myVenueId) {
+function _poolBundleCard(orders, myVenueId, lockedVenueId) {
   const first  = orders[0];
   const isOwn  = first.venueId === myVenueId;
   const pool   = isOwn ? 'venue' : 'available';
   const ids    = orders.map(o => o.id).join(',');
   const totalDelivery = orders.reduce((s,o) => s+(o.deliveryPrice||0), 0);
   const totalAmt      = orders.reduce((s,o) => s+(o.total||0)+(o.deliveryPrice||0), 0);
+
+  // Locked = courier has active orders from a DIFFERENT venue
+  const isLocked = !!lockedVenueId && first.venueId !== lockedVenueId;
+  const isActive = !!lockedVenueId && first.venueId === lockedVenueId; // this is the venue they're working
+
   const addrLines = orders.map(o => {
     const addr = o.address;
     return addr
       ? `<div class="flex items-center gap-2"><span>📍</span><span>${escHtml(addr.street)} ${escHtml(addr.house)}${addr.apt?', кв.'+escHtml(addr.apt):''}</span></div>`
       : '<div>🏪 Самовывоз</div>';
   }).join('');
+
+  const lockBanner = isLocked
+    ? `<div style="margin-top:6px;padding:6px 8px;background:var(--warning-soft,#fef3c7);border-radius:6px;font-size:11px;color:var(--warning,#d97706)">
+         🔒 Сначала доставьте заказы из текущего кафе
+       </div>`
+    : '';
+  const activeBanner = isActive
+    ? `<div style="margin-top:6px;padding:6px 8px;background:var(--success-soft,#d1fae5);border-radius:6px;font-size:11px;color:var(--success,#059669)">
+         ✅ Ваши текущие заказы — можно добавить ещё
+       </div>`
+    : '';
+
+  const cardStyle  = isLocked ? 'opacity:0.55;pointer-events:none;' : 'cursor:pointer;';
+  const btnClass   = isLocked ? 'btn-ghost' : 'btn-primary';
+  const btnLabel   = isLocked ? '🔒 Недоступно' : '✅ Принять →';
+  const btnClick   = isLocked ? '' : `event.stopPropagation();openBundleAcceptSheet('${ids}','${pool}')`;
+  const cardClick  = isLocked ? '' : `openBundleAcceptSheet('${ids}','${pool}')`;
+
   return `
-    <div class="delivery-card" onclick="openBundleAcceptSheet('${ids}','${pool}')" style="cursor:pointer">
+    <div class="delivery-card" onclick="${cardClick}" style="${cardStyle}${isActive?'border-left:3px solid var(--success);':''}">
       <div class="delivery-card-hdr">
         <div>
           <div class="font-bold" style="font-size:14px">🏪 ${escHtml(first.venueName||'Заведение')}</div>
@@ -389,17 +433,18 @@ function _poolBundleCard(orders, myVenueId) {
         ${addrLines}
         <div class="flex items-center gap-2" style="margin-top:2px"><span>💰</span><span>${fmtPrice(totalAmt)}</span></div>
         ${isOwn?'<div class="pill" style="margin-top:4px;font-size:10px;width:fit-content;background:var(--primary)20;color:var(--primary)">⭐ Ваше кафе</div>':''}
+        ${lockBanner}${activeBanner}
       </div>
       <div class="delivery-card-foot">
-        <button class="btn btn-primary btn-sm" onclick="event.stopPropagation();openBundleAcceptSheet('${ids}','${pool}')">
-          ✅ Принять →
+        <button class="btn ${btnClass} btn-sm" ${isLocked?'disabled':''} onclick="${btnClick}">
+          ${btnLabel}
         </button>
       </div>
     </div>`;
 }
 
 // Kept for any legacy call paths
-function _orderPoolCard(o, myVenueId) { return _poolBundleCard([o], myVenueId); }
+function _orderPoolCard(o, myVenueId) { return _poolBundleCard([o], myVenueId, _getCourierLockedVenueId()); }
 
 // ── Accept Sheet ──
 async function openAcceptSheet(orderId, pool) {
@@ -442,6 +487,19 @@ async function acceptOrder(orderId) {
   // M-4: Use Firestore transaction to prevent race condition when multiple couriers
   // press Accept simultaneously. The transaction atomically reads the order status
   // and writes only if it hasn't already been taken.
+
+  // Venue lock check
+  const lockedVenueId = _getCourierLockedVenueId();
+  if (lockedVenueId) {
+    const order = _availOrders.find(o => o.id === orderId) || _venueOrders.find(o => o.id === orderId);
+    if (order && order.venueId !== lockedVenueId) {
+      closeAcceptSheet();
+      tgHaptic('error');
+      showToast('Сначала завершите текущие доставки', 'warning');
+      return;
+    }
+  }
+
   try {
     const orderRef = db.collection('orders').doc(orderId);
     await db.runTransaction(async txn => {
@@ -485,6 +543,16 @@ async function openBundleAcceptSheet(orderIdsStr, pool) {
   const src = pool==='venue' ? _venueOrders : _availOrders;
   const orders = ids.map(id => src.find(o=>o.id===id) || _availOrders.find(o=>o.id===id) || _venueOrders.find(o=>o.id===id)).filter(Boolean);
   if (!orders.length) return;
+
+  // Venue lock: can only hold orders from one venue at a time
+  const lockedVenueId = _getCourierLockedVenueId();
+  if (lockedVenueId && orders[0].venueId !== lockedVenueId) {
+    const lockedName = _myOrders[0]?.venueName || lockedVenueId;
+    tgHaptic('error');
+    showToast(`Сначала завершите доставки из «${lockedName}»`, 'warning');
+    return;
+  }
+
   _acceptOrderIds  = ids;
   _acceptOrderId   = ids[0];
   _acceptFromPool  = pool;
@@ -529,6 +597,18 @@ async function acceptBundleOrders() {
   // Reads every order first; if ANY is already taken, the whole transaction aborts
   // so the courier never gets a partial bundle.
   if (!_acceptOrderIds.length) return;
+
+  // Re-check venue lock — _myOrders may have changed since the sheet was opened
+  const lockedVenueId = _getCourierLockedVenueId();
+  const firstOrder = _availOrders.find(o => o.id === _acceptOrderIds[0])
+                  || _venueOrders.find(o => o.id === _acceptOrderIds[0]);
+  if (lockedVenueId && firstOrder && firstOrder.venueId !== lockedVenueId) {
+    closeAcceptSheet();
+    tgHaptic('error');
+    showToast('Сначала завершите текущие доставки', 'warning');
+    return;
+  }
+
   const ids   = [..._acceptOrderIds];
   const now   = new Date().toISOString();
   const cName = COURIER_DATA?.name || 'Курьер';
