@@ -735,9 +735,11 @@ function watchActiveOrders() {
     // Merge active orders with locally stored completed orders
     const storedAll = _loadOrdersFromStorage();
     const fsIds = new Set(active.map(o => o.id));
-    const localCompleted = storedAll.filter(o =>
-      ['delivered', 'cancelled', 'issued'].includes(o.status) && !fsIds.has(o.id)
-    );
+    // Any stored order absent from the Firestore active set has left it —
+    // either it properly completed (delivered/cancelled/issued) OR the app was
+    // closed while it was completing and its cached status is stale (e.g. 'pending').
+    // In both cases we keep it as history rather than silently discarding it.
+    const localCompleted = storedAll.filter(o => !fsIds.has(o.id));
     _allClientOrders = [...active, ...localCompleted];
     _saveOrdersToStorage(_allClientOrders);
 

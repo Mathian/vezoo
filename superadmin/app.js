@@ -488,7 +488,7 @@ async function saAddCourierToVenue(venueId) {
   const courier = await getCourier(link.uid); // Дыра №7
   if (!courier) { showToast('Этот пользователь не является курьером', 'error'); return; }
   const venue = await dbGet('venues', venueId);
-  await dbSet('courier_venue_links', link.uid, { uid: link.uid, venueId, venueName: venue?.name||'', status: 'pending', invitedAt: new Date().toISOString() });
+  await dbSet('courier_venue_links', link.uid, { uid: link.uid, venueId, venueName: venue?.name||'', venueAddress: venue?.address||'', status: 'pending', invitedAt: new Date().toISOString() });
   tgHaptic('success'); showToast('Приглашение курьеру отправлено', 'success');
   if (document.getElementById('sa-ven-courier-phone')) document.getElementById('sa-ven-courier-phone').value = '';
   await _loadSaVenueCouriers(venueId);

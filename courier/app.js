@@ -198,18 +198,24 @@ async function declineVenueInvite() {
   _venueInvite = null; initMain();
 }
 
-// ── Point 3: Boot recovery — repopulate delivery history from Firestore if localStorage was cleared ──
+// ── Boot history sync — merge Firestore delivered orders into local history ──
+// Runs every boot (not just when empty) so deliveries completed while the app
+// was closed are added to history without waiting for a docChanges() event.
 async function _ensureDeliveryHistory() {
-  if (_loadHistoryFromStorage().length) return; // already have data
   try {
-    // Fetch the last 50 delivered orders for this courier
     const recent = await dbQueryWhere('orders',
       [['courierUid', '==', STATE.uid], ['active', '==', false]],
       'createdAt', 'desc', 50
     );
     const delivered = recent.filter(o => o.status === 'delivered');
-    if (delivered.length) {
-      _saveHistoryToStorage(delivered);
+    if (!delivered.length) return;
+    const existing = _loadHistoryFromStorage();
+    const existingIds = new Set(existing.map(o => o.id));
+    const newOnes = delivered.filter(o => !existingIds.has(o.id));
+    if (newOnes.length) {
+      const merged = [...newOnes, ...existing]
+        .sort((a, b) => (b.deliveredAt || b.createdAt || '').localeCompare(a.deliveredAt || a.createdAt || ''));
+      _saveHistoryToStorage(merged);
     }
   } catch (e) { console.warn('[boot] ensureDeliveryHistory:', e.message); }
 }
@@ -231,10 +237,10 @@ async function initMain() {
   // Дыра №8: warm up venue cache
   _refreshCourierVenueCache();
 
-  // Point 3: recover delivery history from Firestore if localStorage was cleared
+  // Sync delivery history from Firestore (adds deliveries made while app was closed)
   _myHistory = _loadHistoryFromStorage();
-  if (!_myHistory.length) await _ensureDeliveryHistory();
-  _myHistory = _loadHistoryFromStorage(); // reload after potential recovery
+  await _ensureDeliveryHistory();
+  _myHistory = _loadHistoryFromStorage(); // reload after merge
   watchMyOrders();
   watchAvailableOrders();
   watchVenueOrders();

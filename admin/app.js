@@ -1103,7 +1103,7 @@ async function addPermCourier() {
   // Дыра №7: read from single couriers document
   const courier=await getCourier(link.uid);
   if (!courier) { showToast('Этот пользователь не является курьером','error'); return; }
-  await dbSet('courier_venue_links',link.uid,{uid:link.uid,venueId:VENUE.id,venueName:VENUE.name,status:'pending',invitedAt:new Date().toISOString()});
+  await dbSet('courier_venue_links',link.uid,{uid:link.uid,venueId:VENUE.id,venueName:VENUE.name,venueAddress:VENUE.address||'',status:'pending',invitedAt:new Date().toISOString()});
   tgHaptic('success'); showToast('Приглашение отправлено курьеру','success');
   document.getElementById('courier-phone').value='';
   await loadPermCouriers();
