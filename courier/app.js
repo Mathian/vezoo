@@ -42,9 +42,10 @@ let _acceptOrderId    = null;
 let _acceptOrderIds   = [];
 let _acceptFromPool   = 'available'; // 'available' | 'venue'
 let _myHistory        = [];
-const _HIST_KEY       = 'vez_courier_hist';
-function _loadHistoryFromStorage() { try { return JSON.parse(localStorage.getItem(_HIST_KEY)||'[]'); } catch { return []; } }
-function _saveHistoryToStorage(h)  { try { localStorage.setItem(_HIST_KEY, JSON.stringify(h)); } catch {} }
+// Key is per-user so two different couriers on the same device don't share history
+function _histKey() { return 'vez_courier_hist_' + (STATE.uid || 'anon'); }
+function _loadHistoryFromStorage() { try { return JSON.parse(localStorage.getItem(_histKey())||'[]'); } catch { return []; } }
+function _saveHistoryToStorage(h)  { try { localStorage.setItem(_histKey(), JSON.stringify(h)); } catch {} }
 let _shownImportant   = new Set();
 let _openMyOrderId    = null;
 
@@ -86,6 +87,13 @@ window.addEventListener('DOMContentLoaded', async () => {
   }
 
   STATE.user = existing; _saveState();
+  // Variant A: SA-triggered per-user cache reset
+  if (existing.resetCache === true && !sessionStorage.getItem('_vez_reset_done')) {
+    sessionStorage.setItem('_vez_reset_done', '1');
+    try { await dbUpdate('users', STATE.uid, { resetCache: false }); } catch {}
+    localStorage.clear(); location.reload(); return;
+  }
+  sessionStorage.removeItem('_vez_reset_done');
   await checkCourierStatus();
 });
 
@@ -176,6 +184,22 @@ async function declineVenueInvite() {
   _venueInvite = null; initMain();
 }
 
+// ── Point 3: Boot recovery — repopulate delivery history from Firestore if localStorage was cleared ──
+async function _ensureDeliveryHistory() {
+  if (_loadHistoryFromStorage().length) return; // already have data
+  try {
+    // Fetch the last 50 delivered orders for this courier
+    const recent = await dbQueryWhere('orders',
+      [['courierUid', '==', STATE.uid], ['active', '==', false]],
+      'createdAt', 'desc', 50
+    );
+    const delivered = recent.filter(o => o.status === 'delivered');
+    if (delivered.length) {
+      _saveHistoryToStorage(delivered);
+    }
+  } catch (e) { console.warn('[boot] ensureDeliveryHistory:', e.message); }
+}
+
 // ── Init main ──
 async function initMain() {
   document.getElementById('main-nav').style.display = 'flex';
@@ -193,7 +217,10 @@ async function initMain() {
   // Дыра №8: warm up venue cache
   _refreshCourierVenueCache();
 
-  _myHistory = _loadHistoryFromStorage(); // restore from localStorage before listener fires
+  // Point 3: recover delivery history from Firestore if localStorage was cleared
+  _myHistory = _loadHistoryFromStorage();
+  if (!_myHistory.length) await _ensureDeliveryHistory();
+  _myHistory = _loadHistoryFromStorage(); // reload after potential recovery
   watchMyOrders();
   watchAvailableOrders();
   watchVenueOrders();
@@ -420,18 +447,45 @@ async function openAcceptSheet(orderId, pool) {
 }
 
 async function acceptOrder(orderId) {
-  _shownAssigned.add(orderId);
-  await dbSet('orders', orderId, {
-    status: 'courier_assigned',
-    courierUid: STATE.uid,
-    courierName: COURIER_DATA?.name || 'Курьер',
-    courierPhone: COURIER_DATA?.phone || '',
-    assignedAt: new Date().toISOString()
-  });
-  closeAcceptSheet();
-  tgHaptic('success');
-  showToast('Заказ принят! Едете в кафе.', 'success');
-  navToMyOrders();
+  // M-4: Use Firestore transaction to prevent race condition when multiple couriers
+  // press Accept simultaneously. The transaction atomically reads the order status
+  // and writes only if it hasn't already been taken.
+  try {
+    const orderRef = db.collection('orders').doc(orderId);
+    await db.runTransaction(async txn => {
+      const snap = await txn.get(orderRef);
+      if (!snap.exists) throw Object.assign(new Error('not_found'), { code: 'not_found' });
+      const data = snap.data();
+      const ok = data.status === 'searching_courier' || data.status === 'ready_for_courier';
+      if (!ok) throw Object.assign(new Error('taken'), { code: 'taken' });
+      txn.update(orderRef, {
+        status: 'courier_assigned',
+        courierUid: STATE.uid,
+        courierName: COURIER_DATA?.name || 'Курьер',
+        courierPhone: COURIER_DATA?.phone || '',
+        assignedAt: new Date().toISOString()
+      });
+    });
+    _shownAssigned.add(orderId);
+    closeAcceptSheet();
+    tgHaptic('success');
+    showToast('Заказ принят! Едете в кафе.', 'success');
+    navToMyOrders();
+  } catch (e) {
+    if (e.code === 'taken') {
+      closeAcceptSheet();
+      tgHaptic('error');
+      showToast('Этот заказ уже взял другой курьер.', 'error');
+    } else if (e.code === 'not_found') {
+      closeAcceptSheet();
+      tgHaptic('error');
+      showToast('Заказ не найден.', 'error');
+    } else {
+      tgHaptic('error');
+      showToast('Ошибка при принятии заказа. Попробуйте ещё раз.', 'error');
+      console.warn('[acceptOrder] txn error:', e.message);
+    }
+  }
 }
 
 async function openBundleAcceptSheet(orderIdsStr, pool) {
@@ -479,22 +533,53 @@ async function openBundleAcceptSheet(orderIdsStr, pool) {
 }
 
 async function acceptBundleOrders() {
+  // M-4: Use Firestore transaction to atomically claim all bundle orders.
+  // Reads every order first; if ANY is already taken, the whole transaction aborts
+  // so the courier never gets a partial bundle.
   if (!_acceptOrderIds.length) return;
-  const now  = new Date().toISOString();
+  const ids   = [..._acceptOrderIds];
+  const now   = new Date().toISOString();
   const cName = COURIER_DATA?.name || 'Курьер';
-  for (const id of _acceptOrderIds) {
-    _shownAssigned.add(id);
-    await dbSet('orders', id, {
-      status: 'courier_assigned',
-      courierUid: STATE.uid, courierName: cName,
-      courierPhone: COURIER_DATA?.phone || '',
-      assignedAt: now
+  try {
+    const refs = ids.map(id => db.collection('orders').doc(id));
+    await db.runTransaction(async txn => {
+      const snaps = await Promise.all(refs.map(r => txn.get(r)));
+      for (const snap of snaps) {
+        if (!snap.exists) throw Object.assign(new Error('not_found'), { code: 'not_found' });
+        const data = snap.data();
+        const ok = data.status === 'searching_courier' || data.status === 'ready_for_courier';
+        if (!ok) throw Object.assign(new Error('taken'), { code: 'taken' });
+      }
+      // All orders are still available — claim them all atomically
+      for (const ref of refs) {
+        txn.update(ref, {
+          status: 'courier_assigned',
+          courierUid: STATE.uid, courierName: cName,
+          courierPhone: COURIER_DATA?.phone || '',
+          assignedAt: now
+        });
+      }
     });
+    ids.forEach(id => _shownAssigned.add(id));
+    closeAcceptSheet();
+    tgHaptic('success');
+    showToast(`Принято ${ids.length} заказ(а)! Едете в кафе.`, 'success');
+    navToMyOrders();
+  } catch (e) {
+    if (e.code === 'taken') {
+      closeAcceptSheet();
+      tgHaptic('error');
+      showToast('Один или несколько заказов уже взял другой курьер.', 'error');
+    } else if (e.code === 'not_found') {
+      closeAcceptSheet();
+      tgHaptic('error');
+      showToast('Один из заказов не найден.', 'error');
+    } else {
+      tgHaptic('error');
+      showToast('Ошибка при принятии заказов. Попробуйте ещё раз.', 'error');
+      console.warn('[acceptBundleOrders] txn error:', e.message);
+    }
   }
-  closeAcceptSheet();
-  tgHaptic('success');
-  showToast(`Принято ${_acceptOrderIds.length} заказ(а)! Едете в кафе.`, 'success');
-  navToMyOrders();
 }
 
 function closeAcceptSheet(e) {

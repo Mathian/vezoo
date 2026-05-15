@@ -50,6 +50,13 @@ window.addEventListener('DOMContentLoaded', async () => {
     existing.name = autoName;
   }
   STATE.user = existing; saveState();
+  // Variant A: SA-triggered per-user cache reset
+  if (existing.resetCache === true && !sessionStorage.getItem('_vez_reset_done')) {
+    sessionStorage.setItem('_vez_reset_done', '1');
+    try { await dbUpdate('users', STATE.uid, { resetCache: false }); } catch {}
+    localStorage.clear(); location.reload(); return;
+  }
+  sessionStorage.removeItem('_vez_reset_done');
   await checkVenueAndInit();
 });
 

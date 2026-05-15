@@ -48,6 +48,13 @@ window.addEventListener('DOMContentLoaded', async () => {
     return;
   }
   STATE.user = existing; saveState();
+  // Variant A: SA-triggered per-user cache reset
+  if (existing.resetCache === true && !sessionStorage.getItem('_vez_reset_done')) {
+    sessionStorage.setItem('_vez_reset_done', '1');
+    try { await dbUpdate('users', STATE.uid, { resetCache: false }); } catch {}
+    localStorage.clear(); location.reload(); return;
+  }
+  sessionStorage.removeItem('_vez_reset_done');
   showPinScreen();
 });
 
@@ -553,6 +560,7 @@ async function openSaCourier(courierUid) {
         </div>`:''}
       ${courier.status==='active'?`<button class="btn btn-danger btn-sm" onclick="saBlockCourier('${courierUid}')">🚫 Заблокировать</button>`:''}
       ${courier.status==='blocked'?`<button class="btn btn-success btn-sm" onclick="saApproveCourier('${courierUid}')">🟢 Разблокировать</button>`:''}
+      <button class="btn btn-secondary btn-sm" onclick="saResetUserCache('${courierUid}')">🔄 Сбросить кэш</button>
     </div>`;
   document.getElementById('courier-detail-overlay').classList.add('open');
 }
@@ -730,9 +738,12 @@ async function openSaUser(uid) {
       <div class="flex justify-between"><span class="text-dim">Статус</span><span>${user.blocked?'<span style="color:var(--danger)">Заблокирован</span>':'Активен'}</span></div>
       <div class="flex justify-between"><span class="text-dim">Регистрация</span><span>${fmtDate(user.createdAt)}</span></div>
     </div>
-    <button class="btn ${user.blocked?'btn-success':'btn-danger'} btn-sm" onclick="saToggleUserBlock('${uid}',${!!user.blocked})">
-      ${user.blocked?'🟢 Разблокировать':'🚫 Заблокировать'}
-    </button>`;
+    <div style="display:flex;flex-direction:column;gap:8px">
+      <button class="btn ${user.blocked?'btn-success':'btn-danger'} btn-sm" onclick="saToggleUserBlock('${uid}',${!!user.blocked})">
+        ${user.blocked?'🟢 Разблокировать':'🚫 Заблокировать'}
+      </button>
+      <button class="btn btn-secondary btn-sm" onclick="saResetUserCache('${uid}')">🔄 Сбросить кэш</button>
+    </div>`;
   document.getElementById('user-overlay').classList.add('open');
 }
 
@@ -749,6 +760,12 @@ async function saToggleUserBlock(uid, currentlyBlocked) {
   // Refresh current user tab
   const activeTab = document.querySelector('#s-sa-settings .cat-tab.active');
   if (activeTab) activeTab.click();
+}
+
+async function saResetUserCache(uid) {
+  await dbUpdate('users', uid, { resetCache: true });
+  tgHaptic('light');
+  showToast('Флаг сброса установлен. Сработает при следующем открытии приложения.', 'info');
 }
 
 function closeUserSheet(e) {

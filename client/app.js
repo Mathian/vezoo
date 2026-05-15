@@ -89,6 +89,14 @@ window.addEventListener('DOMContentLoaded', async () => {
     existing.name = autoName;
   }
   STATE.user = existing; _saveClientState();
+  // Variant A: SA-triggered per-user cache reset.
+  // sessionStorage guard prevents an infinite reload if the Firestore write fails.
+  if (existing.resetCache === true && !sessionStorage.getItem('_vez_reset_done')) {
+    sessionStorage.setItem('_vez_reset_done', '1');
+    try { await dbUpdate('users', STATE.uid, { resetCache: false }); } catch {}
+    localStorage.clear(); location.reload(); return;
+  }
+  sessionStorage.removeItem('_vez_reset_done');
   initMain();
 });
 
@@ -122,12 +130,29 @@ async function submitAgree() {
   initMain();
 }
 
+// ── Point 3: Boot recovery — repopulate order history from Firestore if localStorage was cleared ──
+async function _ensureOrderHistory() {
+  if (_loadOrdersFromStorage().length) return; // already have data
+  try {
+    // Fetch the last 50 orders for this client (both active and completed)
+    const recent = await dbQueryWhere('orders',
+      [['clientUid', '==', STATE.uid]],
+      'createdAt', 'desc', 50
+    );
+    if (recent.length) {
+      _saveOrdersToStorage(recent);
+    }
+  } catch (e) { console.warn('[boot] ensureOrderHistory:', e.message); }
+}
+
 // ── Init main ──
 async function initMain() {
   document.getElementById('main-nav').style.display = 'flex';
   FAVORITES = JSON.parse(localStorage.getItem('vez_favorites') || '[]');
   // Pre-load app versions for cache validation
   await _getAppVersions();
+  // Point 3: recover history from Firestore if localStorage was cleared
+  await _ensureOrderHistory();
   loadVenues();
   watchActiveOrders();
   showScreen('s-home');
@@ -674,8 +699,21 @@ async function submitOrder() {
 // ══════════════════════════════════════════════════════════
 let _allClientOrders = [];
 
-function _loadOrdersFromStorage() { try { return JSON.parse(localStorage.getItem('vez_client_orders') || '[]'); } catch { return []; } }
-function _saveOrdersToStorage(orders) { try { localStorage.setItem('vez_client_orders', JSON.stringify(orders)); } catch {} }
+const _CLIENT_HIST_MAX = 7;
+// Key is per-user so two different clients on the same device don't share history
+function _ordersStorageKey() { return 'vez_client_orders_' + (STATE.uid || 'anon'); }
+function _loadOrdersFromStorage() {
+  try { return JSON.parse(localStorage.getItem(_ordersStorageKey()) || '[]'); } catch { return []; }
+}
+function _saveOrdersToStorage(orders) {
+  try {
+    const DONE = ['delivered', 'cancelled', 'issued'];
+    const active    = orders.filter(o => !DONE.includes(o.status));
+    // Cap history at _CLIENT_HIST_MAX entries (keep the most recent ones)
+    const completed = orders.filter(o =>  DONE.includes(o.status)).slice(0, _CLIENT_HIST_MAX);
+    localStorage.setItem(_ordersStorageKey(), JSON.stringify([...active, ...completed]));
+  } catch {}
+}
 
 // H-2: Subscribe only to active client orders (not full history).
 // Completed orders are captured via docChanges() type='removed' and merged into localStorage.
