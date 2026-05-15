@@ -269,7 +269,7 @@ function watchAvailableOrders() {
     const cnt = _availOrders.length;
     document.getElementById('avail-badge').textContent = cnt;
     document.getElementById('avail-badge').classList.toggle('hidden', cnt === 0);
-    if (document.getElementById('s-available').classList.contains('active')) renderAvailableOrders();
+    renderAvailableOrders();
   });
 }
 
@@ -317,7 +317,7 @@ function watchVenueOrders() {
     const cnt = _venueOrders.length;
     document.getElementById('venue-badge').textContent = cnt;
     document.getElementById('venue-badge').classList.toggle('hidden', cnt === 0);
-    if (document.getElementById('s-venue-orders').classList.contains('active')) renderVenueOrders();
+    renderVenueOrders();
   });
 }
 
@@ -605,7 +605,7 @@ function watchMyOrders() {
       }
     });
 
-    if (document.getElementById('s-my-orders').classList.contains('active')) renderMyOrders();
+    renderMyOrders();
 
     // Auto-refresh open order detail if data changed (e.g. admin handed off → status delivering)
     if (_openMyOrderId && document.getElementById('my-order-overlay')?.classList.contains('open')) {
@@ -768,11 +768,25 @@ async function openMyOrder(orderId) {
 
 async function courierDeliver(orderId) {
   const doDeliver = async () => {
+    const deliveredAt = new Date().toISOString();
     await dbSet('orders', orderId, {
       status: 'delivered', active: false,       // Дыра №5
-      deliveredAt: new Date().toISOString(),
+      deliveredAt,
       clientNotification: { type: 'delivered', seen: false }
     });
+    // Optimistic local update — remove from _myOrders immediately, don't wait for onSnapshot
+    const finished = _myOrders.find(o => o.id === orderId);
+    _myOrders = _myOrders.filter(o => o.id !== orderId);
+    if (finished) {
+      const deliveredEntry = { ...finished, status: 'delivered', active: false, deliveredAt };
+      const existingIds = new Set(_myHistory.map(o => o.id));
+      if (!existingIds.has(orderId)) {
+        _myHistory = [deliveredEntry, ..._myHistory]
+          .sort((a, b) => (b.deliveredAt || b.createdAt || '').localeCompare(a.deliveredAt || a.createdAt || ''));
+        _saveHistoryToStorage(_myHistory);
+      }
+    }
+    renderMyOrders();
     // Increment total deliveries (from local data, no extra Firestore read)
     const total = (COURIER_DATA?.totalDeliveries || 0) + 1;
     COURIER_DATA = { ...COURIER_DATA, totalDeliveries: total };

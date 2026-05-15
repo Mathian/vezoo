@@ -746,7 +746,7 @@ function watchActiveOrders() {
     ACTIVE_ORDERS = stored.filter(o => !['delivered', 'cancelled', 'issued'].includes(o.status))
       .sort((a, b) => (b.createdAt || '').localeCompare(a.createdAt || ''));
     document.getElementById('order-nav-badge').classList.toggle('hidden', ACTIVE_ORDERS.length === 0);
-    if (document.getElementById('s-orders').classList.contains('active')) renderAllOrders();
+    renderAllOrders();
   }
 
   const _applyActiveOrders = (active, justFinished) => {
@@ -804,7 +804,9 @@ function watchActiveOrders() {
       }
     });
 
-    if (document.getElementById('s-orders').classList.contains('active')) renderAllOrders();
+    // Always re-render — even if the user is on a different screen the DOM update
+    // is cheap and ensures the orders list is current when they navigate back.
+    renderAllOrders();
   };
 
   if (!_fbR) {
@@ -1067,6 +1069,14 @@ async function clientCancelOrder(orderId) {
       cancelledBy: 'client',
       clientNotification: { type: 'cancelled', seen: true, message: 'Вы отменили заказ.' }
     });
+    // Optimistic local update — don't wait for onSnapshot to re-render.
+    // onSnapshot will fire too but will find the state already correct.
+    const now = new Date().toISOString();
+    _allClientOrders = _allClientOrders.map(o =>
+      o.id === orderId ? { ...o, status: 'cancelled', active: false, cancelledAt: now, cancelledBy: 'client' } : o
+    );
+    _saveOrdersToStorage(_allClientOrders);
+    renderAllOrders();
     tgHaptic('light');
     showToast('Заказ отменён', 'info');
   };
