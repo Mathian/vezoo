@@ -202,7 +202,7 @@ function renderVenues(catId) {
         <div class="venue-card-img">${cover}</div>
         <div class="venue-card-body">
           <div class="flex justify-between items-center">
-            <div class="venue-card-name">${v.name}${cartBadge}</div>
+            <div class="venue-card-name">${escHtml(v.name)}${cartBadge}</div>
             <button class="venue-fav${isFav ? ' active' : ''}" onclick="event.stopPropagation();toggleFav('${v.id}',this)">${isFav ? '❤️' : '🤍'}</button>
           </div>
           <div class="venue-card-meta">
@@ -329,7 +329,7 @@ function renderVenueMenuGrid(cat) {
 
   grid.innerHTML = items.map(item => {
     const imgHtml = item.imageUrl
-      ? `<div class="menu-card-img"><img src="${item.imageUrl}" alt="${item.name}" loading="lazy" onerror="this.parentElement.innerHTML='<span style=font-size:44px>${item.emoji || '🍽️'}</span>'"></div>`
+      ? `<div class="menu-card-img"><img src="${item.imageUrl}" alt="${escHtml(item.name)}" loading="lazy" onerror="this.parentElement.innerHTML='<span style=font-size:44px>${item.emoji || '🍽️'}</span>'"></div>`
       : `<div class="menu-card-img"><span style="font-size:44px">${item.emoji || '🍽️'}</span></div>`;
 
     if (item.variants && item.variants.length > 0) {
@@ -337,7 +337,7 @@ function renderVenueMenuGrid(cat) {
         const key = `${item.id}::${v.name}`;
         const qty = (venueCart.find(c => c.cartKey === key) || { qty: 0 }).qty;
         return `<div class="variant-row" id="vr-${CSS.escape(key)}">
-          <span class="variant-name">${v.name}</span>
+          <span class="variant-name">${escHtml(v.name)}</span>
           <div style="display:flex;align-items:center;gap:4px">
             <span class="variant-price">${fmtPrice(v.price, _selectedCurrency)}</span>
             <div class="qty-ctrl">
@@ -347,11 +347,11 @@ function renderVenueMenuGrid(cat) {
           </div>
         </div>`;
       }).join('');
-      return `<div class="menu-card menu-card-wide" id="mc-${item.id}">${imgHtml}<div class="menu-card-body"><div class="menu-card-name">${item.name}</div>${item.description ? `<div class="menu-card-desc">${item.description}</div>` : ''}<div class="variants-container" style="margin-top:8px">${variantRows}</div></div></div>`;
+      return `<div class="menu-card menu-card-wide" id="mc-${item.id}">${imgHtml}<div class="menu-card-body"><div class="menu-card-name">${escHtml(item.name)}</div>${item.description ? `<div class="menu-card-desc">${escHtml(item.description)}</div>` : ''}<div class="variants-container" style="margin-top:8px">${variantRows}</div></div></div>`;
     } else {
       const cartItem = venueCart.find(c => c.cartKey === item.id);
       const qty = cartItem ? cartItem.qty : 0;
-      return `<div class="menu-card" id="mc-${item.id}">${imgHtml}<div class="menu-card-body"><div class="menu-card-name">${item.name}</div>${item.description ? `<div class="menu-card-desc">${item.description}</div>` : ''}<div class="qty-row"><div class="menu-card-price">${fmtPrice(item.price, _selectedCurrency)}</div><div class="qty-ctrl">${qty > 0 ? `<div class="qty-btn" onclick="changeQty('${item.id}',-1)">−</div><div class="qty-num" id="qn-${item.id}">${qty}</div>` : ''}<div class="qty-btn add" onclick="changeQty('${item.id}',1)">+</div></div></div></div></div>`;
+      return `<div class="menu-card" id="mc-${item.id}">${imgHtml}<div class="menu-card-body"><div class="menu-card-name">${escHtml(item.name)}</div>${item.description ? `<div class="menu-card-desc">${escHtml(item.description)}</div>` : ''}<div class="qty-row"><div class="menu-card-price">${fmtPrice(item.price, _selectedCurrency)}</div><div class="qty-ctrl">${qty > 0 ? `<div class="qty-btn" onclick="changeQty('${item.id}',-1)">−</div><div class="qty-num" id="qn-${item.id}">${qty}</div>` : ''}<div class="qty-btn add" onclick="changeQty('${item.id}',1)">+</div></div></div></div></div>`;
     }
   }).join('');
 }
@@ -677,6 +677,9 @@ let _allClientOrders = [];
 function _loadOrdersFromStorage() { try { return JSON.parse(localStorage.getItem('vez_client_orders') || '[]'); } catch { return []; } }
 function _saveOrdersToStorage(orders) { try { localStorage.setItem('vez_client_orders', JSON.stringify(orders)); } catch {} }
 
+// H-2: Subscribe only to active client orders (not full history).
+// Completed orders are captured via docChanges() type='removed' and merged into localStorage.
+// REQUIRES Firestore composite index: orders — clientUid ASC + active ASC
 function watchActiveOrders() {
   if (_ordersUnsub) { _ordersUnsub(); _ordersUnsub = null; }
 
@@ -690,16 +693,18 @@ function watchActiveOrders() {
     if (document.getElementById('s-orders').classList.contains('active')) renderAllOrders();
   }
 
-  _ordersUnsub = onQuerySnap('orders', 'clientUid', '==', STATE.uid, orders => {
-    // Merge Firestore active orders with locally stored completed orders
+  const _applyActiveOrders = (active, justFinished) => {
+    // Merge active orders with locally stored completed orders
     const storedAll = _loadOrdersFromStorage();
-    const fsIds = new Set(orders.map(o => o.id));
-    const localCompleted = storedAll.filter(o => ['delivered', 'cancelled', 'issued'].includes(o.status) && !fsIds.has(o.id));
-    const merged = [...orders, ...localCompleted];
-    _allClientOrders = merged;
-    _saveOrdersToStorage(merged);
+    const fsIds = new Set(active.map(o => o.id));
+    const localCompleted = storedAll.filter(o =>
+      ['delivered', 'cancelled', 'issued'].includes(o.status) && !fsIds.has(o.id)
+    );
+    _allClientOrders = [...active, ...localCompleted];
+    _saveOrdersToStorage(_allClientOrders);
 
-    ACTIVE_ORDERS = orders.filter(o => !['delivered', 'cancelled', 'issued'].includes(o.status))
+    ACTIVE_ORDERS = active
+      .filter(o => !['delivered', 'cancelled', 'issued'].includes(o.status))
       .sort((a, b) => (b.createdAt || '').localeCompare(a.createdAt || ''));
 
     document.getElementById('order-nav-badge').classList.toggle('hidden', ACTIVE_ORDERS.length === 0);
@@ -714,13 +719,13 @@ function watchActiveOrders() {
       searching_courier: 2, courier_assigned: 2, ready_for_courier: 2,
       delivering: 3, delivered: 4, cancelled: 4, issued: 4
     };
-    orders.forEach(o => {
+    // Check notifications on active orders
+    active.forEach(o => {
       const n = o.clientNotification;
       if (!n || n.seen) return;
       const notifLvl  = _notifLevel[n.type]    || 0;
       const statusLvl = _statusLevel[o.status] || 0;
       if (notifLvl < statusLvl) {
-        // Notification is from an earlier stage — mark seen silently
         dbSet('orders', o.id, { clientNotification: { ...n, seen: true } });
         return;
       }
@@ -730,9 +735,51 @@ function watchActiveOrders() {
         _showClientNotification(o);
       }
     });
+    // Also show notifications for orders that just finished (removed from active query)
+    justFinished.forEach(o => {
+      const n = o.clientNotification;
+      if (!n || n.seen) return;
+      const key = `${o.id}:${n.type}`;
+      if (!_shownNotifs.has(key)) {
+        _shownNotifs.add(key);
+        _showClientNotification(o);
+      }
+    });
 
     if (document.getElementById('s-orders').classList.contains('active')) renderAllOrders();
-  });
+  };
+
+  if (!_fbR) {
+    // Offline fallback: poll active orders only
+    const t = setInterval(async () => {
+      const orders = await dbQueryWhere('orders', [['clientUid','==',STATE.uid],['active','==',true]]);
+      _applyActiveOrders(orders, []);
+    }, 15000);
+    _ordersUnsub = () => clearInterval(t);
+    return;
+  }
+
+  _ordersUnsub = db.collection('orders')
+    .where('clientUid', '==', STATE.uid)
+    .where('active', '==', true)
+    .onSnapshot(snap => {
+      // Capture orders that just left the active set (delivered/cancelled/issued)
+      const justFinished = snap.docChanges()
+        .filter(c => c.type === 'removed')
+        .map(c => ({ id: c.doc.id, ...c.doc.data() }));
+
+      if (justFinished.length) {
+        const storedAll = _loadOrdersFromStorage();
+        for (const fin of justFinished) {
+          const idx = storedAll.findIndex(o => o.id === fin.id);
+          if (idx >= 0) storedAll[idx] = fin;
+          else storedAll.unshift(fin);
+        }
+        _saveOrdersToStorage(storedAll);
+      }
+
+      _applyActiveOrders(snap.docs.map(d => ({ id: d.id, ...d.data() })), justFinished);
+    }, e => console.warn('[DB] activeOrders snap:', e.message));
 }
 
 function _showClientNotification(order) {
@@ -809,14 +856,14 @@ function renderHistoryCard(o) {
   return `
     <div class="order-card" style="cursor:pointer;border-left:3px solid ${(o.status === 'delivered' || o.status === 'issued') ? 'var(--success)' : 'var(--danger)'}" onclick="openHistoryOrder('${o.id}')">
       <div class="order-card-hdr">
-        <div><div class="font-bold" style="font-size:13px">📍 ${o.venueName || 'Заведение'}</div><div class="order-id">${fmtDate(o.createdAt)} · #${(o.id || '').slice(-6)}</div></div>
+        <div><div class="font-bold" style="font-size:13px">📍 ${escHtml(o.venueName || 'Заведение')}</div><div class="order-id">${fmtDate(o.createdAt)} · #${(o.id || '').slice(-6)}</div></div>
         <div style="text-align:right">
           <span class="${statusBadgeClass(o.status)}">${statusLabel(o.status)}</span>
           <div class="order-total" style="font-size:15px;margin-top:3px">${fmtPrice((o.total||0)+(o.deliveryPrice||0), o.currency || _selectedCurrency)}</div>
         </div>
       </div>
       <div class="order-card-body">
-        <div class="text-sm text-dim">${(o.items || []).map(i => `${i.emoji || '🍽️'} ${i.name} ×${i.qty}`).join(', ')}</div>
+        <div class="text-sm text-dim">${(o.items || []).map(i => `${i.emoji || '🍽️'} ${escHtml(i.name)} ×${i.qty}`).join(', ')}</div>
         <div class="text-xs text-dim" style="margin-top:4px">Нажмите для деталей →</div>
       </div>
     </div>`;
@@ -835,13 +882,13 @@ function openHistoryOrder(orderId) {
       <span class="${statusBadgeClass(o.status)}">${statusLabel(o.status)}</span>
     </div>
     <div class="card card-body" style="margin-bottom:12px;gap:6px;display:flex;flex-direction:column">
-      <div class="flex justify-between"><span class="text-dim">Заведение</span><span class="font-bold">${o.venueName||'—'}</span></div>
-      ${addr?`<div class="flex justify-between"><span class="text-dim">Адрес</span><span style="text-align:right;max-width:60%">${addr.street} ${addr.house}${addr.apt?', кв.'+addr.apt:''}</span></div>`:'<div class="flex justify-between"><span class="text-dim">Получение</span><span>🏪 Самовывоз</span></div>'}
+      <div class="flex justify-between"><span class="text-dim">Заведение</span><span class="font-bold">${escHtml(o.venueName||'—')}</span></div>
+      ${addr?`<div class="flex justify-between"><span class="text-dim">Адрес</span><span style="text-align:right;max-width:60%">${escHtml(addr.street)} ${escHtml(addr.house)}${addr.apt?', кв.'+escHtml(addr.apt):''}</span></div>`:'<div class="flex justify-between"><span class="text-dim">Получение</span><span>🏪 Самовывоз</span></div>'}
       <div class="flex justify-between"><span class="text-dim">Оплата</span><span>${o.payment==='cash'?'💵 Наличные':'💳 Карта'}</span></div>
     </div>
     <div class="section-title" style="margin-bottom:6px">Состав</div>
     <div class="card card-body" style="margin-bottom:12px;gap:4px;display:flex;flex-direction:column">
-      ${(o.items||[]).map(it=>`<div class="flex justify-between text-sm"><span>${it.emoji||'🍽️'} ${it.name}${it.variantName?' ('+it.variantName+')':''} ×${it.qty}</span><span>${fmtPrice(it.price*it.qty, cur)}</span></div>`).join('')}
+      ${(o.items||[]).map(it=>`<div class="flex justify-between text-sm"><span>${it.emoji||'🍽️'} ${escHtml(it.name)}${it.variantName?' ('+escHtml(it.variantName)+')':''} ×${it.qty}</span><span>${fmtPrice(it.price*it.qty, cur)}</span></div>`).join('')}
       <div class="divider" style="margin:4px 0"></div>
       ${o.deliveryPrice?`<div class="flex justify-between text-sm"><span class="text-dim">Доставка</span><span>${fmtPrice(o.deliveryPrice, cur)}</span></div>`:''}
       <div class="flex justify-between"><span class="font-bold">Итого</span><span class="font-bold text-primary">${fmtPrice((o.total||0)+(o.deliveryPrice||0), cur)}</span></div>
@@ -934,21 +981,21 @@ function renderOrderCard(o) {
   return `
     <div class="order-card" style="margin-bottom:2px">
       <div class="order-card-hdr">
-        <div><div class="font-bold" style="font-size:13px">📍 ${o.venueName || 'Заведение'}</div><div class="order-id">#${(o.id || '').slice(-6)} · ${fmtDate(o.createdAt)}</div></div>
+        <div><div class="font-bold" style="font-size:13px">📍 ${escHtml(o.venueName || 'Заведение')}</div><div class="order-id">#${(o.id || '').slice(-6)} · ${fmtDate(o.createdAt)}</div></div>
         <span class="${statusBadgeClass(o.status)}">${statusLabel(o.status)}</span>
       </div>
       <div class="order-card-body">
         <div class="status-track" style="margin-bottom:12px">${track}</div>
         <div style="display:flex;flex-direction:column;gap:4px;font-size:13px;margin-bottom:8px">
-          ${(o.items || []).map(it => `<div class="flex justify-between"><span>${it.emoji || '🍽️'} ${it.name}${it.variantName ? ' (' + it.variantName + ')' : ''} ×${it.qty}</span><span class="font-bold">${fmtPrice(it.price * it.qty, cur)}</span></div>`).join('')}
+          ${(o.items || []).map(it => `<div class="flex justify-between"><span>${it.emoji || '🍽️'} ${escHtml(it.name)}${it.variantName ? ' (' + escHtml(it.variantName) + ')' : ''} ×${it.qty}</span><span class="font-bold">${fmtPrice(it.price * it.qty, cur)}</span></div>`).join('')}
         </div>
         <div class="divider" style="margin:6px 0"></div>
         <div class="flex justify-between"><span class="text-dim">Товары</span><span>${fmtPrice(o.total, cur)}</span></div>
         ${o.deliveryPrice ? `<div class="flex justify-between"><span class="text-dim">Доставка</span><span>${fmtPrice(o.deliveryPrice, cur)}</span></div>` : ''}
         <div class="flex justify-between"><span class="font-bold">Итого</span><span class="font-bold text-primary">${fmtPrice((o.total||0)+(o.deliveryPrice||0), cur)}</span></div>
         <div class="flex justify-between"><span class="text-dim">Оплата</span><span>${o.payment === 'cash' ? '💵 Наличные' : '💳 Карта'}</span></div>
-        ${addr ? `<div class="flex justify-between"><span class="text-dim">Адрес</span><span style="text-align:right;max-width:58%">${addr.street} ${addr.house}${addr.apt ? ', кв.' + addr.apt : ''}</span></div>` : ''}
-        ${o.courierName ? `<div class="flex justify-between"><span class="text-dim">Курьер</span><span>${o.courierName}</span></div>` : ''}
+        ${addr ? `<div class="flex justify-between"><span class="text-dim">Адрес</span><span style="text-align:right;max-width:58%">${escHtml(addr.street)} ${escHtml(addr.house)}${addr.apt ? ', кв.' + escHtml(addr.apt) : ''}</span></div>` : ''}
+        ${o.courierName ? `<div class="flex justify-between"><span class="text-dim">Курьер</span><span>${escHtml(o.courierName)}</span></div>` : ''}
         ${o.status === 'pending' ? `<div style="margin-top:10px;text-align:right"><button class="btn btn-danger btn-sm" onclick="clientCancelOrder('${o.id}')">❌ Отменить заказ</button></div>` : ''}
       </div>
     </div>`;

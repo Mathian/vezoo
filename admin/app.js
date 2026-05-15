@@ -364,7 +364,7 @@ function renderMenuItems(cat) {
   if (!items.length) { list.innerHTML='<div class="empty"><div class="empty-icon">🍽️</div><div class="empty-text">Нет позиций в меню.<br>Нажмите «+ Добавить».</div></div>'; return; }
   list.innerHTML = items.map(item => {
     const priceStr = item.variants?.length
-      ? item.variants.map(v=>`${v.name}: ${fmtPrice(v.price)}`).join(' · ')
+      ? item.variants.map(v=>`${escHtml(v.name)}: ${fmtPrice(v.price)}`).join(' · ')
       : fmtPrice(item.price);
     const hiddenBadge = item.available===false
       ? `<span style="display:inline-block;margin-left:6px;background:var(--danger-soft);color:var(--danger);font-size:10px;padding:1px 6px;border-radius:4px;font-weight:700;vertical-align:middle">Скрыт</span>`
@@ -373,9 +373,9 @@ function renderMenuItems(cat) {
       <div class="admin-item">
         <div class="admin-item-emoji">${item.emoji||'🍽️'}</div>
         <div class="admin-item-body">
-          <div class="admin-item-name">${item.name}${hiddenBadge}</div>
+          <div class="admin-item-name">${escHtml(item.name)}${hiddenBadge}</div>
           <div class="admin-item-price">${priceStr}</div>
-          ${item.category?`<div class="text-xs text-dim" style="margin-top:2px">${item.category}</div>`:''}
+          ${item.category?`<div class="text-xs text-dim" style="margin-top:2px">${escHtml(item.category)}</div>`:''}
         </div>
         <div class="admin-item-actions">
           <button class="btn btn-icon btn-ghost" onclick="openEditItem('${item.id}')">✏️</button>
@@ -438,7 +438,7 @@ function addVariant() { _variants.push({name:'',price:0}); renderVariants(); }
 function renderVariants() {
   document.getElementById('variants-list').innerHTML=_variants.map((v,i)=>`
     <div class="inp-row" style="align-items:flex-end">
-      <div class="field"><label>Вариант</label><input class="inp" value="${v.name}" placeholder="Маленький" oninput="_variants[${i}].name=this.value"></div>
+      <div class="field"><label>Вариант</label><input class="inp" value="${escHtml(v.name)}" placeholder="Маленький" oninput="_variants[${i}].name=this.value"></div>
       <div class="field"><label>Цена</label><input class="inp" type="number" value="${v.price}" min="0" oninput="_variants[${i}].price=Number(this.value)"></div>
       <button class="btn btn-icon" style="width:34px;height:34px;background:var(--danger-soft);color:var(--danger);border:none;border-radius:8px;cursor:pointer;flex-shrink:0" onclick="removeVariant(${i})">×</button>
     </div>`).join('');
@@ -502,6 +502,7 @@ const _ACTIVE_STATUSES = ['pending','accepted','cooking','searching_courier','co
 // Дыра №5: Only listen to active orders.
 // REQUIRES Firestore composite index: orders — venueId ASC + active ASC
 function watchNewOrders() {
+  if (_ordersUnsub) { _ordersUnsub(); _ordersUnsub = null; }   // H-5: unsubscribe before re-subscribing
   _ordersUnsub = onQuerySnapWhere('orders', [
     ['venueId', '==', VENUE.id],
     ['active', '==', true]
@@ -569,12 +570,12 @@ function renderOrdersList(orders) {
   list.innerHTML=orders.sort((a,b)=>(b.createdAt||'').localeCompare(a.createdAt||'')).map(o=>`
     <div class="order-card" onclick="openOrderDetail('${o.id}')" style="cursor:pointer">
       <div class="order-card-hdr">
-        <div><div class="font-bold" style="font-size:13px">${o.clientName||'Клиент'}${o.isManual?` <span class="badge badge-accepted" style="font-size:10px">📞</span>`:''}</div><div class="order-id">${fmtDate(o.createdAt)} · #${(o.id||'').slice(-6)}</div></div>
+        <div><div class="font-bold" style="font-size:13px">${escHtml(o.clientName||'Клиент')}${o.isManual?` <span class="badge badge-accepted" style="font-size:10px">📞</span>`:''}</div><div class="order-id">${fmtDate(o.createdAt)} · #${(o.id||'').slice(-6)}</div></div>
         <div style="text-align:right"><span class="${statusBadgeClass(o.status)}">${statusLabel(o.status)}</span><div style="font-weight:700;font-size:15px;color:var(--primary);margin-top:3px">${fmtPrice((o.total||0)+(o.deliveryPrice||0))}</div></div>
       </div>
       <div class="order-card-body">
-        <div class="text-sm text-dim">${(o.items||[]).map(i=>`${i.emoji||'🍽️'} ${i.name} ×${i.qty}`).join(', ')}</div>
-        ${o.address?`<div class="text-sm text-dim mt-1">📍 ${o.address.street||o.address} ${o.address.house||''}${o.address.apt?', кв.'+o.address.apt:''}</div>`:''}
+        <div class="text-sm text-dim">${(o.items||[]).map(i=>`${i.emoji||'🍽️'} ${escHtml(i.name)} ×${i.qty}`).join(', ')}</div>
+        ${o.address?`<div class="text-sm text-dim mt-1">📍 ${escHtml(o.address.street||o.address)} ${escHtml(o.address.house||'')}${o.address.apt?', кв.'+escHtml(o.address.apt):''}</div>`:''}
       </div>
     </div>`).join('');
 }
@@ -598,19 +599,19 @@ async function openOrderDetail(orderId) {
       <span class="${statusBadgeClass(order.status)}">${statusLabel(order.status)}</span>
     </div>
     <div class="card card-body" style="margin-bottom:12px;gap:6px;display:flex;flex-direction:column">
-      <div class="flex justify-between"><span class="text-dim">Клиент</span><span class="font-bold">${order.clientName||'—'}</span></div>
-      <div class="flex justify-between"><span class="text-dim">Телефон</span><span style="font-family:monospace">${order.clientPhone||'—'}</span></div>
+      <div class="flex justify-between"><span class="text-dim">Клиент</span><span class="font-bold">${escHtml(order.clientName||'—')}</span></div>
+      <div class="flex justify-between"><span class="text-dim">Телефон</span><span style="font-family:monospace">${escHtml(order.clientPhone||'—')}</span></div>
       ${order.status==='cancelled'&&order.cancelledBy?`<div class="flex justify-between"><span class="text-dim">Отменил</span><span style="color:var(--danger)">${{client:'Клиент',operator:'Оператор',admin:'Администратор'}[order.cancelledBy]||'—'}</span></div>`:''}
       ${callBtn?`<div>${callBtn}</div>`:''}
-      ${(order.courierName||order.courierPhone)?`<div class="flex justify-between"><span class="text-dim">Курьер</span><span style="text-align:right;max-width:60%">${order.courierName||'—'}${order.courierPhone?' · '+order.courierPhone:''}</span></div>`:'' }
+      ${(order.courierName||order.courierPhone)?`<div class="flex justify-between"><span class="text-dim">Курьер</span><span style="text-align:right;max-width:60%">${escHtml(order.courierName||'—')}${order.courierPhone?' · '+escHtml(order.courierPhone):''}</span></div>`:'' }
       ${callCourierBtn?`<div>${callCourierBtn}</div>`:''}
       <div class="flex justify-between"><span class="text-dim">Оплата</span><span>${order.payment==='cash'?'💵 Наличные':'💳 Карта'}</span></div>
-      <div class="flex justify-between"><span class="text-dim">Адрес</span><span style="text-align:right;max-width:60%">${addrStr}</span></div>
-      ${order.comment?`<div class="flex justify-between"><span class="text-dim">Комментарий</span><span style="text-align:right;max-width:60%">${order.comment}</span></div>`:''}
+      <div class="flex justify-between"><span class="text-dim">Адрес</span><span style="text-align:right;max-width:60%">${escHtml(addrStr)}</span></div>
+      ${order.comment?`<div class="flex justify-between"><span class="text-dim">Комментарий</span><span style="text-align:right;max-width:60%">${escHtml(order.comment)}</span></div>`:''}
     </div>
     <div class="section-title" style="margin-bottom:6px">Состав</div>
     <div class="card card-body" style="margin-bottom:12px;gap:5px;display:flex;flex-direction:column">
-      ${(order.items||[]).map(it=>`<div class="flex justify-between"><span>${it.emoji||'🍽️'} ${it.name}${it.variantName?' ('+it.variantName+')':''} ×${it.qty}</span><span class="font-bold">${fmtPrice(it.price*it.qty)}</span></div>`).join('')}
+      ${(order.items||[]).map(it=>`<div class="flex justify-between"><span>${it.emoji||'🍽️'} ${escHtml(it.name)}${it.variantName?' ('+escHtml(it.variantName)+')':''} ×${it.qty}</span><span class="font-bold">${fmtPrice(it.price*it.qty)}</span></div>`).join('')}
       <div class="divider"></div>
       ${order.deliveryPrice?`<div class="flex justify-between"><span class="text-dim">Доставка</span><span>${fmtPrice(order.deliveryPrice)}</span></div>`:''}
       <div class="flex justify-between"><span class="font-bold">Итого</span><span class="font-bold text-primary">${fmtPrice(order.total+(order.deliveryPrice||0))}</span></div>
@@ -634,8 +635,8 @@ function renderAdminOrderActions(order) {
   if (order.status==='accepted'||order.status==='cooking') return `<div style="display:flex;flex-direction:column;gap:8px"><button class="btn btn-success btn-sm" onclick="adminMarkReadyForCourier('${order.id}')">✅ Заказ готов</button><div class="btn-row"><button class="btn btn-secondary btn-sm" onclick="adminSearchCourier('${order.id}')">🔍 В общий пул</button><button class="btn btn-primary btn-sm" onclick="openHandoffFlow()">📦 Передать</button></div>${cancelBtn}</div>${blBtn}`;
   if (order.status==='ready_for_courier') return `<div style="display:flex;flex-direction:column;gap:8px"><div class="alert-box success" style="font-size:13px">⚡ Заказ готов — ждём курьера кафе</div><button class="btn btn-primary btn-sm" onclick="openHandoffFlow()">📦 Передать курьеру</button><button class="btn btn-secondary btn-sm" onclick="adminSearchCourier('${order.id}')">🔍 Выставить в общий пул</button>${cancelBtn}</div>${blBtn}`;
   if (order.status==='searching_courier') return `<div style="display:flex;flex-direction:column;gap:8px"><div class="alert-box info" style="font-size:13px">⏳ Ждём курьера из пула…</div><button class="btn btn-primary btn-sm" onclick="openHandoffFlow()">📦 Передать курьеру</button>${cancelBtn}</div>${blBtn}`;
-  if (order.status==='courier_assigned') return `<div style="display:flex;flex-direction:column;gap:8px"><div class="alert-box info" style="font-size:13px">🏃 <strong>${order.courierName||'Курьер'}</strong> едет в кафе</div><button class="btn btn-success btn-sm" onclick="openHandoffFlow()">📦 Передать заказ курьеру</button>${cancelBtn}</div>${blBtn}`;
-  if (order.status==='delivering') return `<div style="display:flex;flex-direction:column;gap:8px"><div class="alert-box success">🚴 Курьер: <strong>${order.courierName||''}</strong></div>${cancelBtn}</div>${blBtn}`;
+  if (order.status==='courier_assigned') return `<div style="display:flex;flex-direction:column;gap:8px"><div class="alert-box info" style="font-size:13px">🏃 <strong>${escHtml(order.courierName||'Курьер')}</strong> едет в кафе</div><button class="btn btn-success btn-sm" onclick="openHandoffFlow()">📦 Передать заказ курьеру</button>${cancelBtn}</div>${blBtn}`;
+  if (order.status==='delivering') return `<div style="display:flex;flex-direction:column;gap:8px"><div class="alert-box success">🚴 Курьер: <strong>${escHtml(order.courierName||'')}</strong></div>${cancelBtn}</div>${blBtn}`;
   if (order.status==='cancelled') {
     const byLabel = {client:'клиентом',operator:'оператором',admin:'администратором'}[order.cancelledBy]||'';
     return `<div class="alert-box danger">❌ Заказ отменён${byLabel?' '+byLabel:''}</div>${blBtn}`;
@@ -742,8 +743,8 @@ async function findHandoffCourier() {
     <div class="handoff-courier-found">
       <div class="handoff-courier-avatar">🚴</div>
       <div>
-        <div style="font-weight:700;font-size:15px">${courier.name||'Курьер'}</div>
-        <div style="font-size:13px;color:var(--text-dim)">${courier.phone||phone}</div>
+        <div style="font-weight:700;font-size:15px">${escHtml(courier.name||'Курьер')}</div>
+        <div style="font-size:13px;color:var(--text-dim)">${escHtml(courier.phone||phone)}</div>
       </div>
     </div>`;
 
@@ -757,7 +758,7 @@ async function findHandoffCourier() {
   ordList.innerHTML=orders.map(o=>`
     <div class="handoff-order-row" id="ho_${o.id}" onclick="toggleHandoffOrder('${o.id}')">
       <div style="flex:1">
-        <div style="font-weight:600;font-size:14px">#${(o.id||'').slice(-6)} — ${o.clientName||'Клиент'}</div>
+        <div style="font-weight:600;font-size:14px">#${(o.id||'').slice(-6)} — ${escHtml(o.clientName||'Клиент')}</div>
         <div style="font-size:12px;color:var(--text-dim)">${statusLabel(o.status)} · ${fmtPrice((o.total||0)+(o.deliveryPrice||0))}</div>
       </div>
       <div id="ho_chk_${o.id}" style="font-size:20px;color:var(--text-muted)">○</div>
@@ -839,12 +840,21 @@ function moPhoneInput(input) {
 
   if (!matches.length) { dd.style.display = 'none'; return; }
   dd.style.display = '';
+  // C-2: Use data-* attributes to pass user-controlled values — no onclick injection risk
   dd.innerHTML = matches.map(l =>
-    `<div class="autocomplete-item" onclick="moSelectClient('${(l.phone||'').replace(/'/g,'')}','${(l.firstName||'').replace(/'/g,'')}','${(l.uid||'').replace(/'/g,'')}')">
-      <span style="font-family:monospace">${l.phone}</span>
-      <span style="color:var(--text-dim)">${l.firstName||''} ${l.lastName||''}</span>
+    `<div class="autocomplete-item"
+      data-phone="${escHtml(l.phone||'')}"
+      data-name="${escHtml(l.firstName||'')}"
+      data-uid="${escHtml(l.uid||'')}"
+      onclick="moSelectClientFromEl(this)">
+      <span style="font-family:monospace">${escHtml(l.phone||'')}</span>
+      <span style="color:var(--text-dim)">${escHtml((l.firstName||'') + (l.lastName ? ' ' + l.lastName : ''))}</span>
     </div>`
   ).join('');
+}
+
+function moSelectClientFromEl(el) {
+  moSelectClient(el.dataset.phone, el.dataset.name, el.dataset.uid);
 }
 
 async function moSelectClient(phone, name, uid) {
@@ -1102,7 +1112,7 @@ async function loadPermCouriers() {
   listEl.innerHTML=rows.map(r=>`
     <div class="flex items-center gap-2">
       <div class="li-icon yellow" style="width:34px;height:34px;font-size:16px">🚴</div>
-      <div style="flex:1"><div class="font-bold text-sm">${r.courierName}</div><div class="text-xs text-dim">${r.phone} · ${r.status==='confirmed'?'<span class="text-success">Подтвердил</span>':'Ожидает'}</div></div>
+      <div style="flex:1"><div class="font-bold text-sm">${escHtml(r.courierName)}</div><div class="text-xs text-dim">${escHtml(r.phone)} · ${r.status==='confirmed'?'<span class="text-success">Подтвердил</span>':'Ожидает'}</div></div>
       <button class="btn btn-xs" style="background:var(--danger-soft);color:var(--danger);border:none;padding:4px 8px;border-radius:6px;cursor:pointer" onclick="removePermCourier('${r.uid}')">×</button>
     </div>`).join('');
 }
@@ -1138,7 +1148,7 @@ async function loadBlacklist() {
   if (!items.length) { listEl.innerHTML='<div class="text-dim text-sm">Чёрный список пуст</div>'; return; }
   listEl.innerHTML=items.map(b=>`
     <div class="flex items-center gap-2">
-      <div style="flex:1"><div class="font-bold text-sm">${b.clientPhone||b.clientUid}</div><div class="text-xs text-dim">${fmtDate(b.addedAt)}</div></div>
+      <div style="flex:1"><div class="font-bold text-sm">${escHtml(b.clientPhone||b.clientUid)}</div><div class="text-xs text-dim">${fmtDate(b.addedAt)}</div></div>
       <button class="btn btn-xs" style="background:var(--danger-soft);color:var(--danger);border:none;padding:4px 8px;border-radius:6px;cursor:pointer" onclick="removeFromBlacklist('${b.venueId}_${b.clientUid}')">×</button>
     </div>`).join('');
 }

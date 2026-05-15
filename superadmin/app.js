@@ -10,6 +10,8 @@ let _saStatsPeriod = 7; // days; 0 = all time; -1 = custom range
 let _saEditVenueId    = null;
 let _saVenPayMethods  = { cash: true, card: true };
 let _saVenCoverDataUrl = null;
+let _saVenuesCache    = null;   // H-3: session-level cache; cleared on venue save/block
+let _saClientCount    = null;   // H-3: session-level count; set once per session
 
 // ══════════════════════════════════════════════════════════
 //  BOOT
@@ -188,9 +190,9 @@ async function loadAllVenues() {
       <div class="list-item" onclick="openSaVenueEdit('${v.id}')">
         <div class="li-icon yellow" style="font-size:24px">${cat?.icon||'🏪'}</div>
         <div class="li-body">
-          <div class="li-title">${v.name}${v.blocked?' <span style="color:var(--danger);font-size:11px">BLOCKED</span>':''}</div>
-          <div class="li-sub">${cat?.name||'Без категории'} · ${v.cityName||'—'}</div>
-          <div class="li-sub">${v.address||'—'}</div>
+          <div class="li-title">${escHtml(v.name)}${v.blocked?' <span style="color:var(--danger);font-size:11px">BLOCKED</span>':''}</div>
+          <div class="li-sub">${escHtml(cat?.name||'Без категории')} · ${escHtml(v.cityName||'—')}</div>
+          <div class="li-sub">${escHtml(v.address||'—')}</div>
         </div>
         <div style="display:flex;flex-direction:column;gap:4px;align-items:flex-end">${badges.join('')}</div>
       </div>`;
@@ -416,6 +418,7 @@ async function saveSaVenue(venueId) {
   };
   await dbSet('venues', vId, data);
   bumpVersion('venues'); // Дыра №4: invalidate client venue cache
+  _saVenuesCache = null; // H-3: invalidate SA stats venue cache
   closeVenueSheet(); tgHaptic('success');
   showToast(isNew ? 'Заведение создано' : 'Заведение обновлено', 'success');
   await loadAllVenues();
@@ -425,6 +428,7 @@ async function saToggleVenueBlock(venueId, currentlyBlocked) {
   if (!confirm(currentlyBlocked?'Разблокировать заведение?':'Заблокировать заведение?')) return;
   await dbSet('venues', venueId, { blocked: !currentlyBlocked });
   bumpVersion('venues'); // Дыра №4
+  _saVenuesCache = null; // H-3: invalidate SA stats venue cache
   closeVenueSheet(); tgHaptic('light');
   showToast(currentlyBlocked?'Разблокировано':'Заблокировано', 'info');
   loadAllVenues();
@@ -518,8 +522,8 @@ async function loadCouriersByStatus(status, el) {
       <div class="list-item" onclick="openSaCourier('${c.uid||c.id}')">
         <div class="li-icon yellow">🚴</div>
         <div class="li-body">
-          <div class="li-title">${c.name||'—'} ${rating}</div>
-          <div class="li-sub">${c.phone||'—'} · ${fmtDate(c.createdAt)}</div>
+          <div class="li-title">${escHtml(c.name||'—')} ${rating}</div>
+          <div class="li-sub">${escHtml(c.phone||'—')} · ${fmtDate(c.createdAt)}</div>
         </div>
         <span class="badge badge-${status==='pending'?'moderation':status==='active'?'approved':'rejected'}">${status==='pending'?'Проверка':status==='active'?'Активен':'Заблокирован'}</span>
       </div>`;
@@ -533,12 +537,12 @@ async function openSaCourier(courierUid) {
   const totalRev = deliveredOrders.reduce((s,o)=>s+(o.total||0),0);
   const content = document.getElementById('sa-courier-detail');
   content.innerHTML = `
-    <div class="sheet-title">${courier.name||'Курьер'}</div>
+    <div class="sheet-title">${escHtml(courier.name||'Курьер')}</div>
     <div class="card card-body" style="margin-bottom:12px;gap:6px;display:flex;flex-direction:column">
-      <div class="flex justify-between"><span class="text-dim">Телефон</span><span style="font-family:monospace">${courier.phone||'—'}</span></div>
-      <div class="flex justify-between"><span class="text-dim">Статус</span><span>${courier.status}</span></div>
+      <div class="flex justify-between"><span class="text-dim">Телефон</span><span style="font-family:monospace">${escHtml(courier.phone||'—')}</span></div>
+      <div class="flex justify-between"><span class="text-dim">Статус</span><span>${escHtml(courier.status)}</span></div>
       <div class="flex justify-between"><span class="text-dim">Доставлено</span><span class="font-bold">${deliveredOrders.length}</span></div>
-      <div class="flex justify-between"><span class="text-dim">Город</span><span>${courier.cityName||'—'}</span></div>
+      <div class="flex justify-between"><span class="text-dim">Город</span><span>${escHtml(courier.cityName||'—')}</span></div>
       <div class="flex justify-between"><span class="text-dim">Регистрация</span><span>${fmtDate(courier.createdAt)}</span></div>
     </div>
     <div style="display:flex;flex-direction:column;gap:8px">
@@ -603,27 +607,37 @@ function loadSaStatsCustom() {
 }
 
 async function loadSaStats() {
-  const [venues, allOrders, users, couriers] = await Promise.all([
-    dbGetAll('venues'), dbGetAll('orders'), dbGetAll('users'), dbGetAll('couriers')
-  ]);
+  // H-3: Use session-level cache for static data (venues list, client count).
+  // Only orders are queried per-period to avoid loading the full collection each time.
+  if (!_saVenuesCache)    _saVenuesCache = await dbGetAll('venues');
+  if (_saClientCount === null) {
+    const clients = await dbQuery('users', 'agreedClient', '==', true);
+    _saClientCount = clients.length;
+  }
+  const venues = _saVenuesCache;
 
-  // Filter by period
-  let orders = allOrders;
-  if (_saStatsPeriod === -1) {
+  // Query only the orders that fall within the selected period.
+  let orders;
+  if (_saStatsPeriod === 0) {
+    // All-time: limit to 2000 to avoid excessive reads
+    orders = await dbGetAll('orders', 'createdAt', 'desc', 2000);
+  } else if (_saStatsPeriod === -1) {
     // Custom date range
     const dfrom = document.getElementById('sa-date-from')?.value;
     const dto   = document.getElementById('sa-date-to')?.value;
     if (dfrom || dto) {
-      orders = allOrders.filter(o => {
-        const d = (o.createdAt||'').slice(0,10);
-        if (dfrom && d < dfrom) return false;
-        if (dto   && d > dto)   return false;
-        return true;
-      });
+      const conditions = [];
+      if (dfrom) conditions.push(['createdAt', '>=', dfrom + 'T00:00:00.000Z']);
+      if (dto)   conditions.push(['createdAt', '<=', dto   + 'T23:59:59.999Z']);
+      orders = await dbQueryWhere('orders', conditions, 'createdAt', 'desc', 2000);
+    } else {
+      orders = [];
     }
-  } else if (_saStatsPeriod > 0) {
+  } else {
+    // Quick period (7/30/90 days): query only from cutoff onwards
+    // REQUIRES Firestore index: orders — createdAt ASC (single-field, auto-created)
     const cutoff = new Date(Date.now() - _saStatsPeriod * 86400000).toISOString();
-    orders = allOrders.filter(o => (o.createdAt||'') >= cutoff);
+    orders = await dbQueryWhere('orders', [['createdAt', '>=', cutoff]], 'createdAt', 'desc', 2000);
   }
 
   const revenue = orders.filter(o=>o.status==='delivered').reduce((s,o)=>s+(o.total||0),0);
@@ -631,7 +645,7 @@ async function loadSaStats() {
   grid.innerHTML = `
     <div class="stat-card"><div class="stat-val">${venues.filter(v=>v.status==='approved').length}</div><div class="stat-lbl">Заведений</div></div>
     <div class="stat-card"><div class="stat-val">${orders.filter(o=>o.status==='delivered').length}</div><div class="stat-lbl">Доставлено</div></div>
-    <div class="stat-card"><div class="stat-val">${users.filter(u=>u.role==='client').length}</div><div class="stat-lbl">Клиентов</div></div>
+    <div class="stat-card"><div class="stat-val">${_saClientCount}</div><div class="stat-lbl">Клиентов</div></div>
     <div class="stat-card"><div class="stat-val text-primary">${fmtPrice(revenue)}</div><div class="stat-lbl">Оборот</div></div>`;
 
   const venueStats = venues.filter(v=>v.status==='approved').map(v => {
@@ -644,7 +658,7 @@ async function loadSaStats() {
   document.getElementById('sa-stats-venues').innerHTML = venueStats.filter(v=>v.orders>0).map(v=>`
     <div class="list-item" style="cursor:default">
       <div class="li-icon yellow">🏪</div>
-      <div class="li-body"><div class="li-title">${v.name}</div><div class="li-sub">${v.delivered} доставлено из ${v.orders}</div></div>
+      <div class="li-body"><div class="li-title">${escHtml(v.name)}</div><div class="li-sub">${v.delivered} доставлено из ${v.orders}</div></div>
       <div class="li-price">${fmtPrice(v.revenue)}</div>
     </div>`).join('') || '<div class="empty" style="padding:30px 24px"><div class="empty-icon">📊</div><div class="empty-text">Нет данных за период</div></div>';
 }
@@ -664,8 +678,8 @@ async function loadUsersByRole(role, el) {
       <div class="list-item" onclick="openSaUser('${c.uid||c.id}')">
         <div class="li-icon yellow" style="font-size:22px">🚴</div>
         <div class="li-body">
-          <div class="li-title">${c.name||'—'}${c.status==='blocked'?' <span style="color:var(--danger);font-size:11px">BLOCKED</span>':''}</div>
-          <div class="li-sub">${c.phone||'—'} · <span style="color:${c.status==='active'?'var(--success)':c.status==='blocked'?'var(--danger)':'var(--warning)'}">${c.status==='active'?'Активен':c.status==='blocked'?'Заблокирован':'На проверке'}</span></div>
+          <div class="li-title">${escHtml(c.name||'—')}${c.status==='blocked'?' <span style="color:var(--danger);font-size:11px">BLOCKED</span>':''}</div>
+          <div class="li-sub">${escHtml(c.phone||'—')} · <span style="color:${c.status==='active'?'var(--success)':c.status==='blocked'?'var(--danger)':'var(--warning)'}">${c.status==='active'?'Активен':c.status==='blocked'?'Заблокирован':'На проверке'}</span></div>
         </div>
         <div class="chevron">›</div>
       </div>`).join('');
@@ -690,8 +704,8 @@ async function loadUsersByRole(role, el) {
       <div class="list-item" onclick="openSaUser('${u.uid||u.id}')">
         <div class="avatar" style="width:36px;height:36px;font-size:14px">${(u.name||'?')[0].toUpperCase()}</div>
         <div class="li-body">
-          <div class="li-title">${u.name||'—'}${u.blocked?' <span style="color:var(--danger);font-size:11px">BLOCKED</span>':''}</div>
-          <div class="li-sub">${u.phone||'—'}${roleIcons.length?' · '+roleIcons.join(' '):''}</div>
+          <div class="li-title">${escHtml(u.name||'—')}${u.blocked?' <span style="color:var(--danger);font-size:11px">BLOCKED</span>':''}</div>
+          <div class="li-sub">${escHtml(u.phone||'—')}${roleIcons.length?' · '+roleIcons.join(' '):''}</div>
         </div>
         <div class="chevron">›</div>
       </div>`;
@@ -708,11 +722,11 @@ async function openSaUser(uid) {
   if (user.agreedSA || user.role==='superadmin')        roleIcons.push('👑 Суперадмин');
   const content = document.getElementById('sa-user-detail');
   content.innerHTML = `
-    <div class="sheet-title">${user.name||'—'}</div>
+    <div class="sheet-title">${escHtml(user.name||'—')}</div>
     <div class="card card-body" style="margin-bottom:12px;gap:6px;display:flex;flex-direction:column">
-      <div class="flex justify-between"><span class="text-dim">Телефон</span><span style="font-family:monospace">${user.phone||'—'}</span></div>
+      <div class="flex justify-between"><span class="text-dim">Телефон</span><span style="font-family:monospace">${escHtml(user.phone||'—')}</span></div>
       <div class="flex justify-between"><span class="text-dim">Роли</span><span style="text-align:right;font-size:12px;max-width:60%">${roleIcons.join('<br>')||user.role||'—'}</span></div>
-      <div class="flex justify-between"><span class="text-dim">Город</span><span>${user.cityName||'—'}</span></div>
+      <div class="flex justify-between"><span class="text-dim">Город</span><span>${escHtml(user.cityName||'—')}</span></div>
       <div class="flex justify-between"><span class="text-dim">Статус</span><span>${user.blocked?'<span style="color:var(--danger)">Заблокирован</span>':'Активен'}</span></div>
       <div class="flex justify-between"><span class="text-dim">Регистрация</span><span>${fmtDate(user.createdAt)}</span></div>
     </div>

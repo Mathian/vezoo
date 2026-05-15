@@ -326,6 +326,16 @@ function fmtCountdown(ms) {
   return `${String(m).padStart(2,'0')}:${String(s).padStart(2,'0')}`;
 }
 
+// ─────────────────────── HTML escaping (C-2 XSS) ───────────────────────
+function escHtml(str) {
+  return String(str ?? '')
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;');
+}
+
 function statusLabel(st) {
   return {
     pending:'Ожидает', accepted:'Принят', cooking:'Готовится',
