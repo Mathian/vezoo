@@ -123,14 +123,13 @@ async function submitAgree() {
     createdAt: new Date().toISOString()
   };
   await dbSet('users', STATE.uid, STATE.user);
-  // Дыра №7: single couriers document
-  const existingCourier = await getCourier(STATE.uid);
-  if (!existingCourier) {
-    await setCourier(STATE.uid, {
-      uid: STATE.uid, name: autoName, phone: linkData?.phone || '',
-      status: 'pending', totalDeliveries: 0, createdAt: new Date().toISOString()
-    });
-  }
+  // Always (re-)create the courier doc on agreement — this is the registration event.
+  // The old guard `if (!existingCourier)` caused the doc not to be re-created after
+  // a manual deletion because getCourier still found stale data in couriers/all.
+  await setCourier(STATE.uid, {
+    uid: STATE.uid, name: autoName, phone: linkData?.phone || '',
+    status: 'pending', totalDeliveries: 0, createdAt: new Date().toISOString()
+  });
   _saveState();
   document.getElementById('s-agree').style.display = 'none';
   showScreen('s-pending');
@@ -147,7 +146,22 @@ async function checkCourierStatus() {
     courier.totalDeliveries = localDeliveries;
   }
   COURIER_DATA = courier;
-  if (!courier)                         { showScreen('s-pending'); return; }
+  if (!courier) {
+    // Courier doc is missing (e.g. manually deleted) but user has agreedCourier:true.
+    // Auto-recreate with 'pending' so the SA panel can pick it up.
+    if (_fbR) {
+      const fresh = {
+        uid: STATE.uid,
+        name: STATE.user?.name || _getTgName() || 'Курьер',
+        phone: STATE.user?.phone || '',
+        status: 'pending', totalDeliveries: 0,
+        createdAt: new Date().toISOString()
+      };
+      await setCourier(STATE.uid, fresh);
+      COURIER_DATA = fresh;
+    }
+    showScreen('s-pending'); return;
+  }
   if (courier.status === 'pending')     { showScreen('s-pending'); return; }
   if (courier.status === 'blocked')     { showScreen('s-blocked'); return; }
 

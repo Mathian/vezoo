@@ -105,9 +105,15 @@ async function dbGet(col, id) {
         const d = s.data();
         try { localStorage.setItem(`${PFX}${col}_${id}`, JSON.stringify(d)); } catch {}
         return d;
+      } else {
+        // Firestore confirmed the document was deleted — clear stale local cache
+        // and return null immediately (do NOT fall through to stale localStorage).
+        try { localStorage.removeItem(`${PFX}${col}_${id}`); } catch {}
+        return null;
       }
     } catch (e) { console.warn(`[DB] get ${col}/${id}:`, e.message); }
   }
+  // Offline fallback: use locally cached value if Firebase is unavailable
   try { const r = localStorage.getItem(`${PFX}${col}_${id}`); return r ? JSON.parse(r) : null; }
   catch { return null; }
 }
@@ -237,11 +243,19 @@ function onQuerySnapWhere(col, conditions, cb) {
 // Additionally, all couriers are mirrored into couriers/all: { couriers: { uid: {...} } }
 // for fast bulk lookups (avoids N separate Firestore reads per courier list).
 async function getCourier(uid) {
-  // Try batch document first (one cached read covers many couriers)
+  // Individual doc is authoritative — SA queries run against individual docs,
+  // so we must check it first. If it was manually deleted, dbGet returns null
+  // (after the dbGet fix: Firestore "not found" clears stale cache and returns null).
+  const indiv = await dbGet('couriers', uid);
+  if (indiv) return indiv;
+  // Fallback: batch doc (covers couriers not yet written individually, or offline).
   const all = await dbGet('couriers', 'all');
-  if (all?.couriers?.[uid]) return all.couriers[uid];
-  // Fallback: individual doc
-  return await dbGet('couriers', uid);
+  if (all?.couriers?.[uid]) {
+    // Individual doc is missing but batch has the data — re-sync so SA queries work.
+    if (_fbR) setCourier(uid, all.couriers[uid]); // fire-and-forget
+    return all.couriers[uid];
+  }
+  return null;
 }
 async function getCourierAll() {
   const doc = await dbGet('couriers', 'all');
