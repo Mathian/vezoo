@@ -136,15 +136,17 @@
       <button class="btn btn-outline btn-sm" onclick="changePinSa()">Сохранить PIN</button>
     </div>
 
-    <!-- Users quick stats -->
+    <!-- Users search -->
     <div class="section-title">Пользователи</div>
     <div id="sa-users-quick" style="display:flex;flex-direction:column;gap:8px">
-      <div class="cat-tabs" style="padding:0 0 8px">
-        <button class="cat-tab active" onclick="loadUsersByRole('client',this)">👤 Клиенты</button>
-        <button class="cat-tab" onclick="loadUsersByRole('admin',this)">🏪 Админы</button>
-        <button class="cat-tab" onclick="loadUsersByRole('courier',this)">🚴 Курьеры</button>
+      <div style="display:flex;gap:8px">
+        <input class="inp" id="sa-user-search" type="tel" placeholder="+7 (777) 000-00-00" style="flex:1"
+          onkeydown="if(event.key==='Enter')searchSaUsers()">
+        <button class="btn btn-primary btn-sm" style="white-space:nowrap" onclick="searchSaUsers()">🔍 Найти</button>
       </div>
-      <div id="sa-users-list" style="display:flex;flex-direction:column;gap:8px"></div>
+      <div id="sa-users-list" style="display:flex;flex-direction:column;gap:8px">
+        <div class="text-dim text-sm" style="padding:6px 0;text-align:center">Введите номер телефона для поиска</div>
+      </div>
     </div>
   </div>
 </div>

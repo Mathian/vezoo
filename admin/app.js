@@ -515,15 +515,28 @@ function watchNewOrders() {
   });
 }
 
+// Format a Date as YYYY-MM-DD in LOCAL time (not UTC).
+// Using toISOString() would give the UTC date, which is one day behind
+// for UTC+ timezones (e.g. Kazakhstan UTC+5: midnight local = 19:00 prev day UTC).
+function _localDateStr(d) {
+  return d.getFullYear() + '-' +
+    String(d.getMonth() + 1).padStart(2, '0') + '-' +
+    String(d.getDate()).padStart(2, '0');
+}
+
 // Дыра №9 helper: fetch history using venueDateKey (day-by-day, max 7 days)
 async function _fetchHistoryOrders(from, to) {
   const seenIds = new Set();
   const orders  = [];
-  let current   = new Date(from + 'T00:00:00');
-  const end     = new Date(to   + 'T00:00:00');
+  // Parse as local midnight — avoid 'T00:00:00Z' (UTC) vs 'T00:00:00' (local) confusion
+  // by building the Date from individual parts
+  const [fy, fm, fd] = from.split('-').map(Number);
+  const [ty, tm, td] = to.split('-').map(Number);
+  let current = new Date(fy, fm - 1, fd);        // local midnight
+  const end   = new Date(ty, tm - 1, td);        // local midnight
   let days = 0;
   while (current <= end && days < 7) {
-    const dateStr = current.toISOString().slice(0, 10);
+    const dateStr = _localDateStr(current);       // local YYYY-MM-DD
     try {
       const dayOrds = await dbQuery('orders', 'venueDateKey', '==', VENUE.id + '_' + dateStr);
       for (const o of dayOrds) {
@@ -550,7 +563,7 @@ async function loadOrders(tab, el) {
     renderOrdersList(_allOrders.filter(o => o.status === 'pending'));
   } else {
     // History — separate Firestore query per day (Дыра №9)
-    const today = new Date().toISOString().slice(0,10);
+    const today = _localDateStr(new Date()); // local date, not UTC
     const dateEl = document.getElementById('admin-hist-date');
     if (dateEl && !dateEl.value) dateEl.value = today;
     const selectedDate = dateEl?.value || today;

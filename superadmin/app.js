@@ -597,7 +597,7 @@ function closeCourierDetailSheet(e) {
 // ══════════════════════════════════════════════════════════
 async function loadSaSettings() {
   await loadSaStats();
-  loadUsersByRole('client');
+  // Users section is search-based — no auto-load on tab open
 }
 
 function setSaPeriod(days, el) {
@@ -713,6 +713,62 @@ async function loadUsersByRole(role, el) {
     if (u.agreedClient   || u.role==='client')     roleIcons.push('👤');
     if (u.agreedAdmin    || u.role==='admin')       roleIcons.push('🏪');
     if (u.agreedSA       || u.role==='superadmin')  roleIcons.push('👑');
+    return `
+      <div class="list-item" onclick="openSaUser('${u.uid||u.id}')">
+        <div class="avatar" style="width:36px;height:36px;font-size:14px">${(u.name||'?')[0].toUpperCase()}</div>
+        <div class="li-body">
+          <div class="li-title">${escHtml(u.name||'—')}${u.blocked?' <span style="color:var(--danger);font-size:11px">BLOCKED</span>':''}</div>
+          <div class="li-sub">${escHtml(u.phone||'—')}${roleIcons.length?' · '+roleIcons.join(' '):''}</div>
+        </div>
+        <div class="chevron">›</div>
+      </div>`;
+  }).join('');
+}
+
+// ── Phone-based user search ──────────────────────────────────────────────────
+async function searchSaUsers() {
+  const rawInput = (document.getElementById('sa-user-search')?.value || '').trim();
+  if (!rawInput) { showToast('Введите номер телефона', 'warning'); return; }
+  const digits = rawInput.replace(/\D/g, '');
+  if (digits.length < 4) { showToast('Введите минимум 4 цифры', 'warning'); return; }
+
+  const list = document.getElementById('sa-users-list');
+  list.innerHTML = '<div class="loader"><div class="spinner"></div></div>';
+
+  const found = new Map(); // uid → user doc
+
+  // 1. Exact lookup via uid_index (keyed by digits, e.g. "77771234567")
+  try {
+    const link = await dbGet('uid_index', digits);
+    if (link?.uid) {
+      const u = await dbGet('users', link.uid);
+      if (u) found.set(link.uid, u);
+    }
+  } catch {}
+
+  // 2. Prefix range on users.phone — covers "+7777123..." stored as "+77771234567"
+  //    Single-field range query; no composite index needed.
+  if (!found.size || digits.length < 11) {
+    try {
+      const prefix = '+' + digits;
+      const results = await dbQueryWhere('users',
+        [['phone', '>=', prefix], ['phone', '<=', prefix + '']],
+        null, 'asc', 20
+      );
+      for (const u of results) found.set(u.uid || u.id, u);
+    } catch {}
+  }
+
+  if (!found.size) {
+    list.innerHTML = '<div class="empty" style="padding:20px 0"><div class="empty-icon">🔍</div><div class="empty-text">Пользователи не найдены</div></div>';
+    return;
+  }
+
+  list.innerHTML = [...found.values()].map(u => {
+    const roleIcons = [];
+    if (u.agreedClient || u.role === 'client')    roleIcons.push('👤');
+    if (u.agreedAdmin  || u.role === 'admin')      roleIcons.push('🏪');
+    if (u.agreedSA     || u.role === 'superadmin') roleIcons.push('👑');
     return `
       <div class="list-item" onclick="openSaUser('${u.uid||u.id}')">
         <div class="avatar" style="width:36px;height:36px;font-size:14px">${(u.name||'?')[0].toUpperCase()}</div>
