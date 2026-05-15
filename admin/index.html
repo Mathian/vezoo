@@ -89,10 +89,7 @@
     <button class="cat-tab" onclick="loadOrders('history',this)">История</button>
   </div>
   <div id="admin-hist-daterange" style="display:none;padding:8px 20px 0">
-    <div style="display:flex;gap:8px;align-items:flex-end">
-      <div class="field" style="flex:1;margin:0"><label style="font-size:11px;color:var(--text-dim)">От</label><input class="inp" id="admin-hist-from" type="date" style="padding:6px 10px;font-size:13px" onchange="loadOrders('history')"></div>
-      <div class="field" style="flex:1;margin:0"><label style="font-size:11px;color:var(--text-dim)">До</label><input class="inp" id="admin-hist-to" type="date" style="padding:6px 10px;font-size:13px" onchange="loadOrders('history')"></div>
-    </div>
+    <div class="field" style="margin:0"><label style="font-size:11px;color:var(--text-dim)">Дата</label><input class="inp" id="admin-hist-date" type="date" style="padding:6px 10px;font-size:13px" onchange="loadOrders('history')"></div>
   </div>
   <div id="admin-orders-list" style="display:flex;flex-direction:column;gap:10px;padding:0 20px 16px"></div>
 </div>

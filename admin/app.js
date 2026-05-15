@@ -549,16 +549,15 @@ async function loadOrders(tab, el) {
   } else if (tab === 'pending') {
     renderOrdersList(_allOrders.filter(o => o.status === 'pending'));
   } else {
-    // History — separate Firestore query (Дыра №9)
+    // History — separate Firestore query per day (Дыра №9)
     const today = new Date().toISOString().slice(0,10);
-    const fromEl = document.getElementById('admin-hist-from'), toEl = document.getElementById('admin-hist-to');
-    if (fromEl && !fromEl.value) fromEl.value = today;
-    if (toEl   && !toEl.value)   toEl.value   = today;
-    const f = fromEl?.value || today, t = toEl?.value || today;
+    const dateEl = document.getElementById('admin-hist-date');
+    if (dateEl && !dateEl.value) dateEl.value = today;
+    const selectedDate = dateEl?.value || today;
 
     const list = document.getElementById('admin-orders-list');
     if (list) list.innerHTML = '<div class="loader"><div class="spinner"></div></div>';
-    _histOrders = await _fetchHistoryOrders(f, t);
+    _histOrders = await _fetchHistoryOrders(selectedDate, selectedDate);
     renderOrdersList(_histOrders);
   }
 }

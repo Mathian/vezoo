@@ -822,13 +822,26 @@ function watchActiveOrders() {
   _ordersUnsub = db.collection('orders')
     .where('clientUid', '==', STATE.uid)
     .where('active', '==', true)
-    .onSnapshot(snap => {
-      // Capture orders that just left the active set (delivered/cancelled/issued)
-      const justFinished = snap.docChanges()
-        .filter(c => c.type === 'removed')
-        .map(c => ({ id: c.doc.id, ...c.doc.data() }));
+    .onSnapshot(async snap => {
+      // Detect orders that just left the active set (delivered/cancelled/issued).
+      // IMPORTANT: change.doc.data() on 'removed' events may return the document's
+      // state BEFORE the write that made it leave the query set (stale snapshot).
+      // For example, admin cancels → active becomes false, but the removed-event
+      // snapshot still carries status:'pending'. This causes duplicates / stuck UI.
+      // Fix: always re-fetch the final document state directly from Firestore.
+      const removedChanges = snap.docChanges().filter(c => c.type === 'removed');
 
-      if (justFinished.length) {
+      let justFinished = [];
+      if (removedChanges.length) {
+        const freshDocs = await Promise.all(
+          removedChanges.map(c =>
+            db.collection('orders').doc(c.doc.id).get()
+              .then(doc => doc.exists ? { id: doc.id, ...doc.data() } : { id: c.doc.id, ...c.doc.data() })
+              .catch(() => ({ id: c.doc.id, ...c.doc.data() }))
+          )
+        );
+        justFinished = freshDocs;
+
         const storedAll = _loadOrdersFromStorage();
         for (const fin of justFinished) {
           const idx = storedAll.findIndex(o => o.id === fin.id);
