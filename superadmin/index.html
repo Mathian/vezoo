@@ -136,17 +136,22 @@
       <button class="btn btn-outline btn-sm" onclick="changePinSa()">Сохранить PIN</button>
     </div>
 
-    <!-- Users search -->
+    <!-- Users search + tabs -->
     <div class="section-title">Пользователи</div>
     <div id="sa-users-quick" style="display:flex;flex-direction:column;gap:8px">
-      <div style="display:flex;gap:8px">
-        <input class="inp" id="sa-user-search" type="tel" placeholder="+7 (777) 000-00-00" style="flex:1"
+      <div style="display:flex;gap:8px;align-items:center">
+        <input class="inp" id="sa-user-search" type="tel" placeholder="Поиск по телефону..."
+          style="flex:1;min-width:0;padding:8px 12px;font-size:13px"
           onkeydown="if(event.key==='Enter')searchSaUsers()">
-        <button class="btn btn-primary btn-sm" style="white-space:nowrap" onclick="searchSaUsers()">🔍 Найти</button>
+        <button class="btn btn-secondary btn-sm" onclick="searchSaUsers()"
+          style="flex-shrink:0;width:40px;height:40px;padding:0;font-size:18px;border-radius:10px">🔍</button>
       </div>
-      <div id="sa-users-list" style="display:flex;flex-direction:column;gap:8px">
-        <div class="text-dim text-sm" style="padding:6px 0;text-align:center">Введите номер телефона для поиска</div>
+      <div class="cat-tabs" style="padding:0 0 4px">
+        <button class="cat-tab active" onclick="loadUsersByRole('client',this)">👤 Клиенты</button>
+        <button class="cat-tab" onclick="loadUsersByRole('admin',this)">🏪 Админы</button>
+        <button class="cat-tab" onclick="loadUsersByRole('courier',this)">🚴 Курьеры</button>
       </div>
+      <div id="sa-users-list" style="display:flex;flex-direction:column;gap:8px"></div>
     </div>
   </div>
 </div>

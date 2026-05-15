@@ -597,7 +597,10 @@ function closeCourierDetailSheet(e) {
 // ══════════════════════════════════════════════════════════
 async function loadSaSettings() {
   await loadSaStats();
-  // Users section is search-based — no auto-load on tab open
+  loadUsersByRole('client');
+  // Restore active tab highlight
+  const tabs = document.querySelectorAll('#sa-users-quick .cat-tab');
+  tabs.forEach((t, i) => t.classList.toggle('active', i === 0));
 }
 
 function setSaPeriod(days, el) {
@@ -679,45 +682,59 @@ async function loadSaStats() {
 // ══════════════════════════════════════════════════════════
 //  USERS
 // ══════════════════════════════════════════════════════════
+let _saUserRoleTab = 'client'; // track active tab for context in user detail
+
 async function loadUsersByRole(role, el) {
   if (el) { document.querySelectorAll('#s-sa-settings .cat-tab').forEach(b=>b.classList.remove('active')); el.classList.add('active'); }
+  _saUserRoleTab = role;
   const list = document.getElementById('sa-users-list');
   list.innerHTML = '<div class="loader"><div class="spinner"></div></div>';
 
   if (role === 'courier') {
     const couriers = await dbGetAll('couriers');
     if (!couriers.length) { list.innerHTML = '<div class="empty" style="padding:30px 24px"><div class="empty-icon">🚴</div><div class="empty-text">Нет курьеров</div></div>'; return; }
-    list.innerHTML = couriers.sort((a,b)=>(b.createdAt||'').localeCompare(a.createdAt||'')).map(c => `
-      <div class="list-item" onclick="openSaUser('${c.uid||c.id}')">
-        <div class="li-icon yellow" style="font-size:22px">🚴</div>
-        <div class="li-body">
-          <div class="li-title">${escHtml(c.name||'—')}${c.status==='blocked'?' <span style="color:var(--danger);font-size:11px">BLOCKED</span>':''}</div>
-          <div class="li-sub">${escHtml(c.phone||'—')} · <span style="color:${c.status==='active'?'var(--success)':c.status==='blocked'?'var(--danger)':'var(--warning)'}">${c.status==='active'?'Активен':c.status==='blocked'?'Заблокирован':'На проверке'}</span></div>
-        </div>
-        <div class="chevron">›</div>
-      </div>`).join('');
+    list.innerHTML = couriers.sort((a,b)=>(b.createdAt||'').localeCompare(a.createdAt||'')).map(c => {
+      const isBlocked = c.status === 'blocked';
+      return `
+        <div class="list-item" onclick="openSaUser('${c.uid||c.id}')">
+          <div class="li-icon yellow" style="font-size:22px">🚴</div>
+          <div class="li-body">
+            <div class="li-title">${escHtml(c.name||'—')}${isBlocked?' <span style="color:var(--danger);font-size:10px;margin-left:4px">🚴 БЛК</span>':''}</div>
+            <div class="li-sub">${escHtml(c.phone||'—')} · <span style="color:${c.status==='active'?'var(--success)':isBlocked?'var(--danger)':'var(--warning)'}">${c.status==='active'?'Активен':isBlocked?'Заблокирован':'На проверке'}</span></div>
+          </div>
+          <div class="chevron">›</div>
+        </div>`;
+    }).join('');
     return;
   }
 
   // Load all users and filter by agreed* flags (catches multi-role accounts)
   const allUsers = await dbGetAll('users', null, 'asc', 500);
   const filterFn = {
-    client:   u => !!(u.agreedClient || u.role === 'client'),
-    admin:    u => !!(u.agreedAdmin  || u.role === 'admin'),
+    client: u => !!(u.agreedClient || u.role === 'client'),
+    admin:  u => !!(u.agreedAdmin  || u.role === 'admin'),
   }[role] || (() => false);
   const users = allUsers.filter(filterFn);
 
   if (!users.length) { list.innerHTML = '<div class="empty" style="padding:30px 24px"><div class="empty-icon">👤</div><div class="empty-text">Нет пользователей</div></div>'; return; }
+
   list.innerHTML = users.sort((a,b)=>(b.createdAt||'').localeCompare(a.createdAt||'')).map(u => {
+    // Show block badge only for the role currently being viewed
+    const isRoleBlocked = role === 'client'
+      ? !!(u.blocked || u.blockedClient)
+      : !!(u.blocked || u.blockedAdmin);
+    const blockBadge = isRoleBlocked
+      ? `<span style="color:var(--danger);font-size:10px;margin-left:4px">${role==='client'?'👤':'🏪'} БЛК</span>`
+      : '';
     const roleIcons = [];
-    if (u.agreedClient   || u.role==='client')     roleIcons.push('👤');
-    if (u.agreedAdmin    || u.role==='admin')       roleIcons.push('🏪');
-    if (u.agreedSA       || u.role==='superadmin')  roleIcons.push('👑');
+    if (u.agreedClient  || u.role==='client')    roleIcons.push('👤');
+    if (u.agreedAdmin   || u.role==='admin')      roleIcons.push('🏪');
+    if (u.agreedSA      || u.role==='superadmin') roleIcons.push('👑');
     return `
       <div class="list-item" onclick="openSaUser('${u.uid||u.id}')">
         <div class="avatar" style="width:36px;height:36px;font-size:14px">${(u.name||'?')[0].toUpperCase()}</div>
         <div class="li-body">
-          <div class="li-title">${escHtml(u.name||'—')}${u.blocked?' <span style="color:var(--danger);font-size:11px">BLOCKED</span>':''}</div>
+          <div class="li-title">${escHtml(u.name||'—')}${blockBadge}</div>
           <div class="li-sub">${escHtml(u.phone||'—')}${roleIcons.length?' · '+roleIcons.join(' '):''}</div>
         </div>
         <div class="chevron">›</div>
@@ -784,40 +801,85 @@ async function searchSaUsers() {
 async function openSaUser(uid) {
   const [user, courierData] = await Promise.all([dbGet('users', uid), getCourier(uid)]); // Дыра №7
   if (!user) return;
-  const roleIcons = [];
-  if (user.agreedClient   || user.role==='client')     roleIcons.push('👤 Клиент');
-  if (user.agreedAdmin    || user.role==='admin')       roleIcons.push('🏪 Администратор');
-  if (courierData) roleIcons.push(`🚴 Курьер (${courierData.status==='active'?'активен':courierData.status==='blocked'?'заблокирован':'на проверке'})`);
-  if (user.agreedSA || user.role==='superadmin')        roleIcons.push('👑 Суперадмин');
+
+  const hasClient  = !!(user.agreedClient || user.role === 'client');
+  const hasAdmin   = !!(user.agreedAdmin  || user.role === 'admin');
+  const hasCourier = !!courierData;
+  const hasSA      = !!(user.agreedSA     || user.role === 'superadmin');
+
+  // Per-role block state
+  const clientBlocked  = !!(user.blocked || user.blockedClient);
+  const adminBlocked   = !!(user.blocked || user.blockedAdmin);
+  const courierBlocked = courierData?.status === 'blocked';
+
+  // Role labels with block status
+  const roleLines = [];
+  if (hasClient)  roleLines.push(`👤 Клиент — <span style="color:${clientBlocked ?'var(--danger)':'var(--success)'};">${clientBlocked ?'заблокирован':'активен'}</span>`);
+  if (hasAdmin)   roleLines.push(`🏪 Администратор — <span style="color:${adminBlocked  ?'var(--danger)':'var(--success)'};">${adminBlocked  ?'заблокирован':'активен'}</span>`);
+  if (hasCourier) roleLines.push(`🚴 Курьер — <span style="color:${courierBlocked?'var(--danger)':courierData.status==='active'?'var(--success)':'var(--warning)'};">${courierBlocked?'заблокирован':courierData.status==='active'?'активен':'на проверке'}</span>`);
+  if (hasSA)      roleLines.push('👑 Суперадмин');
+
+  // Per-role block / unblock buttons
+  const blockBtns = [];
+  if (hasClient) {
+    blockBtns.push(`<button class="btn ${clientBlocked?'btn-success':'btn-danger'} btn-sm" onclick="saToggleRoleBlock('${uid}','client',${clientBlocked})">
+      ${clientBlocked?'🟢 Клиент: разблокировать':'🚫 Клиент: заблокировать'}
+    </button>`);
+  }
+  if (hasAdmin) {
+    blockBtns.push(`<button class="btn ${adminBlocked?'btn-success':'btn-danger'} btn-sm" onclick="saToggleRoleBlock('${uid}','admin',${adminBlocked})">
+      ${adminBlocked?'🟢 Администратор: разблокировать':'🚫 Администратор: заблокировать'}
+    </button>`);
+  }
+  if (hasCourier) {
+    blockBtns.push(`<button class="btn ${courierBlocked?'btn-success':'btn-danger'} btn-sm" onclick="saToggleRoleBlock('${uid}','courier',${courierBlocked})">
+      ${courierBlocked?'🟢 Курьер: разблокировать':'🚫 Курьер: заблокировать'}
+    </button>`);
+  }
+  // Fallback: user has no roles yet
+  if (!blockBtns.length) {
+    const gb = !!user.blocked;
+    blockBtns.push(`<button class="btn ${gb?'btn-success':'btn-danger'} btn-sm" onclick="saToggleRoleBlock('${uid}','global',${gb})">
+      ${gb?'🟢 Разблокировать':'🚫 Заблокировать'}
+    </button>`);
+  }
+
   const content = document.getElementById('sa-user-detail');
   content.innerHTML = `
     <div class="sheet-title">${escHtml(user.name||'—')}</div>
     <div class="card card-body" style="margin-bottom:12px;gap:6px;display:flex;flex-direction:column">
       <div class="flex justify-between"><span class="text-dim">Телефон</span><span style="font-family:monospace">${escHtml(user.phone||'—')}</span></div>
-      <div class="flex justify-between"><span class="text-dim">Роли</span><span style="text-align:right;font-size:12px;max-width:60%">${roleIcons.join('<br>')||user.role||'—'}</span></div>
+      <div class="flex justify-between align-start"><span class="text-dim">Роли</span><span style="text-align:right;font-size:12px;max-width:65%;line-height:1.6">${roleLines.join('<br>')||user.role||'—'}</span></div>
       <div class="flex justify-between"><span class="text-dim">Город</span><span>${escHtml(user.cityName||'—')}</span></div>
-      <div class="flex justify-between"><span class="text-dim">Статус</span><span>${user.blocked?'<span style="color:var(--danger)">Заблокирован</span>':'Активен'}</span></div>
       <div class="flex justify-between"><span class="text-dim">Регистрация</span><span>${fmtDate(user.createdAt)}</span></div>
     </div>
     <div style="display:flex;flex-direction:column;gap:8px">
-      <button class="btn ${user.blocked?'btn-success':'btn-danger'} btn-sm" onclick="saToggleUserBlock('${uid}',${!!user.blocked})">
-        ${user.blocked?'🟢 Разблокировать':'🚫 Заблокировать'}
-      </button>
+      ${blockBtns.join('')}
       <button class="btn btn-secondary btn-sm" onclick="saResetUserCache('${uid}')">🔄 Сбросить кэш</button>
     </div>`;
   document.getElementById('user-overlay').classList.add('open');
 }
 
-async function saToggleUserBlock(uid, currentlyBlocked) {
-  if (!confirm(currentlyBlocked?'Разблокировать пользователя?':'Заблокировать пользователя?')) return;
-  await dbSet('users', uid, { blocked: !currentlyBlocked });
-  // If this user is also a courier, sync courier status
-  const courierData = await getCourier(uid); // Дыра №7
-  if (courierData) {
-    await setCourier(uid, { status: currentlyBlocked ? 'active' : 'blocked' });
+async function saToggleRoleBlock(uid, role, currentlyBlocked) {
+  const roleLabel = role === 'client' ? 'клиента' : role === 'admin' ? 'администратора' : role === 'courier' ? 'курьера' : 'пользователя';
+  const action    = currentlyBlocked ? 'Разблокировать' : 'Заблокировать';
+  if (!confirm(`${action} ${roleLabel}?`)) return;
+
+  if (role === 'client') {
+    await dbSet('users', uid, { blockedClient: !currentlyBlocked });
+  } else if (role === 'admin') {
+    await dbSet('users', uid, { blockedAdmin: !currentlyBlocked });
+  } else if (role === 'courier') {
+    const newStatus = currentlyBlocked ? 'active' : 'blocked';
+    await setCourier(uid, { status: newStatus, ...(currentlyBlocked ? {} : { blockedAt: new Date().toISOString() }) }); // Дыра №7
+    await dbSet('users', uid, { blockedCourier: !currentlyBlocked });
+  } else {
+    // global / no-role user
+    await dbSet('users', uid, { blocked: !currentlyBlocked });
   }
+
   closeUserSheet(); tgHaptic('light');
-  showToast(currentlyBlocked?'Разблокирован':'Заблокирован', 'info');
+  showToast(currentlyBlocked ? 'Разблокирован' : 'Заблокирован', 'info');
   // Refresh current user tab
   const activeTab = document.querySelector('#s-sa-settings .cat-tab.active');
   if (activeTab) activeTab.click();
