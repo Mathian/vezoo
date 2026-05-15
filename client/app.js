@@ -130,17 +130,31 @@ async function submitAgree() {
   initMain();
 }
 
-// ── Point 3: Boot recovery — repopulate order history from Firestore if localStorage was cleared ──
+// ── Boot history sync — always runs to fix stale statuses and recover cleared localStorage ──
+// Key scenario: app was closed while order was being delivered → localStorage has stale
+// status ('delivering'). On next open, Firestore has 'delivered'/'cancelled' but docChanges()
+// never fired. This sync corrects the mismatch so the client sees the right status.
 async function _ensureOrderHistory() {
-  if (_loadOrdersFromStorage().length) return; // already have data
   try {
-    // Fetch the last 50 orders for this client (both active and completed)
     const recent = await dbQueryWhere('orders',
       [['clientUid', '==', STATE.uid]],
       'createdAt', 'desc', 50
     );
-    if (recent.length) {
-      _saveOrdersToStorage(recent);
+    if (!recent.length) return;
+    const existing = _loadOrdersFromStorage();
+    const byId = {};
+    for (const o of existing) byId[o.id] = o;
+    let changed = false;
+    for (const fresh of recent) {
+      // Add missing orders OR update any whose cached status differs from Firestore
+      if (!byId[fresh.id] || byId[fresh.id].status !== fresh.status) {
+        byId[fresh.id] = fresh;
+        changed = true;
+      }
+    }
+    if (changed) {
+      const all = Object.values(byId).sort((a, b) => (b.createdAt || '').localeCompare(a.createdAt || ''));
+      _saveOrdersToStorage(all);
     }
   } catch (e) { console.warn('[boot] ensureOrderHistory:', e.message); }
 }

@@ -210,10 +210,18 @@ async function _ensureDeliveryHistory() {
     const delivered = recent.filter(o => o.status === 'delivered');
     if (!delivered.length) return;
     const existing = _loadHistoryFromStorage();
-    const existingIds = new Set(existing.map(o => o.id));
-    const newOnes = delivered.filter(o => !existingIds.has(o.id));
-    if (newOnes.length) {
-      const merged = [...newOnes, ...existing]
+    const byId = {};
+    for (const o of existing) byId[o.id] = o;
+    let changed = false;
+    for (const fresh of delivered) {
+      // Add new deliveries OR update stale entries (e.g. cached as 'delivering')
+      if (!byId[fresh.id] || byId[fresh.id].status !== fresh.status) {
+        byId[fresh.id] = fresh;
+        changed = true;
+      }
+    }
+    if (changed) {
+      const merged = Object.values(byId)
         .sort((a, b) => (b.deliveredAt || b.createdAt || '').localeCompare(a.deliveredAt || a.createdAt || ''));
       _saveHistoryToStorage(merged);
     }
