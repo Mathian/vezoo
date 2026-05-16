@@ -296,6 +296,22 @@ async function bumpVersion(field) {
   } catch (e) { console.warn('[Version] bump failed:', e.message); }
 }
 
+// ── Firebase UID → HMAC UID mapping ──
+// Writes uid_index/fb_{firebaseUid} → {hmacUid} so Firestore Rules can resolve
+// the caller's HMAC-based role without relying on request.auth.uid directly.
+// Call once during app boot after both initFirebase() and STATE.uid are known.
+async function registerFirebaseAuthMapping(hmacUid) {
+  if (!_fbR || !hmacUid) return;
+  try {
+    const firebaseUid = firebase.auth().currentUser?.uid;
+    if (!firebaseUid) return;
+    await db.collection('uid_index').doc('fb_' + firebaseUid).set(
+      { hmacUid, _upd: new Date().toISOString() },
+      { merge: true }
+    );
+  } catch (e) { console.warn('[Firebase] auth mapping:', e.message); }
+}
+
 // ── Generate unique ID ──
 function genId() {
   return Date.now().toString(36) + Math.random().toString(36).slice(2, 6);

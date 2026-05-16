@@ -76,6 +76,7 @@ window.addEventListener('DOMContentLoaded', async () => {
     if (tgUid) { STATE.uid = tgUid; _saveState(); }
   }
   if (!STATE.uid) { showScreen('s-no-uid'); return; }
+  await registerFirebaseAuthMapping(STATE.uid);
 
   const existing = await dbGet('users', STATE.uid);
   if (existing?.blocked || existing?.blockedCourier) { showScreen('s-blocked'); return; }

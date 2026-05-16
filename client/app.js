@@ -74,6 +74,7 @@ window.addEventListener('DOMContentLoaded', async () => {
     if (tgUid) { STATE.uid = tgUid; _saveClientState(); }
   }
   if (!STATE.uid) { showScreen('s-no-uid'); return; }
+  registerFirebaseAuthMapping(STATE.uid); // fire-and-forget — clients don't need strict rules
 
   const existing = await dbGet('users', STATE.uid);
   if (existing?.blocked || existing?.blockedClient) { showScreen('s-blocked'); return; }
