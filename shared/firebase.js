@@ -40,12 +40,18 @@ function initFirebase() {
 }
 
 // ── Write (merge) ──
+// Returns true on success (or offline), false if Firestore rejected the write.
 async function dbSet(col, id, data) {
   const payload = { ...data, _upd: new Date().toISOString() };
   try { localStorage.setItem(`${PFX}${col}_${id}`, JSON.stringify(payload)); } catch {}
-  if (!_fbR) return;
-  try { await db.collection(col).doc(String(id)).set(payload, { merge: true }); }
-  catch (e) { console.warn(`[DB] set ${col}/${id}:`, e.message); }
+  if (!_fbR) return true;  // offline mode — treated as optimistic success
+  try {
+    await db.collection(col).doc(String(id)).set(payload, { merge: true });
+    return true;
+  } catch (e) {
+    console.warn(`[DB] set ${col}/${id}:`, e.message);
+    return false;
+  }
 }
 
 // ── Delete ──

@@ -697,11 +697,18 @@ async function submitOrder() {
   };
 
   try {
-    await dbSet('orders', orderId, order);
-    // Save new order to localStorage immediately
-    const storedOrders = _loadOrdersFromStorage();
-    storedOrders.unshift(order);
-    _saveOrdersToStorage(storedOrders);
+    const ok = await dbSet('orders', orderId, order);
+    if (!ok) {
+      showToast('Ошибка при оформлении. Попробуйте ещё раз.', 'error');
+      btn.disabled = false; btn.textContent = 'Оформить заказ';
+      return;
+    }
+    // Add to in-memory list for immediate display only if the Firestore snapshot
+    // hasn't already done so (snapshot fires optimistically inside dbSet).
+    if (!_allClientOrders.some(o => o.id === orderId)) {
+      _allClientOrders.unshift(order);
+      _saveOrdersToStorage(_allClientOrders);
+    }
     CART[venueId] = []; delete CART[venueId];
     _saveCart(); updateCartNavBadge();
     tgHaptic('success'); showToast('Заказ оформлен!', 'success');
@@ -758,7 +765,10 @@ function watchActiveOrders() {
     // closed while it was completing and its cached status is stale (e.g. 'pending').
     // In both cases we keep it as history rather than silently discarding it.
     const localCompleted = storedAll.filter(o => !fsIds.has(o.id));
-    _allClientOrders = [...active, ...localCompleted];
+    // Merge, then deduplicate by id (Firestore snapshot + submitOrder can both add an order)
+    const _merged = [...active, ...localCompleted];
+    const _seen = new Set();
+    _allClientOrders = _merged.filter(o => _seen.has(o.id) ? false : _seen.add(o.id));
     _saveOrdersToStorage(_allClientOrders);
 
     ACTIVE_ORDERS = active
