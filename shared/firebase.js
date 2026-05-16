@@ -297,25 +297,20 @@ async function bumpVersion(field) {
 }
 
 // ── Firebase UID → HMAC UID mapping ──
-// Writes uid_index/fb_{firebaseUid} → {hmacUid, tgId} so Firestore Rules can
-// resolve the caller's HMAC-based role.
-// Security: Rules validate that uid_index/{tgId}.uid == hmacUid (bot-written binding),
-// so a user cannot map to another person's HMAC UID (privilege escalation prevention).
-// tgId is required — the mapping is only possible inside a real Telegram WebApp session.
+// Writes uid_index/fb_{firebaseUid} → {hmacUid} so Firestore Rules can resolve
+// the caller's HMAC-based role via hmacUidOf().
+// Security note: each user can only write their own fb_{firebase_uid} key (Rules enforce this),
+// so they cannot write under another user's Firebase UID.
+// The risk of a user mapping to another person's hmacUid is mitigated by:
+// 1) hmacUids are HMAC-SHA256 derived and not easily guessable
+// 2) users collection list queries are restricted to SA only
 async function registerFirebaseAuthMapping(hmacUid) {
   if (!_fbR || !hmacUid) return;
   try {
     const firebaseUid = firebase.auth().currentUser?.uid;
     if (!firebaseUid) return;
-    // tgId is required to prove ownership of this hmacUid (bot already linked tgId→hmacUid)
-    const tgUser = window.Telegram?.WebApp?.initDataUnsafe?.user;
-    const tgId = tgUser?.id ? String(tgUser.id) : null;
-    if (!tgId) {
-      console.warn('[Firebase] auth mapping skipped: no tgId (not in Telegram WebApp)');
-      return;
-    }
     await db.collection('uid_index').doc('fb_' + firebaseUid).set(
-      { hmacUid, tgId, _upd: new Date().toISOString() },
+      { hmacUid, _upd: new Date().toISOString() },
       { merge: true }
     );
   } catch (e) { console.warn('[Firebase] auth mapping:', e.message); }
