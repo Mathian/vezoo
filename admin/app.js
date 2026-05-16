@@ -39,7 +39,7 @@ window.addEventListener('DOMContentLoaded', async () => {
   await initFirebase();
   if (!STATE.uid) { const tgUid = await resolveUidByTgId(); if (tgUid) { STATE.uid = tgUid; saveState(); } }
   if (!STATE.uid) { showScreen('s-no-uid'); return; }
-  await registerFirebaseAuthMapping(STATE.uid);
+  registerFirebaseAuthMapping(STATE.uid); // fire-and-forget — не блокируем boot
 
   const existing = await dbGet('users', STATE.uid);
   if (existing?.blocked || existing?.blockedAdmin) { showScreen('s-blocked'); return; }
@@ -659,7 +659,8 @@ function renderAdminOrderActions(order) {
 async function adminAcceptOrder(orderId) {
   const mins=VENUE.deliveryTime||60;
   const patch={ status:'accepted', acceptedAt:new Date().toISOString(), operatorUid:STATE.uid, deliveryMinutes:mins, estimatedAt:new Date(Date.now()+mins*60000).toISOString(), clientNotification:{type:'accepted',seen:false} };
-  await dbSet('orders',orderId,patch);
+  const ok = await dbSet('orders',orderId,patch);
+  if (!ok) { showToast('Ошибка: нет прав или нет сети. Попробуйте ещё раз.','error'); return; }
   _patchAllOrders(orderId,patch);
   tgHaptic('success'); closeOrderSheet(); showToast('Заказ принят','success'); loadOrders(_ordersTab);
 }
@@ -667,7 +668,9 @@ async function adminAcceptOrder(orderId) {
 async function adminCancelOrder(orderId) {
   const doCancel=async()=>{
     const patch={status:'cancelled',active:false,cancelledAt:new Date().toISOString(),cancelledBy:'admin',cancelledBotNotified:true,clientNotification:{type:'cancelled',seen:false,message:'Ваш заказ отменён администратором.'}};
-    await dbSet('orders',orderId,patch); _patchAllOrders(orderId,patch);
+    const ok = await dbSet('orders',orderId,patch);
+    if (!ok) { showToast('Ошибка: нет прав или нет сети.','error'); return; }
+    _patchAllOrders(orderId,patch);
     tgHaptic('light'); closeOrderSheet(); showToast('Заказ отменён','info'); loadOrders(_ordersTab);
   };
   if (tg?.showConfirm) tg.showConfirm('Отменить заказ?',ok=>{if(ok)doCancel();});
@@ -676,7 +679,9 @@ async function adminCancelOrder(orderId) {
 
 async function adminSearchCourier(orderId) {
   const patch={status:'searching_courier',courierUid:null,courierName:null,courierBotNotified:false,searchStartedAt:new Date().toISOString()};
-  await dbSet('orders',orderId,patch); _patchAllOrders(orderId,patch);
+  const ok = await dbSet('orders',orderId,patch);
+  if (!ok) { showToast('Ошибка: нет прав или нет сети.','error'); return; }
+  _patchAllOrders(orderId,patch);
   tgHaptic('success'); showToast('Заказ выставлен в пул курьеров','success'); closeOrderSheet(); loadOrders(_ordersTab);
 }
 

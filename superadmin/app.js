@@ -37,7 +37,7 @@ window.addEventListener('DOMContentLoaded', async () => {
   await initFirebase();
   if (!STATE.uid) { const tgUid = await resolveUidByTgId(); if (tgUid) { STATE.uid = tgUid; saveState(); } }
   if (!STATE.uid) { showScreen('s-no-uid'); return; }
-  await registerFirebaseAuthMapping(STATE.uid);
+  registerFirebaseAuthMapping(STATE.uid); // fire-and-forget — не блокируем boot
 
   try { localStorage.removeItem('vez_users_' + STATE.uid); } catch {}
   const existing = await dbGet('users', STATE.uid);
