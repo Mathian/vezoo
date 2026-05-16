@@ -1,4 +1,4 @@
-'use strict';
+﻿'use strict';
 /* ============================================================
    VEZOO SUPERADMIN — Global Management Panel
    ============================================================ */
@@ -684,16 +684,46 @@ async function loadSaStats() {
 // ══════════════════════════════════════════════════════════
 let _saUserRoleTab = 'client'; // track active tab for context in user detail
 
-async function loadUsersByRole(role, el) {
+function loadUsersByRole(role, el) {
   if (el) { document.querySelectorAll('#s-sa-settings .cat-tab').forEach(b=>b.classList.remove('active')); el.classList.add('active'); }
   _saUserRoleTab = role;
   const list = document.getElementById('sa-users-list');
+  list.innerHTML = '<div class="empty" style="padding:20px 0"><div class="empty-icon">🔍</div><div class="empty-text">Введите номер телефона для поиска</div></div>';
+}
+
+// ── Phone-based user search (within active role tab) ────────────────────────
+async function searchSaUsers() {
+  const rawInput = (document.getElementById('sa-user-search')?.value || '').trim();
+  if (!rawInput) { showToast('Введите номер телефона', 'warning'); return; }
+  const digits = rawInput.replace(/\D/g, '');
+  if (digits.length < 4) { showToast('Введите минимум 4 цифры', 'warning'); return; }
+
+  const list = document.getElementById('sa-users-list');
   list.innerHTML = '<div class="loader"><div class="spinner"></div></div>';
 
-  if (role === 'courier') {
-    const couriers = await dbGetAll('couriers');
-    if (!couriers.length) { list.innerHTML = '<div class="empty" style="padding:30px 24px"><div class="empty-icon">🚴</div><div class="empty-text">Нет курьеров</div></div>'; return; }
-    list.innerHTML = couriers.sort((a,b)=>(b.createdAt||'').localeCompare(a.createdAt||'')).map(c => {
+  const found = new Map(); // uid → doc
+  const prefix = '+' + digits;
+
+  if (_saUserRoleTab === 'courier') {
+    // 1. Exact via uid_index → couriers doc
+    try {
+      const link = await dbGet('uid_index', digits);
+      if (link?.uid) { const c = await getCourier(link.uid); if (c) found.set(link.uid, c); }
+    } catch {}
+    // 2. Prefix range on couriers.phone
+    if (!found.size || digits.length < 11) {
+      try {
+        const results = await dbQueryWhere('couriers',
+          [['phone', '>=', prefix], ['phone', '<=', prefix + String.fromCharCode(0xF8FF)]],
+          null, 'asc', 20);
+        for (const c of results) found.set(c.uid || c.id, c);
+      } catch {}
+    }
+    if (!found.size) {
+      list.innerHTML = '<div class="empty" style="padding:20px 0"><div class="empty-icon">🔍</div><div class="empty-text">Курьеры не найдены</div></div>';
+      return;
+    }
+    list.innerHTML = [...found.values()].map(c => {
       const isBlocked = c.status === 'blocked';
       return `
         <div class="list-item" onclick="openSaUser('${c.uid||c.id}')">
@@ -708,73 +738,27 @@ async function loadUsersByRole(role, el) {
     return;
   }
 
-  // Load all users and filter by agreed* flags (catches multi-role accounts)
-  const allUsers = await dbGetAll('users', null, 'asc', 500);
-  const filterFn = {
-    client: u => !!(u.agreedClient || u.role === 'client'),
-    admin:  u => !!(u.agreedAdmin  || u.role === 'admin'),
-  }[role] || (() => false);
-  const users = allUsers.filter(filterFn);
-
-  if (!users.length) { list.innerHTML = '<div class="empty" style="padding:30px 24px"><div class="empty-icon">👤</div><div class="empty-text">Нет пользователей</div></div>'; return; }
-
-  list.innerHTML = users.sort((a,b)=>(b.createdAt||'').localeCompare(a.createdAt||'')).map(u => {
-    // Show block badge only for the role currently being viewed
-    const isRoleBlocked = role === 'client'
-      ? !!(u.blocked || u.blockedClient)
-      : !!(u.blocked || u.blockedAdmin);
-    const blockBadge = isRoleBlocked
-      ? `<span style="color:var(--danger);font-size:10px;margin-left:4px">${role==='client'?'👤':'🏪'} БЛК</span>`
-      : '';
-    const roleIcons = [];
-    if (u.agreedClient  || u.role==='client')    roleIcons.push('👤');
-    if (u.agreedAdmin   || u.role==='admin')      roleIcons.push('🏪');
-    if (u.agreedSA      || u.role==='superadmin') roleIcons.push('👑');
-    return `
-      <div class="list-item" onclick="openSaUser('${u.uid||u.id}')">
-        <div class="avatar" style="width:36px;height:36px;font-size:14px">${(u.name||'?')[0].toUpperCase()}</div>
-        <div class="li-body">
-          <div class="li-title">${escHtml(u.name||'—')}${blockBadge}</div>
-          <div class="li-sub">${escHtml(u.phone||'—')}${roleIcons.length?' · '+roleIcons.join(' '):''}</div>
-        </div>
-        <div class="chevron">›</div>
-      </div>`;
-  }).join('');
-}
-
-// ── Phone-based user search ──────────────────────────────────────────────────
-async function searchSaUsers() {
-  const rawInput = (document.getElementById('sa-user-search')?.value || '').trim();
-  if (!rawInput) { showToast('Введите номер телефона', 'warning'); return; }
-  const digits = rawInput.replace(/\D/g, '');
-  if (digits.length < 4) { showToast('Введите минимум 4 цифры', 'warning'); return; }
-
-  const list = document.getElementById('sa-users-list');
-  list.innerHTML = '<div class="loader"><div class="spinner"></div></div>';
-
-  const found = new Map(); // uid → user doc
-
-  // 1. Exact lookup via uid_index (keyed by digits, e.g. "77771234567")
+  // Client / Admin — search in users collection
+  // 1. Exact via uid_index
   try {
     const link = await dbGet('uid_index', digits);
-    if (link?.uid) {
-      const u = await dbGet('users', link.uid);
-      if (u) found.set(link.uid, u);
-    }
+    if (link?.uid) { const u = await dbGet('users', link.uid); if (u) found.set(link.uid, u); }
   } catch {}
-
-  // 2. Prefix range on users.phone — covers "+7777123..." stored as "+77771234567"
-  //    Single-field range query; no composite index needed.
+  // 2. Prefix range on users.phone
   if (!found.size || digits.length < 11) {
     try {
-      const prefix = '+' + digits;
       const results = await dbQueryWhere('users',
-        [['phone', '>=', prefix], ['phone', '<=', prefix + '']],
-        null, 'asc', 20
-      );
+        [['phone', '>=', prefix], ['phone', '<=', prefix + String.fromCharCode(0xF8FF)]],
+        null, 'asc', 20);
       for (const u of results) found.set(u.uid || u.id, u);
     } catch {}
   }
+  // Filter by selected role tab
+  const roleFilter = {
+    client: u => !!(u.agreedClient || u.role === 'client'),
+    admin:  u => !!(u.agreedAdmin  || u.role === 'admin'),
+  }[_saUserRoleTab] || (() => true);
+  for (const [uid, u] of [...found]) { if (!roleFilter(u)) found.delete(uid); }
 
   if (!found.size) {
     list.innerHTML = '<div class="empty" style="padding:20px 0"><div class="empty-icon">🔍</div><div class="empty-text">Пользователи не найдены</div></div>';
@@ -786,11 +770,17 @@ async function searchSaUsers() {
     if (u.agreedClient || u.role === 'client')    roleIcons.push('👤');
     if (u.agreedAdmin  || u.role === 'admin')      roleIcons.push('🏪');
     if (u.agreedSA     || u.role === 'superadmin') roleIcons.push('👑');
+    const isRoleBlocked = _saUserRoleTab === 'client'
+      ? !!(u.blocked || u.blockedClient)
+      : !!(u.blocked || u.blockedAdmin);
+    const blockBadge = isRoleBlocked
+      ? `<span style="color:var(--danger);font-size:10px;margin-left:4px">${_saUserRoleTab==='client'?'👤':'🏪'} БЛК</span>`
+      : '';
     return `
       <div class="list-item" onclick="openSaUser('${u.uid||u.id}')">
         <div class="avatar" style="width:36px;height:36px;font-size:14px">${(u.name||'?')[0].toUpperCase()}</div>
         <div class="li-body">
-          <div class="li-title">${escHtml(u.name||'—')}${u.blocked?' <span style="color:var(--danger);font-size:11px">BLOCKED</span>':''}</div>
+          <div class="li-title">${escHtml(u.name||'—')}${blockBadge}</div>
           <div class="li-sub">${escHtml(u.phone||'—')}${roleIcons.length?' · '+roleIcons.join(' '):''}</div>
         </div>
         <div class="chevron">›</div>

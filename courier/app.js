@@ -366,20 +366,20 @@ function _importantOrderCard(order) {
   const addr = order.address;
   const addrStr = addr ? `${addr.street} ${addr.house}${addr.apt ? ', кв.' + addr.apt : ''}` : 'Самовывоз';
   return `
-    <div class="delivery-card" style="border-left:3px solid var(--success)">
+    <div class="delivery-card" onclick="openBundleAcceptSheet('${order.id}','venue')" style="cursor:pointer;border-left:3px solid var(--success)">
       <div class="delivery-card-hdr">
         <div>
           <div class="font-bold" style="font-size:14px">⚡ ${escHtml(order.venueName || 'Заведение')}</div>
           <div class="text-xs text-dim">#${(order.id || '').slice(-6)} · ${fmtDate(order.createdAt)}</div>
         </div>
-        <span class="${statusBadgeClass(order.status)}">${statusLabel(order.status)}</span>
+        <div class="text-primary font-bold">${fmtPrice(order.deliveryPrice || 0)}</div>
       </div>
       <div class="delivery-card-body" style="font-size:13px">
         <div>📍 ${escHtml(addrStr)}</div>
         <div>💰 ${fmtPrice((order.total || 0) + (order.deliveryPrice || 0))} · ${order.payment === 'cash' ? 'Наличные' : 'Карта'}</div>
       </div>
-      <div class="delivery-card-foot" style="font-size:12px;color:var(--text-dim);padding-top:4px">
-        ℹ️ Заказ готов — оператор передаст его лично при вашем приезде
+      <div class="delivery-card-foot">
+        <button class="btn btn-primary btn-sm" onclick="event.stopPropagation();openBundleAcceptSheet('${order.id}','venue')">✅ Принять →</button>
       </div>
     </div>`;
 }
