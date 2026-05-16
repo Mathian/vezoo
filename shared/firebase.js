@@ -297,16 +297,25 @@ async function bumpVersion(field) {
 }
 
 // ── Firebase UID → HMAC UID mapping ──
-// Writes uid_index/fb_{firebaseUid} → {hmacUid} so Firestore Rules can resolve
-// the caller's HMAC-based role without relying on request.auth.uid directly.
-// Call once during app boot after both initFirebase() and STATE.uid are known.
+// Writes uid_index/fb_{firebaseUid} → {hmacUid, tgId} so Firestore Rules can
+// resolve the caller's HMAC-based role.
+// Security: Rules validate that uid_index/{tgId}.uid == hmacUid (bot-written binding),
+// so a user cannot map to another person's HMAC UID (privilege escalation prevention).
+// tgId is required — the mapping is only possible inside a real Telegram WebApp session.
 async function registerFirebaseAuthMapping(hmacUid) {
   if (!_fbR || !hmacUid) return;
   try {
     const firebaseUid = firebase.auth().currentUser?.uid;
     if (!firebaseUid) return;
+    // tgId is required to prove ownership of this hmacUid (bot already linked tgId→hmacUid)
+    const tgUser = window.Telegram?.WebApp?.initDataUnsafe?.user;
+    const tgId = tgUser?.id ? String(tgUser.id) : null;
+    if (!tgId) {
+      console.warn('[Firebase] auth mapping skipped: no tgId (not in Telegram WebApp)');
+      return;
+    }
     await db.collection('uid_index').doc('fb_' + firebaseUid).set(
-      { hmacUid, _upd: new Date().toISOString() },
+      { hmacUid, tgId, _upd: new Date().toISOString() },
       { merge: true }
     );
   } catch (e) { console.warn('[Firebase] auth mapping:', e.message); }
@@ -404,14 +413,11 @@ async function resolveUidByTgId() {
     const tgUser = tg?.initDataUnsafe?.user;
     if (!tgUser?.id) return null;
     const tgIdStr = String(tgUser.id);
-    // Bot saves uid_index/{tgId} after phone share
+    // Bot writes uid_index/{tgId} → {uid} after phone share
     const idx = await dbGet('uid_index', tgIdStr);
     if (idx?.uid) return idx.uid;
-    // Fallback: scan users collection by tgId field
-    if (_fbR) {
-      const snap = await db.collection('users').where('tgId', '==', tgIdStr).limit(1).get();
-      if (!snap.empty) return snap.docs[0].data().uid || snap.docs[0].id;
-    }
+    // No fallback query on users collection — it's restricted to SA only.
+    // If uid_index doesn't have this tgId, the user hasn't registered via bot yet.
     return null;
   } catch { return null; }
 }
