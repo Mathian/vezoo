@@ -70,7 +70,7 @@ window.addEventListener('DOMContentLoaded', async () => {
 
   STATE.uid = tgId;
   _saveClientState();
-  registerAuthMap(tgId); // fire-and-forget — пишем auth_map для Firestore Rules
+  await registerAuthMap(tgId); // ждём — иначе race condition: Rules проверяют auth_map раньше записи
 
   const existing = await dbGet('clients', tgId);
   if (!existing) { showScreen('s-no-account'); return; }

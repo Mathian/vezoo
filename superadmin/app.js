@@ -38,7 +38,7 @@ window.addEventListener('DOMContentLoaded', async () => {
 
   STATE.uid = tgId;
   saveState();
-  registerAuthMap(tgId); // fire-and-forget — write auth_map for Firestore Rules
+  await registerAuthMap(tgId); // ждём — Rules проверяют auth_map синхронно
 
   const existing = await dbGet('godsa', tgId);
   if (!existing) { showScreen('s-no-account'); return; }
