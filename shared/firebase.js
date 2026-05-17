@@ -402,8 +402,40 @@ function tgHaptic(t='light'){ try { tg?.HapticFeedback?.impactOccurred(t); } cat
 // ─────────────────────── Telegram ID helpers ───────────────────────
 // Returns the Telegram user ID as a string, or null if not in Telegram context.
 function getTgId() {
+  // Вариант 1: стандартный — initDataUnsafe.user.id (число)
   const id = tg?.initDataUnsafe?.user?.id;
-  return id ? String(id) : null;
+  if (id) return String(id);
+
+  // Вариант 2: user может быть строкой JSON (некоторые версии Telegram)
+  const userRaw = tg?.initDataUnsafe?.user;
+  if (typeof userRaw === 'string') {
+    try { const u = JSON.parse(userRaw); if (u?.id) return String(u.id); } catch {}
+  }
+
+  // Вариант 3: парсим initData напрямую (raw URL-encoded строка)
+  try {
+    const raw = tg?.initData;
+    if (raw) {
+      const params = new URLSearchParams(raw);
+      const userStr = params.get('user');
+      if (userStr) { const u = JSON.parse(decodeURIComponent(userStr)); if (u?.id) return String(u.id); }
+    }
+  } catch {}
+
+  return null;
+}
+
+// Diagnostic dump — используется только на экране ошибки s-no-uid
+function _tgDiag() {
+  try {
+    return [
+      'tg: '          + (tg ? 'ok' : 'NULL'),
+      'initData: '    + (tg?.initData   ? tg.initData.slice(0, 80) + '…' : 'EMPTY'),
+      'user: '        + JSON.stringify(tg?.initDataUnsafe?.user ?? 'undefined'),
+      'version: '     + (tg?.version    ?? '?'),
+      'platform: '    + (tg?.platform   ?? '?'),
+    ].join('\n');
+  } catch (e) { return 'diag error: ' + e.message; }
 }
 
 

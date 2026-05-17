@@ -67,7 +67,13 @@ window.addEventListener('DOMContentLoaded', async () => {
 
   await initFirebase();
 
-  if (!tgId) { showScreen('s-no-uid'); return; }
+  if (!tgId) {
+    try {
+      const el = document.querySelector('#s-no-uid .splash-sub');
+      if (el) el.innerHTML = 'Откройте через Telegram-бот курьера Vezoo.<br><small style="font-size:9px;opacity:0.6;word-break:break-all;white-space:pre-wrap">' + escHtml(_tgDiag()) + '</small>';
+    } catch {}
+    showScreen('s-no-uid'); return;
+  }
 
   STATE.uid = tgId;
   _saveState();
