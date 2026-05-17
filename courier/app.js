@@ -58,23 +58,22 @@ window.addEventListener('DOMContentLoaded', async () => {
   tgReady();
   _initCourierBackButton();
 
-  const _tgUserId = tg?.initDataUnsafe?.user?.id ? String(tg.initDataUnsafe.user.id) : null;
+  const tgId = getTgId();
+
   try {
     const s = JSON.parse(localStorage.getItem('vez_courier_state') || '{}');
-    if (!_tgUserId || s.tgId === _tgUserId) {
-      STATE.uid = s.uid || null; STATE.user = s.user || null;
-    }
+    if (s.tgId === tgId) STATE.user = s.user || null;
   } catch {}
-
-  const urlUid = readUidFromUrl();
-  if (urlUid) { STATE.uid = urlUid; _saveState(); }
 
   await initFirebase();
 
-  if (!STATE.uid || !STATE.uid.startsWith('d_')) { showScreen('s-no-uid'); return; }
-  await registerAuthMap(STATE.uid); // ждём записи auth_map — иначе race condition при быстром нажатии
+  if (!tgId) { showScreen('s-no-uid'); return; }
 
-  const existing = await dbGet('drivers', STATE.uid);
+  STATE.uid = tgId;
+  _saveState();
+  await registerAuthMap(tgId); // ждём записи auth_map — иначе race condition при быстром нажатии
+
+  const existing = await dbGet('drivers', tgId);
   if (!existing) { showScreen('s-no-account'); return; }
   if (existing.blocked || existing.status === 'blocked') { showScreen('s-blocked'); return; }
 
@@ -84,10 +83,10 @@ window.addEventListener('DOMContentLoaded', async () => {
   }
 
   STATE.user = existing; _saveState();
-  // Variant A: SA-triggered per-user cache reset
+  // SA-triggered per-user cache reset
   if (existing.resetCache === true && !sessionStorage.getItem('_vez_reset_done')) {
     sessionStorage.setItem('_vez_reset_done', '1');
-    try { await dbUpdate('drivers', STATE.uid, { resetCache: false }); } catch {}
+    try { await dbUpdate('drivers', tgId, { resetCache: false }); } catch {}
     localStorage.clear(); location.reload(); return;
   }
   sessionStorage.removeItem('_vez_reset_done');
@@ -101,16 +100,14 @@ function _getTgName() {
 }
 
 function _saveState() {
-  const tgId = tg?.initDataUnsafe?.user?.id ? String(tg.initDataUnsafe.user.id) : null;
-  try { localStorage.setItem('vez_courier_state', JSON.stringify({ uid: STATE.uid, user: STATE.user, tgId })); } catch {}
+  try { localStorage.setItem('vez_courier_state', JSON.stringify({ tgId: STATE.uid, user: STATE.user })); } catch {}
 }
 
 // ── Agreement ──
 async function submitAgree() {
   const btn = document.getElementById('agree-btn');
   if (btn) { btn.disabled = true; btn.classList.add('btn-loading'); }
-  // Bot already created the drivers doc — just mark agreed and set name
-  const existingDoc = await dbGet('drivers', STATE.uid) || {};
+  const existingDoc = STATE.user || {};
   const autoName = _getTgName() || existingDoc.firstName || existingDoc.name || 'Курьер';
   const patch = { agreed: true, name: autoName, _upd: new Date().toISOString() };
   await dbSet('drivers', STATE.uid, patch);

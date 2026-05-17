@@ -53,26 +53,26 @@ window.addEventListener('DOMContentLoaded', async () => {
   tgReady();
   _initBackButton();
 
-  const _tgUserId = tg?.initDataUnsafe?.user?.id ? String(tg.initDataUnsafe.user.id) : null;
+  // Telegram ID — единственный ключ аутентификации
+  const tgId = getTgId();
+
   try {
     const s = JSON.parse(localStorage.getItem('vez_client_state') || '{}');
-    if (!_tgUserId || s.tgId === _tgUserId) {
-      STATE.uid  = s.uid  || null;
-      STATE.user = s.user || null;
-    }
+    if (s.tgId === tgId) STATE.user = s.user || null;
     CART      = JSON.parse(localStorage.getItem('vez_cart') || '{}');
     FAVORITES = JSON.parse(localStorage.getItem('vez_favorites') || '[]');
   } catch {}
 
-  const urlUid = readUidFromUrl();
-  if (urlUid) { STATE.uid = urlUid; _saveClientState(); }
-
   await initFirebase();
 
-  if (!STATE.uid || !STATE.uid.startsWith('c_')) { showScreen('s-no-uid'); return; }
-  registerAuthMap(STATE.uid); // fire-and-forget — write auth_map for Firestore Rules
+  // Открыто не через Telegram — доступ запрещён
+  if (!tgId) { showScreen('s-no-uid'); return; }
 
-  const existing = await dbGet('clients', STATE.uid);
+  STATE.uid = tgId;
+  _saveClientState();
+  registerAuthMap(tgId); // fire-and-forget — пишем auth_map для Firestore Rules
+
+  const existing = await dbGet('clients', tgId);
   if (!existing) { showScreen('s-no-account'); return; }
   if (existing.blocked) { showScreen('s-blocked'); return; }
 
@@ -83,15 +83,14 @@ window.addEventListener('DOMContentLoaded', async () => {
 
   if (!existing.name) {
     const autoName = _getTgName() || existing.firstName || 'Пользователь';
-    await dbSet('clients', STATE.uid, { name: autoName });
+    await dbSet('clients', tgId, { name: autoName });
     existing.name = autoName;
   }
   STATE.user = existing; _saveClientState();
-  // Variant A: SA-triggered per-user cache reset.
-  // sessionStorage guard prevents an infinite reload if the Firestore write fails.
+  // SA-triggered per-user cache reset
   if (existing.resetCache === true && !sessionStorage.getItem('_vez_reset_done')) {
     sessionStorage.setItem('_vez_reset_done', '1');
-    try { await dbUpdate('clients', STATE.uid, { resetCache: false }); } catch {}
+    try { await dbUpdate('clients', tgId, { resetCache: false }); } catch {}
     localStorage.clear(); location.reload(); return;
   }
   sessionStorage.removeItem('_vez_reset_done');
@@ -105,8 +104,7 @@ function _getTgName() {
 }
 
 function _saveClientState() {
-  const tgId = tg?.initDataUnsafe?.user?.id ? String(tg.initDataUnsafe.user.id) : null;
-  try { localStorage.setItem('vez_client_state', JSON.stringify({ uid: STATE.uid, user: STATE.user, tgId })); } catch {}
+  try { localStorage.setItem('vez_client_state', JSON.stringify({ tgId: STATE.uid, user: STATE.user })); } catch {}
 }
 function _saveCart()      { try { localStorage.setItem('vez_cart', JSON.stringify(CART)); } catch {} }
 function _saveFavorites() { try { localStorage.setItem('vez_favorites', JSON.stringify(FAVORITES)); } catch {} }
@@ -115,10 +113,10 @@ function _saveFavorites() { try { localStorage.setItem('vez_favorites', JSON.str
 async function submitAgree() {
   const btn = document.getElementById('agree-btn');
   if (btn) { btn.disabled = true; btn.classList.add('btn-loading'); }
-  // Bot already created the doc with phone/tgId/firstName — just mark agreed and set name
-  const existingDoc = await dbGet('clients', STATE.uid) || {};
+  // Бот уже создал документ — только помечаем agreed и устанавливаем имя
+  const existingDoc = STATE.user || {};
   const autoName = _getTgName() || existingDoc.firstName || existingDoc.name || 'Пользователь';
-  const patch = { agreed: true, name: autoName, _upd: new Date().toISOString() };
+  const patch = { agreed: true, name: autoName };
   await dbSet('clients', STATE.uid, patch);
   STATE.user = { ...existingDoc, ...patch };
   _saveClientState();

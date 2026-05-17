@@ -16,17 +16,6 @@ const FIREBASE_CONFIG = {
 const WEBAPP_BASE = "https://mathian.github.io/vezoo";
 const PFX = 'vez_'; // localStorage prefix
 
-// ── Role collection map ──
-// UID prefix → Firestore collection name
-function colForUid(uid) {
-  if (!uid) return null;
-  if (uid.startsWith('c_'))   return 'clients';
-  if (uid.startsWith('d_'))   return 'drivers';
-  if (uid.startsWith('a_'))   return 'admins';
-  if (uid.startsWith('gsa_')) return 'godsa';
-  return null;
-}
-
 // ── Firebase state ──
 let db   = null;
 let _fbR = false;
@@ -277,22 +266,23 @@ async function setDriver(uid, data) {
 async function getCourier(uid)         { return getDriver(uid); }
 async function setCourier(uid, data)   { return setDriver(uid, data); }
 async function getCourierAll()         {
-  // Returns map uid → driver (for admin/SA venue-courier list)
-  // Build from localStorage cache if available, otherwise query Firestore
+  // Returns map tgId → driver (for admin/SA venue-courier list)
   if (_fbR) {
     try {
       const snap = await db.collection('drivers').get();
       const map = {};
-      snap.docs.forEach(d => { const data = d.data(); map[d.id] = data; });
+      snap.docs.forEach(d => { map[d.id] = d.data(); });
       return map;
     } catch (e) { console.warn('[DB] getCourierAll:', e.message); }
   }
-  // Fallback: rebuild from localStorage
+  // Fallback: rebuild from localStorage cache (docId = tgId encoded in key)
   const map = {};
+  const prefix = `${PFX}drivers_`;
   for (let i = 0; i < localStorage.length; i++) {
     const key = localStorage.key(i);
-    if (!key || !key.startsWith(`${PFX}drivers_`)) continue;
-    try { const c = JSON.parse(localStorage.getItem(key)); if (c?.uid) map[c.uid] = c; } catch {}
+    if (!key?.startsWith(prefix)) continue;
+    const docId = key.slice(prefix.length);
+    try { const c = JSON.parse(localStorage.getItem(key)); if (c) map[docId] = c; } catch {}
   }
   return map;
 }
@@ -309,21 +299,15 @@ async function bumpVersion(field) {
 }
 
 // ── Firebase Auth Mapping ──
-// Maps anonymous Firebase UID → role HMAC UID so Firestore Rules can resolve identity.
-// Writes to auth_map/{firebaseUid} (replaces uid_index/fb_{firebaseUid}).
-// Each user can only write their own record (enforced by Firestore Rules).
-async function registerAuthMap(hmacUid) {
-  if (!_fbR || !hmacUid) return;
+// Maps anonymous Firebase UID → Telegram ID so Firestore Rules can resolve identity.
+// Writes to auth_map/{firebaseUid}. Each user can only write their own record.
+async function registerAuthMap(tgId) {
+  if (!_fbR || !tgId) return;
   try {
     const firebaseUid = firebase.auth().currentUser?.uid;
     if (!firebaseUid) return;
-    const role = hmacUid.startsWith('c_')   ? 'client'
-               : hmacUid.startsWith('d_')   ? 'driver'
-               : hmacUid.startsWith('a_')   ? 'admin'
-               : hmacUid.startsWith('gsa_') ? 'superadmin'
-               : 'unknown';
     await db.collection('auth_map').doc(firebaseUid).set(
-      { hmacUid, role, _upd: new Date().toISOString() },
+      { tgId: String(tgId), _upd: new Date().toISOString() },
       { merge: true }
     );
   } catch (e) { console.warn('[Firebase] auth map:', e.message); }
@@ -415,32 +399,11 @@ const tg = window.Telegram?.WebApp || null;
 function tgReady()          { try { tg?.ready(); tg?.expand(); } catch {} }
 function tgHaptic(t='light'){ try { tg?.HapticFeedback?.impactOccurred(t); } catch {} }
 
-// ─────────────────────── UID helpers ───────────────────────
-// Returns true if uid has a valid role prefix
-function _isRoleUid(uid) {
-  if (!uid || uid.length < 6) return false;
-  return uid.startsWith('c_') || uid.startsWith('d_') || uid.startsWith('a_') || uid.startsWith('gsa_');
-}
-
-// ─────────────────────── State helpers ───────────────────────
-function readUidFromUrl() {
-  // 1. Telegram WebApp start_param
-  const startParam = tg?.initDataUnsafe?.start_param || '';
-  if (startParam && _isRoleUid(startParam)) return startParam;
-  // 2. Telegram WebApp передаёт параметры через hash
-  try {
-    const hash = new URLSearchParams(location.hash.replace('#', ''));
-    const hashUid = hash.get('tgWebAppStartParam') || hash.get('uid');
-    if (hashUid && hashUid.length > 5) return hashUid;
-  } catch {}
-  // 3. Прямой ?uid= в URL (fallback для тестирования в браузере)
-  const p = new URLSearchParams(location.search);
-  const uid = p.get('uid') || p.get('tgWebAppStartParam');
-  if (uid && uid.length > 5) {
-    history.replaceState(null, '', location.pathname);
-    return uid;
-  }
-  return null;
+// ─────────────────────── Telegram ID helpers ───────────────────────
+// Returns the Telegram user ID as a string, or null if not in Telegram context.
+function getTgId() {
+  const id = tg?.initDataUnsafe?.user?.id;
+  return id ? String(id) : null;
 }
 
 

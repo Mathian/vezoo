@@ -29,32 +29,37 @@ window.addEventListener('DOMContentLoaded', async () => {
   if (new URLSearchParams(location.search).get('reset') === '1') { localStorage.clear(); location.replace(location.pathname); return; }
   tgReady();
   _initAdminBackButton();
-  const _tgUserId = tg?.initDataUnsafe?.user?.id ? String(tg.initDataUnsafe.user.id) : null;
+
+  const tgId = getTgId();
+
   try {
     const s = JSON.parse(localStorage.getItem('vez_admin_state') || '{}');
-    if (!_tgUserId || s.tgId === _tgUserId) { STATE.uid = s.uid||null; STATE.user = s.user||null; }
+    if (s.tgId === tgId) STATE.user = s.user || null;
   } catch {}
-  const urlUid = readUidFromUrl();
-  if (urlUid) { STATE.uid = urlUid; saveState(); }
-  await initFirebase();
-  if (!STATE.uid || !STATE.uid.startsWith('a_')) { showScreen('s-no-uid'); return; }
-  await registerAuthMap(STATE.uid); // ждём записи auth_map — иначе race condition при быстром нажатии
 
-  const existing = await dbGet('admins', STATE.uid);
+  await initFirebase();
+
+  if (!tgId) { showScreen('s-no-uid'); return; }
+
+  STATE.uid = tgId;
+  saveState();
+  await registerAuthMap(tgId); // ждём записи auth_map — иначе race condition при быстром нажатии
+
+  const existing = await dbGet('admins', tgId);
   if (!existing) { showScreen('s-no-account'); return; }
   if (existing.blocked) { showScreen('s-blocked'); return; }
   if (!existing.agreed) { showAgreement(); return; }
 
   if (!existing.name) {
     const autoName = _getTgName() || 'Администратор';
-    await dbSet('admins', STATE.uid, { name: autoName });
+    await dbSet('admins', tgId, { name: autoName });
     existing.name = autoName;
   }
   STATE.user = existing; saveState();
-  // Variant A: SA-triggered per-user cache reset
+  // SA-triggered per-user cache reset
   if (existing.resetCache === true && !sessionStorage.getItem('_vez_reset_done')) {
     sessionStorage.setItem('_vez_reset_done', '1');
-    try { await dbUpdate('admins', STATE.uid, { resetCache: false }); } catch {}
+    try { await dbUpdate('admins', tgId, { resetCache: false }); } catch {}
     localStorage.clear(); location.reload(); return;
   }
   sessionStorage.removeItem('_vez_reset_done');
@@ -68,8 +73,7 @@ function _getTgName() {
 }
 
 function saveState() {
-  const tgUserId = tg?.initDataUnsafe?.user?.id ? String(tg.initDataUnsafe.user.id) : null;
-  try { localStorage.setItem('vez_admin_state', JSON.stringify({ uid: STATE.uid, user: STATE.user, tgId: tgUserId })); } catch {}
+  try { localStorage.setItem('vez_admin_state', JSON.stringify({ tgId: STATE.uid, user: STATE.user })); } catch {}
 }
 
 // ══════════════════════════════════════════════════════════
