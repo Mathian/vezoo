@@ -38,7 +38,7 @@ window.addEventListener('DOMContentLoaded', async () => {
   if (urlUid) { STATE.uid = urlUid; saveState(); }
   await initFirebase();
   if (!STATE.uid || !STATE.uid.startsWith('a_')) { showScreen('s-no-uid'); return; }
-  registerAuthMap(STATE.uid); // fire-and-forget — write auth_map for Firestore Rules
+  await registerAuthMap(STATE.uid); // ждём записи auth_map — иначе race condition при быстром нажатии
 
   const existing = await dbGet('admins', STATE.uid);
   if (!existing) { showScreen('s-no-account'); return; }
@@ -1063,7 +1063,6 @@ function copyAdminReport() {
 // ══════════════════════════════════════════════════════════
 async function loadSettingsScreen() {
   if (!VENUE) return;
-  await loadPermCouriers();
   await loadBlacklist();
 }
 

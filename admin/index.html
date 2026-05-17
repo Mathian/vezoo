@@ -57,7 +57,6 @@
     <p style="color:var(--text-dim);font-size:14px;max-width:280px;line-height:1.5">
       Покажите QR-код или сообщите номер телефона суперадминистратору Vezoo.
     </p>
-    <button class="btn btn-ghost btn-sm" onclick="checkAdminInvite()">🔄 Проверить приглашение</button>
   </div>
 </div>
 
@@ -103,18 +102,6 @@
       <div class="section-title">Управление</div>
       <button class="btn btn-secondary" style="width:100%;margin-bottom:10px" onclick="openMenuWithPin()">🍽️ Меню</button>
       <button class="btn btn-secondary" style="width:100%" onclick="openStatsWithPin()">📊 Статистика</button>
-    </div>
-    <div class="section">
-      <div class="section-title">Постоянные курьеры</div>
-      <div id="perm-couriers-list" style="display:flex;flex-direction:column;gap:6px;margin-bottom:10px"></div>
-      <div class="field">
-        <label>Телефон курьера</label>
-        <div style="display:flex;gap:8px;align-items:flex-start">
-          <input class="inp" id="courier-phone" type="tel" placeholder="+7 (777) 000-00-00" style="flex:1">
-          <button class="btn btn-secondary btn-sm btn-icon" onclick="scanQrCourier()" title="Сканировать QR" style="margin-top:0;height:46px;width:46px;flex-shrink:0;font-size:20px">📷</button>
-        </div>
-        <button class="btn btn-secondary btn-sm" style="margin-top:8px;width:100%" onclick="addPermCourier()">Добавить курьера</button>
-      </div>
     </div>
     <div class="section">
       <div class="section-title">🚫 Чёрный список</div>
