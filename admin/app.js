@@ -698,8 +698,12 @@ async function adminHandOverCourier(orderId) {
 }
 
 async function adminMarkReadyForCourier(orderId) {
-  const patch={ status:'ready_for_courier', readyForCourierAt:new Date().toISOString(), courierBotNotified:false };
-  await dbSet('orders',orderId,patch); _patchAllOrders(orderId,patch);
+  // courierUid:null — явно сбрасываем, чтобы правило курьера (courierUid==null) в Rules сработало
+  const patch={ status:'ready_for_courier', readyForCourierAt:new Date().toISOString(),
+                courierUid:null, courierName:null, courierBotNotified:false };
+  const ok = await dbSet('orders',orderId,patch);
+  if (!ok) { showToast('Ошибка: нет прав или нет сети.','error'); return; }
+  _patchAllOrders(orderId,patch);
   closeOrderSheet(); tgHaptic('success'); showToast('Заказ готов — курьеры заведения уведомлены','success'); loadOrders(_ordersTab);
 }
 
