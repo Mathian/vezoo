@@ -16,6 +16,17 @@ const FIREBASE_CONFIG = {
 const WEBAPP_BASE = "https://mathian.github.io/vezoo";
 const PFX = 'vez_'; // localStorage prefix
 
+// ── Role collection map ──
+// UID prefix → Firestore collection name
+function colForUid(uid) {
+  if (!uid) return null;
+  if (uid.startsWith('c_'))   return 'clients';
+  if (uid.startsWith('d_'))   return 'drivers';
+  if (uid.startsWith('a_'))   return 'admins';
+  if (uid.startsWith('gsa_')) return 'godsa';
+  return null;
+}
+
 // ── Firebase state ──
 let db   = null;
 let _fbR = false;
@@ -112,14 +123,11 @@ async function dbGet(col, id) {
         try { localStorage.setItem(`${PFX}${col}_${id}`, JSON.stringify(d)); } catch {}
         return d;
       } else {
-        // Firestore confirmed the document was deleted — clear stale local cache
-        // and return null immediately (do NOT fall through to stale localStorage).
         try { localStorage.removeItem(`${PFX}${col}_${id}`); } catch {}
         return null;
       }
     } catch (e) { console.warn(`[DB] get ${col}/${id}:`, e.message); }
   }
-  // Offline fallback: use locally cached value if Firebase is unavailable
   try { const r = localStorage.getItem(`${PFX}${col}_${id}`); return r ? JSON.parse(r) : null; }
   catch { return null; }
 }
@@ -227,8 +235,6 @@ function onColSnap(col, cb, orderBy = null, dir = 'asc') {
 }
 
 // ── Real-time query listener (multiple conditions) ──
-// NOTE: Requires composite Firestore index for multi-field queries.
-// E.g. for orders: venueId ASC + active ASC
 function onQuerySnapWhere(col, conditions, cb) {
   if (_fbR) {
     try {
@@ -244,48 +250,54 @@ function onQuerySnapWhere(col, conditions, cb) {
   return () => clearInterval(t);
 }
 
-// ── Courier helpers (Дыра №7) ──
-// Each courier keeps its individual doc (needed for status queries in superadmin).
-// Additionally, all couriers are mirrored into couriers/all: { couriers: { uid: {...} } }
-// for fast bulk lookups (avoids N separate Firestore reads per courier list).
-async function getCourier(uid) {
-  // Individual doc is authoritative — SA queries run against individual docs,
-  // so we must check it first. If it was manually deleted, dbGet returns null
-  // (after the dbGet fix: Firestore "not found" clears stale cache and returns null).
-  const indiv = await dbGet('couriers', uid);
-  if (indiv) return indiv;
-  // Fallback: batch doc (covers couriers not yet written individually, or offline).
-  const all = await dbGet('couriers', 'all');
-  if (all?.couriers?.[uid]) {
-    // Individual doc is missing but batch has the data — re-sync so SA queries work.
-    if (_fbR) setCourier(uid, all.couriers[uid]); // fire-and-forget
-    return all.couriers[uid];
-  }
-  return null;
+// ── Driver helpers ──
+// drivers/{uid} is the single authoritative document (replaces old users + couriers).
+async function getDriver(uid) {
+  return await dbGet('drivers', uid);
 }
-async function getCourierAll() {
-  const doc = await dbGet('couriers', 'all');
-  if (doc?.couriers && Object.keys(doc.couriers).length > 0) return doc.couriers;
-  // Rebuild from locally cached individual courier docs
+
+// Get all drivers for a venue (replaces getCourierAll for venue context)
+async function getDriversByVenue(venueId) {
+  if (!venueId) return [];
+  const docs = await dbQuery('drivers', 'primaryVenueId', '==', venueId);
+  return docs;
+}
+
+// Get all active drivers (for admin courier management)
+async function getAllDrivers() {
+  return await dbGetAll('drivers', 'name', 'asc');
+}
+
+async function setDriver(uid, data) {
+  const payload = { ...data, _upd: new Date().toISOString() };
+  return await dbSet('drivers', uid, payload);
+}
+
+// Legacy aliases — kept for code that hasn't migrated yet
+async function getCourier(uid)         { return getDriver(uid); }
+async function setCourier(uid, data)   { return setDriver(uid, data); }
+async function getCourierAll()         {
+  // Returns map uid → driver (for admin/SA venue-courier list)
+  // Build from localStorage cache if available, otherwise query Firestore
+  if (_fbR) {
+    try {
+      const snap = await db.collection('drivers').get();
+      const map = {};
+      snap.docs.forEach(d => { const data = d.data(); map[d.id] = data; });
+      return map;
+    } catch (e) { console.warn('[DB] getCourierAll:', e.message); }
+  }
+  // Fallback: rebuild from localStorage
   const map = {};
   for (let i = 0; i < localStorage.length; i++) {
     const key = localStorage.key(i);
-    if (!key || !key.startsWith(`${PFX}couriers_`) || key === `${PFX}couriers_all`) continue;
+    if (!key || !key.startsWith(`${PFX}drivers_`)) continue;
     try { const c = JSON.parse(localStorage.getItem(key)); if (c?.uid) map[c.uid] = c; } catch {}
   }
   return map;
 }
-async function setCourier(uid, data) {
-  const payload = { ...data, _upd: new Date().toISOString() };
-  // Write to individual doc (superadmin queries by status)
-  await dbSet('couriers', uid, payload);
-  // Mirror into batch doc (fast bulk lookup for admin/courier apps)
-  await dbUpdate('couriers', 'all', { [`couriers.${uid}`]: payload });
-}
 
-// ── Version bumping (Дыры №2, №3, №4) ──
-// field examples: 'venues', 'menu_venueId'
-// Хранится в коллекции versions, документ main
+// ── Version bumping ──
 async function bumpVersion(field) {
   if (!_fbR) return;
   try {
@@ -296,24 +308,25 @@ async function bumpVersion(field) {
   } catch (e) { console.warn('[Version] bump failed:', e.message); }
 }
 
-// ── Firebase UID → HMAC UID mapping ──
-// Writes uid_index/fb_{firebaseUid} → {hmacUid} so Firestore Rules can resolve
-// the caller's HMAC-based role via hmacUidOf().
-// Security note: each user can only write their own fb_{firebase_uid} key (Rules enforce this),
-// so they cannot write under another user's Firebase UID.
-// The risk of a user mapping to another person's hmacUid is mitigated by:
-// 1) hmacUids are HMAC-SHA256 derived and not easily guessable
-// 2) users collection list queries are restricted to SA only
-async function registerFirebaseAuthMapping(hmacUid) {
+// ── Firebase Auth Mapping ──
+// Maps anonymous Firebase UID → role HMAC UID so Firestore Rules can resolve identity.
+// Writes to auth_map/{firebaseUid} (replaces uid_index/fb_{firebaseUid}).
+// Each user can only write their own record (enforced by Firestore Rules).
+async function registerAuthMap(hmacUid) {
   if (!_fbR || !hmacUid) return;
   try {
     const firebaseUid = firebase.auth().currentUser?.uid;
     if (!firebaseUid) return;
-    await db.collection('uid_index').doc('fb_' + firebaseUid).set(
-      { hmacUid, _upd: new Date().toISOString() },
+    const role = hmacUid.startsWith('c_')   ? 'client'
+               : hmacUid.startsWith('d_')   ? 'driver'
+               : hmacUid.startsWith('a_')   ? 'admin'
+               : hmacUid.startsWith('gsa_') ? 'superadmin'
+               : 'unknown';
+    await db.collection('auth_map').doc(firebaseUid).set(
+      { hmacUid, role, _upd: new Date().toISOString() },
       { merge: true }
     );
-  } catch (e) { console.warn('[Firebase] auth mapping:', e.message); }
+  } catch (e) { console.warn('[Firebase] auth map:', e.message); }
 }
 
 // ── Generate unique ID ──
@@ -366,7 +379,7 @@ function fmtCountdown(ms) {
   return `${String(m).padStart(2,'0')}:${String(s).padStart(2,'0')}`;
 }
 
-// ─────────────────────── HTML escaping (C-2 XSS) ───────────────────────
+// ─────────────────────── HTML escaping ───────────────────────
 function escHtml(str) {
   return String(str ?? '')
     .replace(/&/g, '&amp;')
@@ -402,29 +415,19 @@ const tg = window.Telegram?.WebApp || null;
 function tgReady()          { try { tg?.ready(); tg?.expand(); } catch {} }
 function tgHaptic(t='light'){ try { tg?.HapticFeedback?.impactOccurred(t); } catch {} }
 
-// ─────────────────────── UID resolver ───────────────────────
-async function resolveUidByTgId() {
-  try {
-    const tgUser = tg?.initDataUnsafe?.user;
-    if (!tgUser?.id) return null;
-    const tgIdStr = String(tgUser.id);
-    // Bot writes uid_index/{tgId} → {uid} after phone share
-    const idx = await dbGet('uid_index', tgIdStr);
-    if (idx?.uid) return idx.uid;
-    // No fallback query on users collection — it's restricted to SA only.
-    // If uid_index doesn't have this tgId, the user hasn't registered via bot yet.
-    return null;
-  } catch { return null; }
+// ─────────────────────── UID helpers ───────────────────────
+// Returns true if uid has a valid role prefix
+function _isRoleUid(uid) {
+  if (!uid || uid.length < 6) return false;
+  return uid.startsWith('c_') || uid.startsWith('d_') || uid.startsWith('a_') || uid.startsWith('gsa_');
 }
 
 // ─────────────────────── State helpers ───────────────────────
 function readUidFromUrl() {
-  // 1. Telegram WebApp start_param (передаётся через ?startapp= или бот /start uid_xxx)
+  // 1. Telegram WebApp start_param
   const startParam = tg?.initDataUnsafe?.start_param || '';
-  if (startParam && startParam.startsWith('u_') && startParam.length > 5) {
-    return startParam;
-  }
-  // 2. Telegram WebApp передаёт параметры через tgWebAppStartParam в hash
+  if (startParam && _isRoleUid(startParam)) return startParam;
+  // 2. Telegram WebApp передаёт параметры через hash
   try {
     const hash = new URLSearchParams(location.hash.replace('#', ''));
     const hashUid = hash.get('tgWebAppStartParam') || hash.get('uid');
@@ -473,10 +476,8 @@ function normPhone(raw) {
   if (!raw) return '';
   let d = raw.replace(/\D/g, '');
   if (!d) return '';
-  // Russian/Kazakh 8-prefix → 7
   if (d.length === 11 && d[0] === '8') d = '7' + d.slice(1);
-  // Strip leading country code duplicates
-  if (d.length === 10) d = '7' + d; // bare 10-digit
+  if (d.length === 10) d = '7' + d;
   return '+' + d;
 }
 
@@ -490,7 +491,7 @@ function callPhone(phone) {
   document.body.removeChild(a);
 }
 
-// ─────────────────────── Order timeline (for admin/operator history) ───────────────────────
+// ─────────────────────── Order timeline ───────────────────────
 function renderOrderTimeline(order) {
   const events = [
     { label: 'Создан',            time: order.createdAt },
@@ -588,14 +589,11 @@ function recordPinAttempt(role, success) {
 }
 
 // ─────────────────────── Agreement checkbox ───────────────────────
-// Универсальная функция для всех ролей — живёт в shared/firebase.js
 function toggleAgreeCheck() {
   const cb  = document.getElementById('agree-cb');
   const box = document.getElementById('agree-box');
   const row = document.getElementById('agree-check-row');
   const btn = document.getElementById('agree-btn');
-  // Читаем реальное состояние: если есть скрытый <input type="checkbox">,
-  // браузер уже переключил его когда пользователь кликнул на <label>
   const checked = cb ? cb.checked : (box?.textContent !== '✓');
   if (box) box.textContent = checked ? '✓' : '';
   if (row) row.classList.toggle('checked', checked);

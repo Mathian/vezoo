@@ -35,15 +35,15 @@ window.addEventListener('DOMContentLoaded', async () => {
   if (urlUid) { STATE.uid = urlUid; saveState(); }
 
   await initFirebase();
-  if (!STATE.uid) { const tgUid = await resolveUidByTgId(); if (tgUid) { STATE.uid = tgUid; saveState(); } }
-  if (!STATE.uid) { showScreen('s-no-uid'); return; }
-  registerFirebaseAuthMapping(STATE.uid); // fire-and-forget — не блокируем boot
+  if (!STATE.uid || !STATE.uid.startsWith('gsa_')) { showScreen('s-no-uid'); return; }
+  registerAuthMap(STATE.uid); // fire-and-forget — write auth_map for Firestore Rules
 
-  try { localStorage.removeItem('vez_users_' + STATE.uid); } catch {}
-  const existing = await dbGet('users', STATE.uid);
+  try { localStorage.removeItem('vez_godsa_' + STATE.uid); } catch {}
+  const existing = await dbGet('godsa', STATE.uid);
+  if (!existing) { showScreen('s-no-account'); return; }
 
-  if (!existing?.agreedSA) {
-    STATE.user = existing || { uid: STATE.uid, role: 'superadmin' };
+  if (!existing.agreed) {
+    STATE.user = existing;
     saveState();
     showAgreement();
     return;
@@ -52,7 +52,7 @@ window.addEventListener('DOMContentLoaded', async () => {
   // Variant A: SA-triggered per-user cache reset
   if (existing.resetCache === true && !sessionStorage.getItem('_vez_reset_done')) {
     sessionStorage.setItem('_vez_reset_done', '1');
-    try { await dbUpdate('users', STATE.uid, { resetCache: false }); } catch {}
+    try { await dbUpdate('godsa', STATE.uid, { resetCache: false }); } catch {}
     localStorage.clear(); location.reload(); return;
   }
   sessionStorage.removeItem('_vez_reset_done');
@@ -73,8 +73,10 @@ function showAgreement() {
 }
 
 async function submitAgree() {
-  await dbSet('users', STATE.uid, { agreedSA: true });
-  STATE.user = { ...STATE.user, agreedSA: true }; saveState();
+  // Bot already created the godsa doc — just mark agreed
+  const patch = { agreed: true, _upd: new Date().toISOString() };
+  await dbSet('godsa', STATE.uid, patch);
+  STATE.user = { ...STATE.user, ...patch }; saveState();
   document.getElementById('s-agree').style.display = 'none';
   showPinScreen();
 }
@@ -151,7 +153,7 @@ function initMain() {
 }
 
 async function loadPendingBadges() {
-  const pc = await dbQuery('couriers','status','==','pending');
+  const pc = await dbQuery('drivers','status','==','pending');
   const cb = document.getElementById('couriers-badge');
   cb.textContent = pc.length; cb.classList.toggle('hidden', pc.length === 0);
 }
@@ -331,7 +333,7 @@ async function _loadSaVenueAssignees(venue) {
   const removeAdminBtn = document.getElementById('sa-ven-remove-admin-btn');
   if (adminEl) {
     if (venue.adminUid) {
-      const admin = await dbGet('users', venue.adminUid);
+      const admin = await dbGet('admins', venue.adminUid);
       adminEl.textContent = `Администратор: ${admin?.name||'—'} (${admin?.phone||'—'})`;
       adminEl.className = 'alert-box success';
       if (removeAdminBtn) removeAdminBtn.style.display = '';
@@ -350,7 +352,7 @@ async function _loadSaVenueCouriers(venueId) {
   if (!listEl) return;
   const links = await dbQuery('courier_venue_links','venueId','==',venueId);
   if (!links.length) { listEl.innerHTML = '<div class="text-dim text-sm">Нет постоянных курьеров</div>'; return; }
-  // Дыра №7: one read for all couriers (couriers/all batch doc)
+  // One read for all drivers
   const allCouriers = await getCourierAll();
   const rows = links.map(l => { const c = allCouriers[l.uid]; return {...l, courierName:c?.name||l.uid, phone:c?.phone||''}; });
   listEl.innerHTML = rows.map(r => `
@@ -439,15 +441,22 @@ async function saToggleVenueBlock(venueId, currentlyBlocked) {
 async function saAssignAdminToVenue(venueId) {
   const phone = document.getElementById('sa-ven-admin-phone')?.value.trim();
   if (!phone) { showToast('Введите телефон', 'warning'); return; }
-  const phoneKey = normPhone(phone).replace(/\D/g, '');
-  const link = await dbGet('uid_index', phoneKey);
-  if (!link?.uid) { showToast('Пользователь не найден', 'error'); return; }
-  const user = await dbGet('users', link.uid);
-  if (!user?.agreedAdmin) { showToast('Пользователь не зарегистрирован как администратор', 'error'); return; }
+  const normalized = normPhone(phone);
+  const prefix = normalized.replace(/\D/g, '');
+  // Search admins collection by phone (no uid_index)
+  let adminUid = null, user = null;
+  try {
+    const results = await dbQueryWhere('admins',
+      [['phone', '>=', '+' + prefix], ['phone', '<=', '+' + prefix + String.fromCharCode(0xF8FF)]],
+      null, 'asc', 5);
+    if (results.length) { user = results[0]; adminUid = user.uid || user.id; }
+  } catch {}
+  if (!adminUid || !user) { showToast('Администратор не найден', 'error'); return; }
+  if (!user.agreed) { showToast('Пользователь не завершил регистрацию как администратор', 'error'); return; }
   // Direct assignment — no invite/confirmation needed
-  await dbSet('venues', venueId, { adminUid: link.uid, adminName: user.name || '' });
+  await dbSet('venues', venueId, { adminUid, adminName: user.name || '' });
   // Clean up any stale invite document
-  try { await dbDelete('admin_invites', link.uid); } catch {}
+  try { await dbDelete('admin_invites', adminUid); } catch {}
   tgHaptic('success'); showToast('Администратор назначен', 'success');
   if (document.getElementById('sa-ven-admin-phone')) document.getElementById('sa-ven-admin-phone').value = '';
   const adminEl = document.getElementById('sa-ven-admin-info');
@@ -482,19 +491,25 @@ function saScanQrAdmin(venueId) {
 async function saAddCourierToVenue(venueId) {
   const phone = document.getElementById('sa-ven-courier-phone')?.value.trim();
   if (!phone) { showToast('Введите телефон', 'warning'); return; }
-  const phoneKey = normPhone(phone).replace(/\D/g, '');
-  const link = await dbGet('uid_index', phoneKey);
-  if (!link?.uid) { showToast('Пользователь не найден', 'error'); return; }
-  const courier = await getCourier(link.uid); // Дыра №7
-  if (!courier) { showToast('Этот пользователь не является курьером', 'error'); return; }
+  const normalized = normPhone(phone);
+  const prefix = normalized.replace(/\D/g, '');
+  // Search drivers collection by phone (no uid_index)
+  let courierUid = null, courier = null;
+  try {
+    const results = await dbQueryWhere('drivers',
+      [['phone', '>=', '+' + prefix], ['phone', '<=', '+' + prefix + String.fromCharCode(0xF8FF)]],
+      null, 'asc', 5);
+    if (results.length) { courier = results[0]; courierUid = courier.uid || courier.id; }
+  } catch {}
+  if (!courierUid || !courier) { showToast('Курьер не найден', 'error'); return; }
   const venue = await dbGet('venues', venueId);
   // Direct assignment — confirmed immediately, no invite/confirmation step
-  await dbSet('courier_venue_links', link.uid, {
-    uid: link.uid, venueId, venueName: venue?.name||'', venueAddress: venue?.address||'',
+  await dbSet('courier_venue_links', courierUid, {
+    uid: courierUid, venueId, venueName: venue?.name||'', venueAddress: venue?.address||'',
     status: 'confirmed', assignedAt: new Date().toISOString()
   });
-  // Also update courier doc so they see venue orders immediately
-  await setCourier(link.uid, { ...courier, primaryVenueId: venueId, primaryVenueName: venue?.name||'' });
+  // Also update driver doc so they see venue orders immediately
+  await setDriver(courierUid, { ...courier, primaryVenueId: venueId, primaryVenueName: venue?.name||'' });
   tgHaptic('success'); showToast('Курьер прикреплён к заведению', 'success');
   if (document.getElementById('sa-ven-courier-phone')) document.getElementById('sa-ven-courier-phone').value = '';
   await _loadSaVenueCouriers(venueId);
@@ -527,7 +542,7 @@ async function loadCouriersByStatus(status, el) {
   if (el) { document.querySelectorAll('#s-couriers .cat-tab').forEach(b=>b.classList.remove('active')); el.classList.add('active'); }
   const list = document.getElementById('sa-couriers-list');
   list.innerHTML = '<div class="loader"><div class="spinner"></div></div>';
-  const couriers = await dbQuery('couriers','status','==',status);
+  const couriers = await dbQuery('drivers','status','==',status);
   if (!couriers.length) { list.innerHTML = '<div class="empty"><div class="empty-icon">🚴</div><div class="empty-text">Нет курьеров</div></div>'; return; }
   list.innerHTML = couriers.sort((a,b)=>(b.createdAt||'').localeCompare(a.createdAt||'')).map(c => {
     const rating = c.rating ? `⭐ ${Number(c.rating).toFixed(1)}` : '';
@@ -544,7 +559,7 @@ async function loadCouriersByStatus(status, el) {
 }
 
 async function openSaCourier(courierUid) {
-  const courier = await getCourier(courierUid); // Дыра №7
+  const courier = await getDriver(courierUid);
   if (!courier) return;
   const deliveredOrders = (await dbQuery('orders','courierUid','==',courierUid)).filter(o=>o.status==='delivered');
   const totalRev = deliveredOrders.reduce((s,o)=>s+(o.total||0),0);
@@ -572,8 +587,7 @@ async function openSaCourier(courierUid) {
 }
 
 async function saApproveCourier(uid) {
-  await setCourier(uid, { status: 'active', approvedAt: new Date().toISOString() }); // Дыра №7
-  await dbSet('users',   uid, { role: 'courier' });
+  await setDriver(uid, { status: 'active', approvedAt: new Date().toISOString() });
   await dbSet('admin_events', `courier_approved_${uid}`, { type:'courier_approved', uid, ts: new Date().toISOString() });
   closeCourierDetailSheet(); tgHaptic('success'); showToast('Курьер одобрен', 'success');
   loadCouriersByStatus('pending'); loadPendingBadges();
@@ -581,8 +595,7 @@ async function saApproveCourier(uid) {
 
 async function saBlockCourier(uid) {
   if (!confirm('Заблокировать / отклонить курьера?')) return;
-  await setCourier(uid, { status: 'blocked', blockedAt: new Date().toISOString() }); // Дыра №7
-  await dbSet('users',   uid, { blocked: true });
+  await setDriver(uid, { status: 'blocked', blocked: true, blockedAt: new Date().toISOString() });
   await dbSet('admin_events', `courier_blocked_${uid}`, { type:'courier_blocked', uid, ts: new Date().toISOString() });
   closeCourierDetailSheet(); tgHaptic('light'); showToast('Курьер заблокирован', 'info');
   loadCouriersByStatus('pending'); loadPendingBadges();
@@ -628,7 +641,7 @@ async function loadSaStats() {
   // Only orders are queried per-period to avoid loading the full collection each time.
   if (!_saVenuesCache)    _saVenuesCache = await dbGetAll('venues');
   if (_saClientCount === null) {
-    const clients = await dbQuery('users', 'agreedClient', '==', true);
+    const clients = await dbQuery('clients', 'agreed', '==', true);
     _saClientCount = clients.length;
   }
   const venues = _saVenuesCache;
@@ -705,32 +718,31 @@ async function searchSaUsers() {
   const found = new Map(); // uid → doc
   const prefix = '+' + digits;
 
+  // Map role tab to collection name
+  const colMap = { client: 'clients', admin: 'admins', courier: 'drivers' };
+  const col = colMap[_saUserRoleTab] || 'clients';
+
+  try {
+    const results = await dbQueryWhere(col,
+      [['phone', '>=', prefix], ['phone', '<=', prefix + String.fromCharCode(0xF8FF)]],
+      null, 'asc', 20);
+    for (const u of results) found.set(u.uid || u.id, u);
+  } catch {}
+
+  if (!found.size) {
+    const emptyLabel = _saUserRoleTab === 'courier' ? 'Курьеры не найдены' : 'Пользователи не найдены';
+    list.innerHTML = `<div class="empty" style="padding:20px 0"><div class="empty-icon">🔍</div><div class="empty-text">${emptyLabel}</div></div>`;
+    return;
+  }
+
   if (_saUserRoleTab === 'courier') {
-    // 1. Exact via uid_index → couriers doc
-    try {
-      const link = await dbGet('uid_index', digits);
-      if (link?.uid) { const c = await getCourier(link.uid); if (c) found.set(link.uid, c); }
-    } catch {}
-    // 2. Prefix range on couriers.phone
-    if (!found.size || digits.length < 11) {
-      try {
-        const results = await dbQueryWhere('couriers',
-          [['phone', '>=', prefix], ['phone', '<=', prefix + String.fromCharCode(0xF8FF)]],
-          null, 'asc', 20);
-        for (const c of results) found.set(c.uid || c.id, c);
-      } catch {}
-    }
-    if (!found.size) {
-      list.innerHTML = '<div class="empty" style="padding:20px 0"><div class="empty-icon">🔍</div><div class="empty-text">Курьеры не найдены</div></div>';
-      return;
-    }
     list.innerHTML = [...found.values()].map(c => {
-      const isBlocked = c.status === 'blocked';
+      const isBlocked = c.status === 'blocked' || !!c.blocked;
       return `
-        <div class="list-item" onclick="openSaUser('${c.uid||c.id}')">
+        <div class="list-item" onclick="openSaUser('${c.uid||c.id}','courier')">
           <div class="li-icon yellow" style="font-size:22px">🚴</div>
           <div class="li-body">
-            <div class="li-title">${escHtml(c.name||'—')}${isBlocked?' <span style="color:var(--danger);font-size:10px;margin-left:4px">🚴 БЛК</span>':''}</div>
+            <div class="li-title">${escHtml(c.name||'—')}${isBlocked?' <span style="color:var(--danger);font-size:10px;margin-left:4px">БЛК</span>':''}</div>
             <div class="li-sub">${escHtml(c.phone||'—')} · <span style="color:${c.status==='active'?'var(--success)':isBlocked?'var(--danger)':'var(--warning)'}">${c.status==='active'?'Активен':isBlocked?'Заблокирован':'На проверке'}</span></div>
           </div>
           <div class="chevron">›</div>
@@ -739,134 +751,67 @@ async function searchSaUsers() {
     return;
   }
 
-  // Client / Admin — search in users collection
-  // 1. Exact via uid_index
-  try {
-    const link = await dbGet('uid_index', digits);
-    if (link?.uid) { const u = await dbGet('users', link.uid); if (u) found.set(link.uid, u); }
-  } catch {}
-  // 2. Prefix range on users.phone
-  if (!found.size || digits.length < 11) {
-    try {
-      const results = await dbQueryWhere('users',
-        [['phone', '>=', prefix], ['phone', '<=', prefix + String.fromCharCode(0xF8FF)]],
-        null, 'asc', 20);
-      for (const u of results) found.set(u.uid || u.id, u);
-    } catch {}
-  }
-  // Filter by selected role tab
-  const roleFilter = {
-    client: u => !!(u.agreedClient || u.role === 'client'),
-    admin:  u => !!(u.agreedAdmin  || u.role === 'admin'),
-  }[_saUserRoleTab] || (() => true);
-  for (const [uid, u] of [...found]) { if (!roleFilter(u)) found.delete(uid); }
-
-  if (!found.size) {
-    list.innerHTML = '<div class="empty" style="padding:20px 0"><div class="empty-icon">🔍</div><div class="empty-text">Пользователи не найдены</div></div>';
-    return;
-  }
-
   list.innerHTML = [...found.values()].map(u => {
-    const roleIcons = [];
-    if (u.agreedClient || u.role === 'client')    roleIcons.push('👤');
-    if (u.agreedAdmin  || u.role === 'admin')      roleIcons.push('🏪');
-    if (u.agreedSA     || u.role === 'superadmin') roleIcons.push('👑');
-    const isRoleBlocked = _saUserRoleTab === 'client'
-      ? !!(u.blocked || u.blockedClient)
-      : !!(u.blocked || u.blockedAdmin);
-    const blockBadge = isRoleBlocked
-      ? `<span style="color:var(--danger);font-size:10px;margin-left:4px">${_saUserRoleTab==='client'?'👤':'🏪'} БЛК</span>`
-      : '';
+    const icon = _saUserRoleTab === 'admin' ? '🏪' : '👤';
+    const isBlocked = !!(u.blocked);
+    const blockBadge = isBlocked ? `<span style="color:var(--danger);font-size:10px;margin-left:4px">БЛК</span>` : '';
     return `
-      <div class="list-item" onclick="openSaUser('${u.uid||u.id}')">
-        <div class="avatar" style="width:36px;height:36px;font-size:14px">${(u.name||'?')[0].toUpperCase()}</div>
+      <div class="list-item" onclick="openSaUser('${u.uid||u.id}','${_saUserRoleTab}')">
+        <div class="avatar" style="width:36px;height:36px;font-size:14px">${icon}</div>
         <div class="li-body">
           <div class="li-title">${escHtml(u.name||'—')}${blockBadge}</div>
-          <div class="li-sub">${escHtml(u.phone||'—')}${roleIcons.length?' · '+roleIcons.join(' '):''}</div>
+          <div class="li-sub">${escHtml(u.phone||'—')}</div>
         </div>
         <div class="chevron">›</div>
       </div>`;
   }).join('');
 }
 
-async function openSaUser(uid) {
-  const [user, courierData] = await Promise.all([dbGet('users', uid), getCourier(uid)]); // Дыра №7
+async function openSaUser(uid, role) {
+  // role comes from the search tab: 'client' | 'admin' | 'courier'
+  const col = role === 'courier' ? 'drivers' : role === 'admin' ? 'admins' : 'clients';
+  const user = await dbGet(col, uid);
   if (!user) return;
 
-  const hasClient  = !!(user.agreedClient || user.role === 'client');
-  const hasAdmin   = !!(user.agreedAdmin  || user.role === 'admin');
-  const hasCourier = !!courierData;
-  const hasSA      = !!(user.agreedSA     || user.role === 'superadmin');
+  const isBlocked  = !!(user.blocked || user.status === 'blocked');
+  const roleIcon   = role === 'courier' ? '🚴' : role === 'admin' ? '🏪' : '👤';
+  const roleLabel  = role === 'courier' ? 'Курьер' : role === 'admin' ? 'Администратор' : 'Клиент';
+  const statusStr  = role === 'courier'
+    ? (user.status === 'active' ? 'активен' : user.status === 'blocked' ? 'заблокирован' : 'на проверке')
+    : (isBlocked ? 'заблокирован' : 'активен');
+  const statusColor = (isBlocked || user.status === 'blocked') ? 'var(--danger)' : 'var(--success)';
 
-  // Per-role block state
-  const clientBlocked  = !!(user.blocked || user.blockedClient);
-  const adminBlocked   = !!(user.blocked || user.blockedAdmin);
-  const courierBlocked = courierData?.status === 'blocked';
-
-  // Role labels with block status
-  const roleLines = [];
-  if (hasClient)  roleLines.push(`👤 Клиент — <span style="color:${clientBlocked ?'var(--danger)':'var(--success)'};">${clientBlocked ?'заблокирован':'активен'}</span>`);
-  if (hasAdmin)   roleLines.push(`🏪 Администратор — <span style="color:${adminBlocked  ?'var(--danger)':'var(--success)'};">${adminBlocked  ?'заблокирован':'активен'}</span>`);
-  if (hasCourier) roleLines.push(`🚴 Курьер — <span style="color:${courierBlocked?'var(--danger)':courierData.status==='active'?'var(--success)':'var(--warning)'};">${courierBlocked?'заблокирован':courierData.status==='active'?'активен':'на проверке'}</span>`);
-  if (hasSA)      roleLines.push('👑 Суперадмин');
-
-  // Per-role block / unblock buttons
-  const blockBtns = [];
-  if (hasClient) {
-    blockBtns.push(`<button class="btn ${clientBlocked?'btn-success':'btn-danger'} btn-sm" onclick="saToggleRoleBlock('${uid}','client',${clientBlocked})">
-      ${clientBlocked?'🟢 Клиент: разблокировать':'🚫 Клиент: заблокировать'}
-    </button>`);
-  }
-  if (hasAdmin) {
-    blockBtns.push(`<button class="btn ${adminBlocked?'btn-success':'btn-danger'} btn-sm" onclick="saToggleRoleBlock('${uid}','admin',${adminBlocked})">
-      ${adminBlocked?'🟢 Администратор: разблокировать':'🚫 Администратор: заблокировать'}
-    </button>`);
-  }
-  if (hasCourier) {
-    blockBtns.push(`<button class="btn ${courierBlocked?'btn-success':'btn-danger'} btn-sm" onclick="saToggleRoleBlock('${uid}','courier',${courierBlocked})">
-      ${courierBlocked?'🟢 Курьер: разблокировать':'🚫 Курьер: заблокировать'}
-    </button>`);
-  }
-  // Fallback: user has no roles yet
-  if (!blockBtns.length) {
-    const gb = !!user.blocked;
-    blockBtns.push(`<button class="btn ${gb?'btn-success':'btn-danger'} btn-sm" onclick="saToggleRoleBlock('${uid}','global',${gb})">
-      ${gb?'🟢 Разблокировать':'🚫 Заблокировать'}
-    </button>`);
-  }
+  const blockBtn = `<button class="btn ${isBlocked?'btn-success':'btn-danger'} btn-sm" onclick="saToggleRoleBlock('${uid}','${role}',${isBlocked})">
+    ${isBlocked?`🟢 Разблокировать ${roleLabel}`:`🚫 Заблокировать ${roleLabel}`}
+  </button>`;
 
   const content = document.getElementById('sa-user-detail');
   content.innerHTML = `
     <div class="sheet-title">${escHtml(user.name||'—')}</div>
     <div class="card card-body" style="margin-bottom:12px;gap:6px;display:flex;flex-direction:column">
       <div class="flex justify-between"><span class="text-dim">Телефон</span><span style="font-family:monospace">${escHtml(user.phone||'—')}</span></div>
-      <div class="flex justify-between align-start"><span class="text-dim">Роли</span><span style="text-align:right;font-size:12px;max-width:65%;line-height:1.6">${roleLines.join('<br>')||user.role||'—'}</span></div>
-      <div class="flex justify-between"><span class="text-dim">Город</span><span>${escHtml(user.cityName||'—')}</span></div>
+      <div class="flex justify-between"><span class="text-dim">Роль</span><span>${roleIcon} ${roleLabel} — <span style="color:${statusColor}">${statusStr}</span></span></div>
+      ${role === 'courier' ? `<div class="flex justify-between"><span class="text-dim">Город</span><span>${escHtml(user.cityName||'—')}</span></div>` : ''}
       <div class="flex justify-between"><span class="text-dim">Регистрация</span><span>${fmtDate(user.createdAt)}</span></div>
     </div>
     <div style="display:flex;flex-direction:column;gap:8px">
-      ${blockBtns.join('')}
-      <button class="btn btn-secondary btn-sm" onclick="saResetUserCache('${uid}')">🔄 Сбросить кэш</button>
+      ${blockBtn}
+      <button class="btn btn-secondary btn-sm" onclick="saResetUserCache('${uid}','${role}')">🔄 Сбросить кэш</button>
     </div>`;
   document.getElementById('user-overlay').classList.add('open');
 }
 
 async function saToggleRoleBlock(uid, role, currentlyBlocked) {
-  const roleLabel = role === 'client' ? 'клиента' : role === 'admin' ? 'администратора' : role === 'courier' ? 'курьера' : 'пользователя';
+  const roleLabel = role === 'client' ? 'клиента' : role === 'admin' ? 'администратора' : 'курьера';
   const action    = currentlyBlocked ? 'Разблокировать' : 'Заблокировать';
   if (!confirm(`${action} ${roleLabel}?`)) return;
 
-  if (role === 'client') {
-    await dbSet('users', uid, { blockedClient: !currentlyBlocked });
-  } else if (role === 'admin') {
-    await dbSet('users', uid, { blockedAdmin: !currentlyBlocked });
-  } else if (role === 'courier') {
+  const col = role === 'courier' ? 'drivers' : role === 'admin' ? 'admins' : 'clients';
+  if (role === 'courier') {
     const newStatus = currentlyBlocked ? 'active' : 'blocked';
-    await setCourier(uid, { status: newStatus, ...(currentlyBlocked ? {} : { blockedAt: new Date().toISOString() }) }); // Дыра №7
-    await dbSet('users', uid, { blockedCourier: !currentlyBlocked });
+    await setDriver(uid, { status: newStatus, blocked: !currentlyBlocked, ...(currentlyBlocked ? {} : { blockedAt: new Date().toISOString() }) });
   } else {
-    // global / no-role user
-    await dbSet('users', uid, { blocked: !currentlyBlocked });
+    await dbSet(col, uid, { blocked: !currentlyBlocked });
   }
 
   closeUserSheet(); tgHaptic('light');
@@ -876,8 +821,9 @@ async function saToggleRoleBlock(uid, role, currentlyBlocked) {
   if (activeTab) activeTab.click();
 }
 
-async function saResetUserCache(uid) {
-  await dbUpdate('users', uid, { resetCache: true });
+async function saResetUserCache(uid, role) {
+  const col = role === 'courier' ? 'drivers' : role === 'admin' ? 'admins' : role === 'client' ? 'clients' : 'godsa';
+  await dbUpdate(col, uid, { resetCache: true });
   tgHaptic('light');
   showToast('Флаг сброса установлен. Сработает при следующем открытии приложения.', 'info');
 }

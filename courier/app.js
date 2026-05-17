@@ -71,17 +71,14 @@ window.addEventListener('DOMContentLoaded', async () => {
 
   await initFirebase();
 
-  if (!STATE.uid) {
-    const tgUid = await resolveUidByTgId();
-    if (tgUid) { STATE.uid = tgUid; _saveState(); }
-  }
-  if (!STATE.uid) { showScreen('s-no-uid'); return; }
-  registerFirebaseAuthMapping(STATE.uid); // fire-and-forget — не блокируем boot
+  if (!STATE.uid || !STATE.uid.startsWith('d_')) { showScreen('s-no-uid'); return; }
+  registerAuthMap(STATE.uid); // fire-and-forget — write auth_map for Firestore Rules
 
-  const existing = await dbGet('users', STATE.uid);
-  if (existing?.blocked || existing?.blockedCourier) { showScreen('s-blocked'); return; }
+  const existing = await dbGet('drivers', STATE.uid);
+  if (!existing) { showScreen('s-no-account'); return; }
+  if (existing.blocked || existing.status === 'blocked') { showScreen('s-blocked'); return; }
 
-  if (!existing?.agreedCourier) {
+  if (!existing.agreed) {
     document.getElementById('s-agree').style.display = 'flex';
     return;
   }
@@ -90,7 +87,7 @@ window.addEventListener('DOMContentLoaded', async () => {
   // Variant A: SA-triggered per-user cache reset
   if (existing.resetCache === true && !sessionStorage.getItem('_vez_reset_done')) {
     sessionStorage.setItem('_vez_reset_done', '1');
-    try { await dbUpdate('users', STATE.uid, { resetCache: false }); } catch {}
+    try { await dbUpdate('drivers', STATE.uid, { resetCache: false }); } catch {}
     localStorage.clear(); location.reload(); return;
   }
   sessionStorage.removeItem('_vez_reset_done');
@@ -112,33 +109,23 @@ function _saveState() {
 async function submitAgree() {
   const btn = document.getElementById('agree-btn');
   if (btn) { btn.disabled = true; btn.classList.add('btn-loading'); }
-  const linkData = await dbGet('user_links', STATE.uid);
-  const autoName = _getTgName() || linkData?.firstName || 'Курьер';
-  STATE.user = {
-    name: autoName,
-    phone: linkData?.phone || '',
-    tgId: linkData?.tgId || '',
-    role: 'courier',
-    agreedCourier: true,
-    createdAt: new Date().toISOString()
-  };
-  await dbSet('users', STATE.uid, STATE.user);
-  // Always (re-)create the courier doc on agreement — this is the registration event.
-  // The old guard `if (!existingCourier)` caused the doc not to be re-created after
-  // a manual deletion because getCourier still found stale data in couriers/all.
-  await setCourier(STATE.uid, {
-    uid: STATE.uid, name: autoName, phone: linkData?.phone || '',
-    status: 'pending', totalDeliveries: 0, createdAt: new Date().toISOString()
-  });
+  // Bot already created the drivers doc — just mark agreed and set name
+  const existingDoc = await dbGet('drivers', STATE.uid) || {};
+  const autoName = _getTgName() || existingDoc.firstName || existingDoc.name || 'Курьер';
+  const patch = { agreed: true, name: autoName, _upd: new Date().toISOString() };
+  await dbSet('drivers', STATE.uid, patch);
+  STATE.user = { ...existingDoc, ...patch };
+  COURIER_DATA = STATE.user;
   _saveState();
+  if (btn) { btn.disabled = false; btn.classList.remove('btn-loading'); }
   document.getElementById('s-agree').style.display = 'none';
   showScreen('s-pending');
 }
 
 // ── Check courier status ──
 async function checkCourierStatus() {
-  // Дыра №7: read from single couriers document
-  const courier = await getCourier(STATE.uid);
+  // Read single drivers document (combined user + courier data)
+  const courier = await getDriver(STATE.uid);
   // Preserve locally-tracked totalDeliveries if it's higher (offline-safe)
   const localRaw = (() => { try { return JSON.parse(localStorage.getItem('vez_courier_data') || 'null'); } catch { return null; } })();
   const localDeliveries = localRaw?.totalDeliveries || 0;
@@ -147,25 +134,13 @@ async function checkCourierStatus() {
   }
   COURIER_DATA = courier;
   if (!courier) {
-    // Courier doc is missing (e.g. manually deleted) but user has agreedCourier:true.
-    // Auto-recreate with 'pending' so the SA panel can pick it up.
-    if (_fbR) {
-      const fresh = {
-        uid: STATE.uid,
-        name: STATE.user?.name || _getTgName() || 'Курьер',
-        phone: STATE.user?.phone || '',
-        status: 'pending', totalDeliveries: 0,
-        createdAt: new Date().toISOString()
-      };
-      await setCourier(STATE.uid, fresh);
-      COURIER_DATA = fresh;
-    }
-    showScreen('s-pending'); return;
+    // Driver doc is missing (e.g. manually deleted) — show no-account screen.
+    showScreen('s-no-account'); return;
   }
   if (courier.status === 'pending')     { showScreen('s-pending'); return; }
   if (courier.status === 'blocked')     { showScreen('s-blocked'); return; }
 
-  // Superadmin assigns couriers directly with status='confirmed' — no invite screen needed.
+  // status='active' — proceed to main courier interface
   initMain();
 }
 
@@ -871,7 +846,7 @@ async function courierDeliver(orderId) {
     // Increment total deliveries (from local data, no extra Firestore read)
     const total = (COURIER_DATA?.totalDeliveries || 0) + 1;
     COURIER_DATA = { ...COURIER_DATA, totalDeliveries: total };
-    await setCourier(STATE.uid, COURIER_DATA); // Дыра №7
+    await setDriver(STATE.uid, COURIER_DATA);
     try { localStorage.setItem('vez_courier_data', JSON.stringify(COURIER_DATA)); } catch {}
     closeMyOrderSheet();
     tgHaptic('success'); showToast('Заказ доставлен!', 'success');
@@ -945,7 +920,7 @@ async function courierLeaveVenue() {
   });
   if (!ok) return;
   COURIER_DATA = { ...COURIER_DATA, primaryVenueId: null, primaryVenueName: null };
-  await setCourier(STATE.uid, COURIER_DATA); // Дыра №7
+  await setDriver(STATE.uid, COURIER_DATA);
   document.getElementById('primary-venue-label').textContent = '—';
   if (_venueUnsub) { _venueUnsub(); _venueUnsub = null; }
   _venueOrders = [];

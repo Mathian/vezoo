@@ -69,24 +69,21 @@ window.addEventListener('DOMContentLoaded', async () => {
 
   await initFirebase();
 
-  if (!STATE.uid) {
-    const tgUid = await resolveUidByTgId();
-    if (tgUid) { STATE.uid = tgUid; _saveClientState(); }
-  }
-  if (!STATE.uid) { showScreen('s-no-uid'); return; }
-  registerFirebaseAuthMapping(STATE.uid); // fire-and-forget — clients don't need strict rules
+  if (!STATE.uid || !STATE.uid.startsWith('c_')) { showScreen('s-no-uid'); return; }
+  registerAuthMap(STATE.uid); // fire-and-forget — write auth_map for Firestore Rules
 
-  const existing = await dbGet('users', STATE.uid);
-  if (existing?.blocked || existing?.blockedClient) { showScreen('s-blocked'); return; }
+  const existing = await dbGet('clients', STATE.uid);
+  if (!existing) { showScreen('s-no-account'); return; }
+  if (existing.blocked) { showScreen('s-blocked'); return; }
 
-  if (!existing?.agreedClient) {
+  if (!existing.agreed) {
     document.getElementById('s-agree').style.display = 'flex';
     return;
   }
 
   if (!existing.name) {
     const autoName = _getTgName() || existing.firstName || 'Пользователь';
-    await dbSet('users', STATE.uid, { name: autoName });
+    await dbSet('clients', STATE.uid, { name: autoName });
     existing.name = autoName;
   }
   STATE.user = existing; _saveClientState();
@@ -94,7 +91,7 @@ window.addEventListener('DOMContentLoaded', async () => {
   // sessionStorage guard prevents an infinite reload if the Firestore write fails.
   if (existing.resetCache === true && !sessionStorage.getItem('_vez_reset_done')) {
     sessionStorage.setItem('_vez_reset_done', '1');
-    try { await dbUpdate('users', STATE.uid, { resetCache: false }); } catch {}
+    try { await dbUpdate('clients', STATE.uid, { resetCache: false }); } catch {}
     localStorage.clear(); location.reload(); return;
   }
   sessionStorage.removeItem('_vez_reset_done');
@@ -118,13 +115,12 @@ function _saveFavorites() { try { localStorage.setItem('vez_favorites', JSON.str
 async function submitAgree() {
   const btn = document.getElementById('agree-btn');
   if (btn) { btn.disabled = true; btn.classList.add('btn-loading'); }
-  const linkData = await dbGet('user_links', STATE.uid);
-  const autoName = _getTgName() || linkData?.firstName || 'Пользователь';
-  STATE.user = {
-    name: autoName, phone: linkData?.phone || '', tgId: linkData?.tgId || '',
-    role: 'client', agreedClient: true, createdAt: new Date().toISOString()
-  };
-  await dbSet('users', STATE.uid, STATE.user);
+  // Bot already created the doc with phone/tgId/firstName — just mark agreed and set name
+  const existingDoc = await dbGet('clients', STATE.uid) || {};
+  const autoName = _getTgName() || existingDoc.firstName || existingDoc.name || 'Пользователь';
+  const patch = { agreed: true, name: autoName, _upd: new Date().toISOString() };
+  await dbSet('clients', STATE.uid, patch);
+  STATE.user = { ...existingDoc, ...patch };
   _saveClientState();
   if (btn) { btn.disabled = false; btn.classList.remove('btn-loading'); }
   document.getElementById('s-agree').style.display = 'none';
@@ -1153,7 +1149,7 @@ async function saveAddress() {
   const savedAddress = { street, house, apt };
   STATE.user = { ...STATE.user, savedAddress };
   _saveClientState();
-  await dbSet('users', STATE.uid, { savedAddress });
+  await dbSet('clients', STATE.uid, { savedAddress });
   tgHaptic('success'); showToast('Адрес сохранён', 'success');
 }
 
@@ -1161,7 +1157,7 @@ async function saveAddress() {
 //  NAVIGATION
 // ══════════════════════════════════════════════════════════
 const _navHistory = [];
-const _NO_HISTORY_SCREENS = ['s-splash', 's-blocked', 's-no-uid', 's-agree'];
+const _NO_HISTORY_SCREENS = ['s-splash', 's-blocked', 's-no-uid', 's-no-account', 's-agree'];
 const _rawShowScreen = id => {
   document.querySelectorAll('.screen').forEach(s => s.classList.remove('active'));
   const el = document.getElementById(id);

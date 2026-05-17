@@ -37,24 +37,24 @@ window.addEventListener('DOMContentLoaded', async () => {
   const urlUid = readUidFromUrl();
   if (urlUid) { STATE.uid = urlUid; saveState(); }
   await initFirebase();
-  if (!STATE.uid) { const tgUid = await resolveUidByTgId(); if (tgUid) { STATE.uid = tgUid; saveState(); } }
-  if (!STATE.uid) { showScreen('s-no-uid'); return; }
-  registerFirebaseAuthMapping(STATE.uid); // fire-and-forget — не блокируем boot
+  if (!STATE.uid || !STATE.uid.startsWith('a_')) { showScreen('s-no-uid'); return; }
+  registerAuthMap(STATE.uid); // fire-and-forget — write auth_map for Firestore Rules
 
-  const existing = await dbGet('users', STATE.uid);
-  if (existing?.blocked || existing?.blockedAdmin) { showScreen('s-blocked'); return; }
-  if (!existing?.agreedAdmin) { showAgreement(); return; }
+  const existing = await dbGet('admins', STATE.uid);
+  if (!existing) { showScreen('s-no-account'); return; }
+  if (existing.blocked) { showScreen('s-blocked'); return; }
+  if (!existing.agreed) { showAgreement(); return; }
 
-  if (existing && !existing.name) {
+  if (!existing.name) {
     const autoName = _getTgName() || 'Администратор';
-    await dbSet('users', STATE.uid, { name: autoName });
+    await dbSet('admins', STATE.uid, { name: autoName });
     existing.name = autoName;
   }
   STATE.user = existing; saveState();
   // Variant A: SA-triggered per-user cache reset
   if (existing.resetCache === true && !sessionStorage.getItem('_vez_reset_done')) {
     sessionStorage.setItem('_vez_reset_done', '1');
-    try { await dbUpdate('users', STATE.uid, { resetCache: false }); } catch {}
+    try { await dbUpdate('admins', STATE.uid, { resetCache: false }); } catch {}
     localStorage.clear(); location.reload(); return;
   }
   sessionStorage.removeItem('_vez_reset_done');
@@ -83,10 +83,12 @@ function showAgreement() {
 async function submitAgree() {
   const btn = document.getElementById('agree-btn');
   if (btn) { btn.disabled = true; btn.classList.add('btn-loading'); }
-  const linkData = await dbGet('user_links', STATE.uid);
-  const autoName = _getTgName() || linkData?.firstName || 'Администратор';
-  STATE.user = { name: autoName, phone: linkData?.phone||'', tgId: linkData?.tgId||'', role: 'admin', agreedAdmin: true, createdAt: new Date().toISOString() };
-  await dbSet('users', STATE.uid, STATE.user);
+  // Bot already created the admins doc — just mark agreed and set name
+  const existingDoc = await dbGet('admins', STATE.uid) || {};
+  const autoName = _getTgName() || existingDoc.firstName || existingDoc.name || 'Администратор';
+  const patch = { agreed: true, name: autoName, _upd: new Date().toISOString() };
+  await dbSet('admins', STATE.uid, patch);
+  STATE.user = { ...existingDoc, ...patch };
   saveState();
   if (btn) { btn.disabled = false; btn.classList.remove('btn-loading'); }
   document.getElementById('s-agree').style.display = 'none';
@@ -747,13 +749,17 @@ async function findHandoffCourier() {
   if (!checkRateLimit('findHandoffCourier', 1, 3000)) { showToast('Слишком часто', 'warning'); return; }
   const phone=normPhone(document.getElementById('handoff-phone').value.trim());
   if (!phone) { showToast('Введите номер телефона','warning'); return; }
-  const phoneKey=phone.replace(/\D/g,'');
-  const link=await dbGet('uid_index',phoneKey);
-  if (!link?.uid) { showToast('Курьер не найден','error'); return; }
-  // Дыра №7: read from single couriers document
-  const courier=await getCourier(link.uid);
-  if (!courier) { showToast('Этот пользователь не является курьером','error'); return; }
-  _handoffCourier={ ...courier, uid: link.uid };
+  const prefix = phone.replace(/\D/g,'');
+  // Search drivers collection by phone prefix (no uid_index needed)
+  let courier = null; let courierUid = null;
+  try {
+    const results = await dbQueryWhere('drivers',
+      [['phone', '>=', '+' + prefix], ['phone', '<=', '+' + prefix + String.fromCharCode(0xF8FF)]],
+      null, 'asc', 5);
+    if (results.length) { courier = results[0]; courierUid = courier.uid || courier.id; }
+  } catch {}
+  if (!courier) { showToast('Курьер не найден','error'); return; }
+  _handoffCourier={ ...courier, uid: courierUid };
   const foundEl=document.getElementById('handoff-courier-found');
   foundEl.style.display='';
   foundEl.innerHTML=`
@@ -833,7 +839,7 @@ async function openManualOrder() {
   _openSheet('manual-order-overlay');
 }
 
-// Дыра №11: search user_links only from localStorage — no full-collection Firestore read
+// Search clients from localStorage cache — no full-collection Firestore read
 function moPhoneInput(input) {
   const val = input.value.trim();
   const dd  = document.getElementById('mo-autocomplete');
@@ -841,11 +847,11 @@ function moPhoneInput(input) {
   const norm = val.replace(/\D/g, '');
   if (!norm) { dd.style.display = 'none'; return; }
 
-  // Search localStorage keys that were cached by individual dbGet('user_links', uid) calls
+  // Search localStorage keys cached by dbGet('clients', uid) calls
   const matches = [];
   for (let i = 0; i < localStorage.length && matches.length < 5; i++) {
     const key = localStorage.key(i);
-    if (!key || !key.startsWith('vez_user_links_')) continue;
+    if (!key || !key.startsWith('vez_clients_')) continue;
     try {
       const link = JSON.parse(localStorage.getItem(key));
       if (link && link.phone) {
@@ -861,11 +867,11 @@ function moPhoneInput(input) {
   dd.innerHTML = matches.map(l =>
     `<div class="autocomplete-item"
       data-phone="${escHtml(l.phone||'')}"
-      data-name="${escHtml(l.firstName||'')}"
+      data-name="${escHtml(l.name||l.firstName||'')}"
       data-uid="${escHtml(l.uid||'')}"
       onclick="moSelectClientFromEl(this)">
       <span style="font-family:monospace">${escHtml(l.phone||'')}</span>
-      <span style="color:var(--text-dim)">${escHtml((l.firstName||'') + (l.lastName ? ' ' + l.lastName : ''))}</span>
+      <span style="color:var(--text-dim)">${escHtml(l.name||l.firstName||'')}</span>
     </div>`
   ).join('');
 }
@@ -880,7 +886,7 @@ async function moSelectClient(phone, name, uid) {
   document.getElementById('mo-autocomplete').style.display='none';
   if (uid) {
     try {
-      const userData=await dbGet('users',uid);
+      const userData=await dbGet('clients',uid);
       const addr=userData?.savedAddress;
       if (addr) {
         document.getElementById('mo-street').value=addr.street||'';
@@ -1112,7 +1118,7 @@ async function loadPermCouriers() {
   const links=await dbQuery('courier_venue_links','venueId','==',VENUE.id);
   const listEl=document.getElementById('perm-couriers-list');
   if (!links.length) { listEl.innerHTML='<div class="text-dim text-sm">Нет постоянных курьеров</div>'; return; }
-  // Дыра №7: one read for all couriers instead of N individual reads
+  // One read for all drivers instead of N individual reads
   const allCouriers=await getCourierAll();
   const rows=links.map(l=>{ const c=allCouriers[l.uid]; return {...l,courierName:c?.name||l.uid,phone:c?.phone||''}; });
   listEl.innerHTML=rows.map(r=>`
@@ -1140,10 +1146,18 @@ async function adminBlacklistClient(clientUid,clientPhone) {
 async function addToBlacklistByPhone() {
   const phone=document.getElementById('bl-phone').value.trim();
   if (!phone) { showToast('Введите телефон','warning'); return; }
-  const phoneKey=normPhone(phone).replace(/\D/g,'');
-  const link=await dbGet('uid_index',phoneKey);
-  if (!link?.uid) { showToast('Пользователь не найден','error'); return; }
-  await dbSet('venue_blacklist',VENUE.id+'_'+link.uid,{venueId:VENUE.id,clientUid:link.uid,clientPhone:link.phone,addedAt:new Date().toISOString(),adminUid:STATE.uid});
+  const normalized=normPhone(phone);
+  const prefix=normalized.replace(/\D/g,'');
+  // Search clients collection by phone prefix (no uid_index needed)
+  let clientUid=null, clientPhone=normalized;
+  try {
+    const results=await dbQueryWhere('clients',
+      [['phone','>=','+'+prefix],['phone','<=','+'+prefix+String.fromCharCode(0xF8FF)]],
+      null,'asc',5);
+    if (results.length) { clientUid=results[0].uid||results[0].id; clientPhone=results[0].phone||normalized; }
+  } catch {}
+  if (!clientUid) { showToast('Клиент не найден','error'); return; }
+  await dbSet('venue_blacklist',VENUE.id+'_'+clientUid,{venueId:VENUE.id,clientUid,clientPhone,addedAt:new Date().toISOString(),adminUid:STATE.uid});
   document.getElementById('bl-phone').value='';
   tgHaptic('success'); showToast('Клиент добавлен в ЧС','success'); await loadBlacklist();
 }
