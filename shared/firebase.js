@@ -428,12 +428,16 @@ function getTgId() {
 // Diagnostic dump — используется только на экране ошибки s-no-uid
 function _tgDiag() {
   try {
+    const hash = location.hash ? location.hash.slice(0, 120) : 'EMPTY';
+    const search = location.search ? location.search.slice(0, 80) : 'EMPTY';
     return [
       'tg: '          + (tg ? 'ok' : 'NULL'),
       'initData: '    + (tg?.initData   ? tg.initData.slice(0, 80) + '…' : 'EMPTY'),
       'user: '        + JSON.stringify(tg?.initDataUnsafe?.user ?? 'undefined'),
       'version: '     + (tg?.version    ?? '?'),
       'platform: '    + (tg?.platform   ?? '?'),
+      'hash: '        + hash,
+      'search: '      + search,
     ].join('\n');
   } catch (e) { return 'diag error: ' + e.message; }
 }
