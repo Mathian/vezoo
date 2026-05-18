@@ -310,7 +310,7 @@ function initMain() {
 async function loadMenuItems() {
   const list = document.getElementById('menu-items-list');
   if (!list) return;
-  // Show localStorage data instantly
+  // 1. Показываем localStorage мгновенно
   const stored = _loadMenuFromStorage();
   if (stored.length) {
     MENU_ITEMS = stored;
@@ -319,14 +319,22 @@ async function loadMenuItems() {
   } else {
     list.innerHTML = '<div class="loader"><div class="spinner"></div></div>';
   }
-  // Fetch from Firestore, update localStorage
-  const fresh = await dbQuery('menu_items','venueId','==',VENUE.id);
-  if (fresh.length || !stored.length) {
-    MENU_ITEMS = fresh;
-    _saveMenuToStorage(MENU_ITEMS);
-    MENU_CATS  = [...new Set(MENU_ITEMS.map(i => i.category).filter(Boolean))];
-    renderMenuCatTabs(); renderMenuItems(null); _refreshCatSelect();
+  // 2. Читаем бандл (1 чит вместо N читов)
+  let bundle = await dbGet('menu_bundles', VENUE.id);
+  if (!bundle || !bundle.items) {
+    // Одноразовая миграция из старых menu_items
+    const legacy = await dbQuery('menu_items', 'venueId', '==', VENUE.id);
+    if (legacy.length) {
+      await dbSet('menu_bundles', VENUE.id, { items: legacy });
+      bundle = { items: legacy };
+    } else {
+      bundle = { items: [] };
+    }
   }
+  MENU_ITEMS = bundle.items || [];
+  _saveMenuToStorage(MENU_ITEMS);
+  MENU_CATS  = [...new Set(MENU_ITEMS.map(i => i.category).filter(Boolean))];
+  renderMenuCatTabs(); renderMenuItems(null); _refreshCatSelect();
 }
 
 function _refreshCatSelect(currentVal) {
@@ -374,14 +382,18 @@ function renderMenuItems(cat) {
   const list  = document.getElementById('menu-items-list');
   if (!items.length) { list.innerHTML='<div class="empty"><div class="empty-icon">🍽️</div><div class="empty-text">Нет позиций в меню.<br>Нажмите «+ Добавить».</div></div>'; return; }
   list.innerHTML = items.map(item => {
+    const isHidden = item.available === false;
     const priceStr = item.variants?.length
       ? item.variants.map(v=>`${escHtml(v.name)}: ${fmtPrice(v.price)}`).join(' · ')
       : fmtPrice(item.price);
-    const hiddenBadge = item.available===false
+    const hiddenBadge = isHidden
       ? `<span style="display:inline-block;margin-left:6px;background:var(--danger-soft);color:var(--danger);font-size:10px;padding:1px 6px;border-radius:4px;font-weight:700;vertical-align:middle">Скрыт</span>`
       : '';
+    const toggleBtn = isHidden
+      ? `<button class="btn btn-icon" style="color:var(--success)" onclick="toggleItemAvail('${item.id}')" title="Показать">👁</button>`
+      : `<button class="btn btn-icon btn-ghost" onclick="toggleItemAvail('${item.id}')" title="Скрыть">🙈</button>`;
     return `
-      <div class="admin-item">
+      <div class="admin-item" style="${isHidden?'opacity:0.55':''}">
         <div class="admin-item-emoji">${item.emoji||'🍽️'}</div>
         <div class="admin-item-body">
           <div class="admin-item-name">${escHtml(item.name)}${hiddenBadge}</div>
@@ -389,6 +401,7 @@ function renderMenuItems(cat) {
           ${item.category?`<div class="text-xs text-dim" style="margin-top:2px">${escHtml(item.category)}</div>`:''}
         </div>
         <div class="admin-item-actions">
+          ${toggleBtn}
           <button class="btn btn-icon btn-ghost" onclick="openEditItem('${item.id}')">✏️</button>
           <button class="btn btn-icon btn-danger" onclick="deleteItem('${item.id}')">🗑</button>
         </div>
@@ -401,6 +414,7 @@ function openAddItem() {
   document.getElementById('item-sheet-title').textContent='Добавить позицию';
   document.getElementById('it-name').value='';
   document.getElementById('it-emoji').value='';
+  document.getElementById('it-image-url').value='';
   document.getElementById('it-desc').value='';
   document.getElementById('it-price').value='';
   _refreshCatSelect();
@@ -419,6 +433,7 @@ async function openEditItem(itemId) {
   document.getElementById('item-sheet-title').textContent='Редактировать позицию';
   document.getElementById('it-name').value=item.name||'';
   document.getElementById('it-emoji').value=item.emoji||'';
+  document.getElementById('it-image-url').value=item.imageUrl||'';
   document.getElementById('it-desc').value=item.description||'';
   document.getElementById('it-price').value=item.price||'';
   _refreshCatSelect(item.category||'');
@@ -472,19 +487,23 @@ async function saveItem() {
   }
   const btn=document.getElementById('save-item-btn'); btn.disabled=true;
   const itemId=_editItemId||genId();
+  const imageUrl=(document.getElementById('it-image-url').value||'').trim();
+  // Сохраняем флаг available при редактировании (не сбрасываем скрытые позиции)
+  const existing = _editItemId ? MENU_ITEMS.find(i=>i.id===itemId) : null;
   const itemData = { id:itemId, venueId:VENUE.id, name, category:cat, emoji, description:desc,
-    price, variants, createdAt:new Date().toISOString() };
-  await dbSet('menu_items',itemId, itemData);
-  // Update localStorage
+    imageUrl, price, variants,
+    available: existing ? (existing.available !== false) : true,
+    createdAt: existing?.createdAt || new Date().toISOString() };
   if (_editItemId) {
     const idx = MENU_ITEMS.findIndex(i => i.id === itemId);
-    if (idx >= 0) MENU_ITEMS[idx] = { ...MENU_ITEMS[idx], ...itemData };
+    if (idx >= 0) MENU_ITEMS[idx] = itemData;
     else MENU_ITEMS.push(itemData);
   } else {
     MENU_ITEMS.push(itemData);
   }
+  // Пишем весь бандл (1 запись)
+  await dbSet('menu_bundles', VENUE.id, { items: MENU_ITEMS });
   _saveMenuToStorage(MENU_ITEMS);
-  // Дыра №2: bump menu version so clients know to refresh
   bumpVersion('menu_' + VENUE.id);
   document.getElementById('item-overlay').classList.remove('open');
   btn.disabled=false;
@@ -496,13 +515,24 @@ async function saveItem() {
 
 async function deleteItem(itemId) {
   if (!confirm('Удалить позицию из меню?')) return;
-  await dbDelete('menu_items',itemId);
   MENU_ITEMS = MENU_ITEMS.filter(i => i.id !== itemId);
+  await dbSet('menu_bundles', VENUE.id, { items: MENU_ITEMS });
   _saveMenuToStorage(MENU_ITEMS);
-  bumpVersion('menu_' + VENUE.id); // Дыра №2
+  bumpVersion('menu_' + VENUE.id);
   tgHaptic('light');
   MENU_CATS = [...new Set(MENU_ITEMS.map(i => i.category).filter(Boolean))];
   renderMenuCatTabs(); renderMenuItems(null); _refreshCatSelect();
+}
+
+async function toggleItemAvail(itemId) {
+  const item = MENU_ITEMS.find(i => i.id === itemId);
+  if (!item) return;
+  item.available = item.available === false; // false→true, true/undefined→false
+  await dbSet('menu_bundles', VENUE.id, { items: MENU_ITEMS });
+  _saveMenuToStorage(MENU_ITEMS);
+  bumpVersion('menu_' + VENUE.id);
+  tgHaptic('light');
+  renderMenuItems(null);
 }
 
 // ══════════════════════════════════════════════════════════
