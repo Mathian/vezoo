@@ -616,15 +616,30 @@ function openCart() {
 
 function _renderPaymentOpts(venue) {
   const row = document.getElementById('payment-opts-row');
-  const hasCash = venue?.paymentMethods?.cash !== false;
-  const hasCard = venue?.paymentMethods?.card !== false;
-  let html = '';
-  if (hasCash) html += `<button class="btn ${_paymentMethod === 'cash' ? 'btn-primary' : 'btn-secondary'} payment-opt" data-val="cash" onclick="selectPayment(this)">💵 Наличные</button>`;
-  if (hasCard) html += `<button class="btn ${_paymentMethod === 'card' ? 'btn-primary' : 'btn-secondary'} payment-opt" data-val="card" onclick="selectPayment(this)">💳 Карта</button>`;
-  row.innerHTML = html;
-  // Auto-select first available
-  if (!hasCash && hasCard) _paymentMethod = 'card';
-  if (hasCash && !hasCard) _paymentMethod = 'cash';
+  const pm  = venue?.paymentMethods || {};
+  // cash is default-on unless explicitly disabled; kaspi_* are opt-in
+  const hasCash        = pm.cash        !== false;
+  const hasKaspiQr     = pm.kaspi_qr    === true;
+  const hasKaspiRemote = pm.kaspi_remote === true;
+  // legacy card support
+  const hasCard        = pm.card        === true;
+
+  const opts = [];
+  if (hasCash)        opts.push('cash');
+  if (hasKaspiQr)     opts.push('kaspi_qr');
+  if (hasKaspiRemote) opts.push('kaspi_remote');
+  if (hasCard)        opts.push('card');
+  if (!opts.length)   opts.push('cash'); // fallback
+
+  // If current selection not available → pick first
+  if (!opts.includes(_paymentMethod)) _paymentMethod = opts[0];
+
+  const labels = { cash:'💵 Наличные', kaspi_qr:'📱 Kaspi QR', kaspi_remote:'📲 Kaspi Remote', card:'💳 Карта' };
+  row.innerHTML = opts.map(v =>
+    `<button class="btn ${_paymentMethod === v ? 'btn-primary' : 'btn-secondary'} payment-opt" data-val="${v}" onclick="selectPayment(this)">${labels[v]}</button>`
+  ).join('');
+
+  _toggleKaspiPhoneField();
 }
 
 function cartGoBack() {
@@ -703,6 +718,19 @@ function selectPayment(el) {
     b.classList.toggle('btn-primary',   b.dataset.val === _paymentMethod);
     b.classList.toggle('btn-secondary', b.dataset.val !== _paymentMethod);
   });
+  _toggleKaspiPhoneField();
+}
+
+function _toggleKaspiPhoneField() {
+  const sec = document.getElementById('kaspi-phone-section');
+  if (!sec) return;
+  const show = _paymentMethod === 'kaspi_remote';
+  sec.classList.toggle('hidden', !show);
+  if (show) {
+    // Auto-fill with user phone if available
+    const ph = document.getElementById('kaspi-phone-inp');
+    if (ph && !ph.value && STATE.user?.phone) ph.value = STATE.user.phone;
+  }
 }
 
 // ── Submit order ──
@@ -724,6 +752,11 @@ async function submitOrder() {
   const apt      = document.getElementById('addr-apt').value.trim();
   const comment  = document.getElementById('order-comment').value.trim();
   if (!isPickup && (!street || !house)) { showToast('Укажите улицу и дом', 'warning'); return; }
+  // kaspi_remote: phone required
+  const kaspiPhone = _paymentMethod === 'kaspi_remote'
+    ? (document.getElementById('kaspi-phone-inp')?.value.trim() || STATE.user?.phone || '')
+    : null;
+  if (_paymentMethod === 'kaspi_remote' && !kaspiPhone) { showToast('Введите номер телефона для Kaspi', 'warning'); return; }
 
   const blEntry = await dbGet('venue_blacklist', venueId + '_' + STATE.uid);
   if (blEntry) { showToast('Вы не можете оформить заказ в этом заведении', 'error'); return; }
@@ -758,6 +791,7 @@ async function submitOrder() {
     total: freshTotal, deliveryPrice,
     address: isPickup ? null : { street, house, apt, hasIntercom: _intercomChecked },
     payment: _paymentMethod, deliveryType: _deliveryType, comment,
+    ...(kaspiPhone ? { kaspiPhone } : {}),
     status: 'pending', createdAt: new Date().toISOString(),
     // Дыры №5, №9, №10: index fields
     active: true,                               // false when delivered/cancelled/issued
@@ -1037,7 +1071,7 @@ function openHistoryOrder(orderId) {
     <div class="card card-body" style="margin-bottom:12px;gap:6px;display:flex;flex-direction:column">
       <div class="flex justify-between"><span class="text-dim">Заведение</span><span class="font-bold">${escHtml(o.venueName||'—')}</span></div>
       ${addr?`<div class="flex justify-between"><span class="text-dim">Адрес</span><span style="text-align:right;max-width:60%">${escHtml(addr.street)} ${escHtml(addr.house)}${addr.apt?', кв.'+escHtml(addr.apt):''}</span></div>`:'<div class="flex justify-between"><span class="text-dim">Получение</span><span>🏪 Самовывоз</span></div>'}
-      <div class="flex justify-between"><span class="text-dim">Оплата</span><span>${o.payment==='cash'?'💵 Наличные':'💳 Карта'}</span></div>
+      <div class="flex justify-between"><span class="text-dim">Оплата</span><span>${paymentLabel(o.payment)}</span></div>
     </div>
     <div class="section-title" style="margin-bottom:6px">Состав</div>
     <div class="card card-body" style="margin-bottom:12px;gap:4px;display:flex;flex-direction:column">
@@ -1154,7 +1188,7 @@ function renderOrderCard(o) {
         <div class="flex justify-between"><span class="text-dim">Товары</span><span>${fmtPrice(o.total, cur)}</span></div>
         ${o.deliveryPrice ? `<div class="flex justify-between"><span class="text-dim">Доставка</span><span>${fmtPrice(o.deliveryPrice, cur)}</span></div>` : ''}
         <div class="flex justify-between"><span class="font-bold">Итого</span><span class="font-bold text-primary">${fmtPrice((o.total||0)+(o.deliveryPrice||0), cur)}</span></div>
-        <div class="flex justify-between"><span class="text-dim">Оплата</span><span>${o.payment === 'cash' ? '💵 Наличные' : '💳 Карта'}</span></div>
+        <div class="flex justify-between"><span class="text-dim">Оплата</span><span>${paymentLabel(o.payment)}</span></div>
         ${addr ? `<div class="flex justify-between"><span class="text-dim">Адрес</span><span style="text-align:right;max-width:58%">${escHtml(addr.street)} ${escHtml(addr.house)}${addr.apt ? ', кв.' + escHtml(addr.apt) : ''}</span></div>` : ''}
         ${o.courierName ? `<div class="flex justify-between"><span class="text-dim">Курьер</span><span>${escHtml(o.courierName)}</span></div>` : ''}
         ${o.status === 'pending' ? `<div style="margin-top:10px;text-align:right"><button class="btn btn-danger btn-sm" onclick="clientCancelOrder('${o.id}')">❌ Отменить заказ</button></div>` : ''}

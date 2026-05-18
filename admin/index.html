@@ -304,10 +304,12 @@
       <div class="field"><label>Сумма заказа *</label><input class="inp" id="mo-amount" type="number" min="0" placeholder="0"></div>
       <div class="field">
         <label>Оплата</label>
-        <select class="inp" id="mo-payment">
+        <select class="inp" id="mo-payment" onchange="moPaymentChanged()">
           <option value="cash">💵 Наличные</option>
-          <option value="card">💳 Карта</option>
+          <option value="kaspi_qr">📱 Kaspi QR</option>
+          <option value="kaspi_remote">📲 Kaspi Remote (счёт)</option>
         </select>
+        <div id="mo-kaspi-info" class="alert-box info" style="display:none;margin-top:6px;font-size:12px">📲 Выставьте счёт клиенту вне сервиса. Заказ будет создан сразу в статусе «Готовится».</div>
       </div>
       <div class="field"><label>Комментарий</label><textarea class="inp" id="mo-comment" rows="2" placeholder="Примечания..." style="resize:none"></textarea></div>
       <div class="btn-row">

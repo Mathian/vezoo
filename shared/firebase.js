@@ -373,6 +373,15 @@ function escHtml(str) {
     .replace(/'/g, '&#39;');
 }
 
+// ─────────────────────── Payment label helper ───────────────────────
+function paymentLabel(p) {
+  if (p === 'cash')         return '💵 Наличные';
+  if (p === 'kaspi_qr')     return '📱 Kaspi QR';
+  if (p === 'kaspi_remote') return '📲 Kaspi Remote';
+  if (p === 'card')         return '💳 Карта'; // legacy
+  return p || '—';
+}
+
 function statusLabel(st) {
   return {
     pending:'Ожидает', accepted:'Принят', cooking:'Готовится',

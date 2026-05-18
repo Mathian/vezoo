@@ -131,9 +131,10 @@
     <div class="alert-box info hidden" id="pickup-info">Вы заберёте заказ самостоятельно из заведения.</div>
     <div class="section">
       <div class="section-title">Оплата</div>
-      <div class="btn-row" id="payment-opts-row">
-        <button class="btn btn-primary payment-opt" data-val="cash" onclick="selectPayment(this)">💵 Наличные</button>
-        <button class="btn btn-secondary payment-opt" data-val="card" onclick="selectPayment(this)">💳 Карта</button>
+      <div class="btn-row" id="payment-opts-row"></div>
+      <div id="kaspi-phone-section" class="hidden" style="margin-top:10px">
+        <div class="alert-box info" style="margin-bottom:8px;font-size:13px">📲 Администратор выставит счёт на ваш Kaspi. Убедитесь, что номер верный.</div>
+        <div class="field" style="margin:0"><label>Номер телефона для Kaspi</label><input class="inp" id="kaspi-phone-inp" type="tel" placeholder="+7 (777) 000-00-00"></div>
       </div>
     </div>
     <div class="section">

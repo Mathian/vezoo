@@ -20,7 +20,7 @@ let _sectionPinBuffer = '';
 let _ordersTab      = 'active';
 let _handoffCourier = null;
 let _handoffSelectedOrders = new Set();
-let _payMethods     = { cash: true, card: true };
+let _payMethods     = { cash: true, kaspi_qr: false, kaspi_remote: false };
 
 // ══════════════════════════════════════════════════════════
 //  BOOT
@@ -289,9 +289,8 @@ function togglePayTag(btnId, method) {
   const btn = document.getElementById(btnId);
   if (!btn) return;
   _payMethods[method] = !_payMethods[method];
-  btn.classList.toggle('active-cash', method === 'cash' && _payMethods[method]);
-  btn.classList.toggle('active-card', method === 'card' && _payMethods[method]);
-  if (!_payMethods[method]) btn.className = 'pay-tag';
+  const activeClass = method === 'cash' ? 'active-cash' : 'active-kaspi';
+  btn.className = _payMethods[method] ? 'pay-tag ' + activeClass : 'pay-tag';
 }
 
 // ══════════════════════════════════════════════════════════
@@ -629,7 +628,8 @@ async function openOrderDetail(orderId) {
       ${callBtn?`<div>${callBtn}</div>`:''}
       ${(order.courierName||order.courierPhone)?`<div class="flex justify-between"><span class="text-dim">Курьер</span><span style="text-align:right;max-width:60%">${escHtml(order.courierName||'—')}${order.courierPhone?' · '+escHtml(order.courierPhone):''}</span></div>`:'' }
       ${callCourierBtn?`<div>${callCourierBtn}</div>`:''}
-      <div class="flex justify-between"><span class="text-dim">Оплата</span><span>${order.payment==='cash'?'💵 Наличные':'💳 Карта'}</span></div>
+      <div class="flex justify-between"><span class="text-dim">Оплата</span><span>${paymentLabel(order.payment)}</span></div>
+      ${order.payment==='kaspi_remote'&&order.kaspiPhone?`<div class="flex justify-between"><span class="text-dim">Kaspi номер</span><span style="font-family:monospace;color:var(--primary)">${escHtml(order.kaspiPhone)}</span></div>`:''}
       <div class="flex justify-between"><span class="text-dim">Адрес</span><span style="text-align:right;max-width:60%">${escHtml(addrStr)}</span></div>
       ${order.comment?`<div class="flex justify-between"><span class="text-dim">Комментарий</span><span style="text-align:right;max-width:60%">${escHtml(order.comment)}</span></div>`:''}
     </div>
@@ -654,14 +654,25 @@ async function openOrderDetail(orderId) {
 function renderAdminOrderActions(order) {
   const blBtn=order.clientUid?`<button class="btn btn-ghost btn-sm" style="margin-top:8px;color:var(--danger)" onclick="adminBlacklistClient('${order.clientUid}','${(order.clientPhone||'').replace(/'/g,'')}')">🚫 В чёрный список</button>`:'';
   const cancelBtn=`<button class="btn btn-danger btn-sm" onclick="adminCancelOrder('${order.id}')">❌ Отменить</button>`;
+  const isKaspiRemote = order.payment === 'kaspi_remote';
   const isPickup = order.deliveryType === 'pickup';
   if (isPickup) {
-    if (order.status==='pending') return `<div class="btn-row">${cancelBtn}<button class="btn btn-success btn-sm" onclick="adminAcceptOrder('${order.id}')">✅ Принять</button></div>${blBtn}`;
+    if (order.status==='pending') {
+      const acceptBtn = isKaspiRemote
+        ? `<button class="btn btn-success btn-sm" onclick="adminMarkPaid('${order.id}')">💸 Заказ оплачен</button>`
+        : `<button class="btn btn-success btn-sm" onclick="adminAcceptOrder('${order.id}')">✅ Принять</button>`;
+      return `<div class="btn-row">${cancelBtn}${acceptBtn}</div>${blBtn}`;
+    }
     if (order.status==='accepted'||order.status==='cooking') return `<div style="display:flex;flex-direction:column;gap:8px"><div class="alert-box info" style="font-size:13px">🏪 Самовывоз</div><div class="btn-row">${cancelBtn}<button class="btn btn-primary btn-sm" onclick="adminIssueOrder('${order.id}')">📦 Выдать клиенту</button></div></div>${blBtn}`;
     if (order.status==='ready') return `<div class="alert-box success" style="margin-bottom:8px;font-size:13px">✅ Заказ готов к выдаче</div><button class="btn btn-primary" onclick="adminIssueOrder('${order.id}')">📦 Выдан клиенту</button>${blBtn}`;
     return blBtn;
   }
-  if (order.status==='pending') return `<div class="btn-row">${cancelBtn}<button class="btn btn-success btn-sm" onclick="adminAcceptOrder('${order.id}')">✅ Принять</button></div>${blBtn}`;
+  if (order.status==='pending') {
+    const acceptBtn = isKaspiRemote
+      ? `<button class="btn btn-success btn-sm" onclick="adminMarkPaid('${order.id}')">💸 Заказ оплачен</button>`
+      : `<button class="btn btn-success btn-sm" onclick="adminAcceptOrder('${order.id}')">✅ Принять</button>`;
+    return `<div class="btn-row">${cancelBtn}${acceptBtn}</div>${blBtn}`;
+  }
   if (order.status==='accepted'||order.status==='cooking') return `<div style="display:flex;flex-direction:column;gap:8px"><button class="btn btn-success btn-sm" onclick="adminMarkReadyForCourier('${order.id}')">✅ Заказ готов</button><div class="btn-row"><button class="btn btn-secondary btn-sm" onclick="adminSearchCourier('${order.id}')">🔍 В общий пул</button><button class="btn btn-primary btn-sm" onclick="openHandoffFlow()">📦 Передать</button></div>${cancelBtn}</div>${blBtn}`;
   if (order.status==='ready_for_courier') return `<div style="display:flex;flex-direction:column;gap:8px"><div class="alert-box success" style="font-size:13px">⚡ Заказ готов — ждём курьера кафе</div><button class="btn btn-primary btn-sm" onclick="openHandoffFlow()">📦 Передать курьеру</button><button class="btn btn-secondary btn-sm" onclick="adminSearchCourier('${order.id}')">🔍 Выставить в общий пул</button>${cancelBtn}</div>${blBtn}`;
   if (order.status==='searching_courier') return `<div style="display:flex;flex-direction:column;gap:8px"><div class="alert-box info" style="font-size:13px">⏳ Ждём курьера из пула…</div><button class="btn btn-primary btn-sm" onclick="openHandoffFlow()">📦 Передать курьеру</button>${cancelBtn}</div>${blBtn}`;
@@ -681,6 +692,19 @@ async function adminAcceptOrder(orderId) {
   if (!ok) { showToast('Ошибка: нет прав или нет сети. Попробуйте ещё раз.','error'); return; }
   _patchAllOrders(orderId,patch);
   tgHaptic('success'); closeOrderSheet(); showToast('Заказ принят','success'); loadOrders(_ordersTab);
+}
+
+async function adminMarkPaid(orderId) {
+  // kaspi_remote: client paid remotely → skip pending, go straight to cooking
+  const mins=VENUE.deliveryTime||60;
+  const patch={ status:'cooking', acceptedAt:new Date().toISOString(), operatorUid:STATE.uid,
+                deliveryMinutes:mins, estimatedAt:new Date(Date.now()+mins*60000).toISOString(),
+                paidAt:new Date().toISOString(),
+                clientNotification:{type:'accepted',seen:false} };
+  const ok = await dbSet('orders',orderId,patch);
+  if (!ok) { showToast('Ошибка: нет прав или нет сети.','error'); return; }
+  _patchAllOrders(orderId,patch);
+  tgHaptic('success'); closeOrderSheet(); showToast('Оплата подтверждена — заказ готовится','success'); loadOrders(_ordersTab);
 }
 
 async function adminCancelOrder(orderId) {
@@ -859,6 +883,12 @@ async function openManualOrder() {
   _openSheet('manual-order-overlay');
 }
 
+function moPaymentChanged() {
+  const pay = document.getElementById('mo-payment').value;
+  const infoEl = document.getElementById('mo-kaspi-info');
+  if (infoEl) infoEl.style.display = pay === 'kaspi_remote' ? '' : 'none';
+}
+
 // Search clients from localStorage cache — no full-collection Firestore read
 function moPhoneInput(input) {
   const val = input.value.trim();
@@ -931,16 +961,19 @@ async function submitManualOrder() {
   if (!amount) { showToast('Введите сумму заказа','warning'); return; }
   const ordId=genOrderId();
   const _manDate=new Date().toISOString().slice(0,10);
+  const now=new Date().toISOString();
+  // kaspi_remote: admin confirmed payment → order goes straight to cooking
+  const initStatus = payment === 'kaspi_remote' ? 'cooking' : 'accepted';
   const orderData={
     id:ordId, venueId:VENUE.id, venueName:VENUE.name,
     clientPhone:phone, clientName, clientUid:null,
     address:{street,house,apt}, payment, total:amount,
     deliveryPrice: VENUE.deliveryPrice || 0,
     items:[], comment,
-    status:'accepted', isManual:true,
+    status:initStatus, isManual:true,
     active:true, venueDateKey:VENUE.id+'_'+_manDate,
-    createdAt:new Date().toISOString(),
-    acceptedAt:new Date().toISOString(),
+    createdAt:now, acceptedAt:now,
+    ...(payment==='kaspi_remote'?{paidAt:now}:{}),
     clientNotification:{type:'accepted',seen:false},
     adminBotNotified:true, courierBotNotified:false, cancelledBotNotified:false
   };
