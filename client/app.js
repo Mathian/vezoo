@@ -337,13 +337,17 @@ async function loadVenueMenu(venueId) {
 
   let allItems;
   if (remoteV > 0 && remoteV === localV) {
+    // Версия совпадает — берём из localStorage (0 читов Firestore)
     allItems = _loadMenuCache(venueId);
     if (!allItems.length) {
-      allItems = await dbQuery('menu_items', 'venueId', '==', venueId);
+      const bundle = await dbGet('menu_bundles', venueId);
+      allItems = bundle?.items || [];
       _saveMenuCache(venueId, allItems, remoteV);
     }
   } else {
-    allItems = await dbQuery('menu_items', 'venueId', '==', venueId);
+    // Версия устарела — читаем бандл (1 чит вместо N)
+    const bundle = await dbGet('menu_bundles', venueId);
+    allItems = bundle?.items || [];
     _saveMenuCache(venueId, allItems, remoteV);
   }
 
@@ -592,11 +596,13 @@ async function openCartFromOverview(venueId) {
   if (!venue) { showToast('Заведение не найдено', 'warning'); return; }
   CURRENT_VENUE = venue;
   if (!VENUE_MENU.length || VENUE_MENU[0]?.venueId !== venueId) {
-    // Use localStorage cache (Дыра №2)
     const cached = _loadMenuCache(venueId);
-    VENUE_MENU = cached.length
-      ? cached.filter(i => i.available !== false)
-      : (await dbQuery('menu_items', 'venueId', '==', venueId)).filter(i => i.available !== false);
+    if (cached.length) {
+      VENUE_MENU = cached.filter(i => i.available !== false);
+    } else {
+      const bundle = await dbGet('menu_bundles', venueId);
+      VENUE_MENU = (bundle?.items || []).filter(i => i.available !== false);
+    }
   }
   _cartOpenedFrom = 'overview';
   renderCartScreen();
@@ -764,8 +770,9 @@ async function submitOrder() {
   const btn = document.getElementById('order-btn');
   btn.disabled = true; btn.textContent = 'Оформляем...';
 
-  // Re-fetch fresh prices from DB to prevent manipulation
-  const freshMenuItems = await dbQuery('menu_items', 'venueId', '==', venueId);
+  // Re-fetch fresh prices from DB to prevent manipulation (1 чит вместо N)
+  const _freshBundle = await dbGet('menu_bundles', venueId);
+  const freshMenuItems = _freshBundle?.items || [];
   const recalcItems = venueCart.map(c => {
     const menuItem = freshMenuItems.find(m => m.id === c.id && m.available !== false);
     if (!menuItem) return null;
@@ -1104,9 +1111,13 @@ async function reorderFromHistory(orderId) {
 
   // Use localStorage menu cache (Дыра №2)
   const cachedMenu = _loadMenuCache(o.venueId);
-  const menuItems = cachedMenu.length
-    ? cachedMenu.filter(i => i.available !== false)
-    : (await dbQuery('menu_items', 'venueId', '==', o.venueId)).filter(i => i.available !== false);
+  let menuItems;
+  if (cachedMenu.length) {
+    menuItems = cachedMenu.filter(i => i.available !== false);
+  } else {
+    const _rb = await dbGet('menu_bundles', o.venueId);
+    menuItems = (_rb?.items || []).filter(i => i.available !== false);
+  }
 
   CART[o.venueId] = [];
   let addedCount = 0;
