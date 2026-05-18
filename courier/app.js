@@ -355,7 +355,7 @@ function _importantOrderCard(order) {
       </div>
       <div class="delivery-card-body" style="font-size:13px">
         <div>📍 ${escHtml(addrStr)}</div>
-        <div>💰 ${fmtPrice((order.total || 0) + (order.deliveryPrice || 0))} · ${order.payment === 'cash' ? 'Наличные' : 'Карта'}</div>
+        <div>💰 ${fmtPrice((order.total || 0) + (order.deliveryPrice || 0))} · ${paymentLabel(order.payment)}</div>
       </div>
       <div class="delivery-card-foot">
         <button class="btn btn-primary btn-sm" onclick="event.stopPropagation();openBundleAcceptSheet('${order.id}','venue')">✅ Принять →</button>
@@ -443,7 +443,7 @@ async function openAcceptSheet(orderId, pool) {
       <div class="flex justify-between"><span class="text-dim">Заведение</span><span class="font-bold">${escHtml(order.venueName || '—')}</span></div>
       <div class="flex justify-between"><span class="text-dim">Адрес кафе</span><span style="text-align:right;max-width:60%">${escHtml(venueAddr)}</span></div>
       <div class="flex justify-between"><span class="text-dim">Доставка</span><span style="text-align:right;max-width:60%">${addr ? `${escHtml(addr.street)} ${escHtml(addr.house)}${addr.apt ? ', кв.' + escHtml(addr.apt) : ''}` : 'Самовывоз'}</span></div>
-      <div class="flex justify-between"><span class="text-dim">Оплата</span><span>${order.payment === 'cash' ? '💵 Наличные' : '💳 Карта'}</span></div>
+      <div class="flex justify-between"><span class="text-dim">Оплата</span><span>${paymentLabel(order.payment)}</span></div>
       <div class="flex justify-between"><span class="text-dim">Вознаграждение</span><span class="font-bold text-primary">${fmtPrice(order.deliveryPrice || 0)}</span></div>
     </div>
     <div class="section-title" style="margin-bottom:6px">Состав</div>
@@ -550,7 +550,7 @@ async function openBundleAcceptSheet(orderIdsStr, pool) {
       <div class="section-title" style="margin-bottom:4px">Заказ ${orders.length>1?i+1+' · ':''}#${(o.id||'').slice(-6)}</div>
       <div class="card card-body" style="margin-bottom:8px;gap:4px;display:flex;flex-direction:column">
         <div class="flex justify-between text-sm"><span class="text-dim">Адрес</span><span style="text-align:right;max-width:60%">${addrStr}</span></div>
-        <div class="flex justify-between text-sm"><span class="text-dim">Оплата</span><span>${o.payment==='cash'?'💵 Наличные':'💳 Карта'}</span></div>
+        <div class="flex justify-between text-sm"><span class="text-dim">Оплата</span><span>${paymentLabel(o.payment)}</span></div>
         ${(o.items||[]).map(it=>`<div class="flex justify-between text-sm"><span>${it.emoji||'🍽️'} ${escHtml(it.name)} ×${it.qty}</span><span>${fmtPrice(it.price*it.qty)}</span></div>`).join('')}
       </div>`;
   }).join('');
@@ -731,7 +731,7 @@ function renderMyOrders() {
           </div>
           <div class="delivery-card-body" style="font-size:13px">
             ${addr ? `<div>📍 ${escHtml(addr.street)} ${escHtml(addr.house)}${addr.apt ? ', кв.' + escHtml(addr.apt) : ''}</div>` : '<div>🏪 Самовывоз</div>'}
-            <div>💰 ${fmtPrice((o.total || 0) + (o.deliveryPrice || 0))} · ${o.payment === 'cash' ? 'Наличные' : 'Карта'}</div>
+            <div>💰 ${fmtPrice((o.total || 0) + (o.deliveryPrice || 0))} · ${paymentLabel(o.payment)}</div>
           </div>
           <div class="delivery-card-foot">
             <button class="btn btn-primary btn-sm" onclick="event.stopPropagation();openMyOrder('${o.id}')">Детали →</button>
@@ -796,7 +796,7 @@ async function openMyOrder(orderId) {
       <div class="flex justify-between"><span class="text-dim">Клиент</span><span>${escHtml(order.clientName || '—')}</span></div>
       <div class="flex justify-between"><span class="text-dim">Телефон</span><span>${escHtml(order.clientPhone || '—')}</span></div>
       <div class="flex justify-between"><span class="text-dim">Адрес</span><span style="text-align:right;max-width:60%">${addr ? `${escHtml(addr.street)} ${escHtml(addr.house)}${addr.apt ? ', кв.' + escHtml(addr.apt) : ''}${addr.hasIntercom ? ' · домофон: ' + escHtml(addr.intercomCode || 'есть') : ''}` : 'Самовывоз'}</span></div>
-      <div class="flex justify-between"><span class="text-dim">Оплата</span><span>${order.payment === 'cash' ? '💵 Наличные' : '💳 Карта'}</span></div>
+      <div class="flex justify-between"><span class="text-dim">Оплата</span><span>${paymentLabel(order.payment)}</span></div>
       <div class="flex justify-between"><span class="text-dim">Итого</span><span class="font-bold text-primary">${fmtPrice((order.total || 0) + (order.deliveryPrice || 0))}</span></div>
       ${order.comment ? `<div class="flex justify-between"><span class="text-dim">Комментарий</span><span style="text-align:right;max-width:60%">${escHtml(order.comment)}</span></div>` : ''}
     </div>
