@@ -1248,7 +1248,47 @@ function loadSettings2() {
     </div>`).join('');
 }
 
+// ── Rate limit для сохранения адреса ──────────────────────
+const _ADDR_RL_KEY   = 'vez_addr_rl';
+const _ADDR_FREEZE_KEY = 'vez_addr_freeze';
+const _ADDR_COOLDOWN = 3000;   // 3 сек между нажатиями
+const _ADDR_MAX_SAVES = 3;     // после 3 сохранений — заморозка
+const _ADDR_FREEZE_MS = 3600000; // 1 час
+
+function _checkAddrRateLimit() {
+  const now = Date.now();
+  // Проверяем заморозку
+  try {
+    const freeze = parseInt(localStorage.getItem(_ADDR_FREEZE_KEY) || '0');
+    if (freeze > now) {
+      const mins = Math.ceil((freeze - now) / 60000);
+      showToast(`Подождите ${mins} мин. перед следующим сохранением`, 'warning');
+      return false;
+    }
+  } catch {}
+  // Проверяем cooldown и счётчик
+  try {
+    const rl = JSON.parse(localStorage.getItem(_ADDR_RL_KEY) || '{"last":0,"count":0}');
+    if (now - rl.last < _ADDR_COOLDOWN) {
+      const secs = Math.ceil((_ADDR_COOLDOWN - (now - rl.last)) / 1000);
+      showToast(`Подождите ${secs} сек.`, 'warning');
+      return false;
+    }
+    const newCount = rl.count + 1;
+    if (newCount > _ADDR_MAX_SAVES) {
+      // Замораживаем на час
+      localStorage.setItem(_ADDR_FREEZE_KEY, String(now + _ADDR_FREEZE_MS));
+      localStorage.setItem(_ADDR_RL_KEY, JSON.stringify({ last: now, count: 0 }));
+      showToast('Слишком много попыток. Повторите через 1 час.', 'error');
+      return false;
+    }
+    localStorage.setItem(_ADDR_RL_KEY, JSON.stringify({ last: now, count: newCount }));
+  } catch {}
+  return true;
+}
+
 async function saveAddress() {
+  if (!_checkAddrRateLimit()) return;
   const street = document.getElementById('saved-street').value.trim();
   const house  = document.getElementById('saved-house').value.trim();
   const apt    = document.getElementById('saved-apt').value.trim();

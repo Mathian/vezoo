@@ -676,7 +676,7 @@ function renderAdminOrderActions(order) {
   if (order.status==='accepted'||order.status==='cooking') return `<div style="display:flex;flex-direction:column;gap:8px"><button class="btn btn-success btn-sm" onclick="adminMarkReadyForCourier('${order.id}')">✅ Заказ готов</button><div class="btn-row"><button class="btn btn-secondary btn-sm" onclick="adminSearchCourier('${order.id}')">🔍 В общий пул</button><button class="btn btn-primary btn-sm" onclick="openHandoffFlow()">📦 Передать</button></div>${cancelBtn}</div>${blBtn}`;
   if (order.status==='ready_for_courier') return `<div style="display:flex;flex-direction:column;gap:8px"><div class="alert-box success" style="font-size:13px">⚡ Заказ готов — ждём курьера кафе</div><button class="btn btn-primary btn-sm" onclick="openHandoffFlow()">📦 Передать курьеру</button><button class="btn btn-secondary btn-sm" onclick="adminSearchCourier('${order.id}')">🔍 Выставить в общий пул</button>${cancelBtn}</div>${blBtn}`;
   if (order.status==='searching_courier') return `<div style="display:flex;flex-direction:column;gap:8px"><div class="alert-box info" style="font-size:13px">⏳ Ждём курьера из пула…</div><button class="btn btn-primary btn-sm" onclick="openHandoffFlow()">📦 Передать курьеру</button>${cancelBtn}</div>${blBtn}`;
-  if (order.status==='courier_assigned') return `<div style="display:flex;flex-direction:column;gap:8px"><div class="alert-box info" style="font-size:13px">🏃 <strong>${escHtml(order.courierName||'Курьер')}</strong> едет в кафе</div><button class="btn btn-success btn-sm" onclick="openHandoffFlow()">📦 Передать заказ курьеру</button>${cancelBtn}</div>${blBtn}`;
+  if (order.status==='courier_assigned') return `<div style="display:flex;flex-direction:column;gap:8px"><div class="alert-box info" style="font-size:13px">🏃 <strong>${escHtml(order.courierName||'Курьер')}</strong> едет к вам${order.courierPhone?' · '+escHtml(order.courierPhone):''}</div><button class="btn btn-success btn-sm" onclick="openHandoffFlow()">📦 Передать заказ курьеру</button>${cancelBtn}</div>${blBtn}`;
   if (order.status==='delivering') return `<div style="display:flex;flex-direction:column;gap:8px"><div class="alert-box success">🚴 Курьер: <strong>${escHtml(order.courierName||'')}</strong></div>${cancelBtn}</div>${blBtn}`;
   if (order.status==='cancelled') {
     const byLabel = {client:'клиентом',operator:'оператором',admin:'администратором'}[order.cancelledBy]||'';
@@ -732,7 +732,7 @@ async function adminHandOverCourier(orderId) {
   const courierName=order?.courierName||'Курьер';
   const courierPhone=order?.courierPhone||'';
   // Note: delivering is still active — courier is on the way
-  const patch={status:'delivering',handedOverAt:new Date().toISOString(),clientNotification:{type:'delivering',seen:false,message:`Курьер ${courierName}${courierPhone?' · '+courierPhone:''} везёт ваш заказ!`}};
+  const patch={status:'delivering',handedOverAt:new Date().toISOString(),clientNotification:{type:'delivering',seen:false,message:`Курьер ${courierName} везёт ваш заказ!`}};
   await dbSet('orders',orderId,patch); _patchAllOrders(orderId,patch);
   closeOrderSheet(); tgHaptic('success'); showToast(`Заказ передан курьеру ${courierName}`,'success'); loadOrders(_ordersTab);
 }
@@ -851,7 +851,7 @@ async function confirmHandoff() {
   const cName=_handoffCourier.name||'Курьер';
   const cPhone=_handoffCourier.phone||'';
   for (const orderId of _handoffSelectedOrders) {
-    const patch={ status:'delivering', courierUid:_handoffCourier.uid, courierName:cName, courierPhone:cPhone, handedOverAt:new Date().toISOString(), clientNotification:{type:'delivering',seen:false,message:`Курьер ${cName}${cPhone?' · '+cPhone:''} везёт ваш заказ!`} };
+    const patch={ status:'delivering', courierUid:_handoffCourier.uid, courierName:cName, courierPhone:cPhone, handedOverAt:new Date().toISOString(), clientNotification:{type:'delivering',seen:false,message:`Курьер ${cName} везёт ваш заказ!`} };
     await dbSet('orders',orderId,patch); _patchAllOrders(orderId,patch);
   }
   closeCourierSheet(); tgHaptic('success');
