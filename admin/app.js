@@ -633,13 +633,19 @@ async function openOrderDetail(orderId) {
       <div class="flex justify-between"><span class="text-dim">Адрес</span><span style="text-align:right;max-width:60%">${escHtml(addrStr)}</span></div>
       ${order.comment?`<div class="flex justify-between"><span class="text-dim">Комментарий</span><span style="text-align:right;max-width:60%">${escHtml(order.comment)}</span></div>`:''}
     </div>
-    <div class="section-title" style="margin-bottom:6px">Состав</div>
-    <div class="card card-body" style="margin-bottom:12px;gap:5px;display:flex;flex-direction:column">
-      ${(order.items||[]).map(it=>`<div class="flex justify-between"><span>${it.emoji||'🍽️'} ${escHtml(it.name)}${it.variantName?' ('+escHtml(it.variantName)+')':''} ×${it.qty}</span><span class="font-bold">${fmtPrice(it.price*it.qty)}</span></div>`).join('')}
-      <div class="divider"></div>
-      ${order.deliveryPrice?`<div class="flex justify-between"><span class="text-dim">Доставка</span><span>${fmtPrice(order.deliveryPrice)}</span></div>`:''}
-      <div class="flex justify-between"><span class="font-bold">Итого</span><span class="font-bold text-primary">${fmtPrice(order.total+(order.deliveryPrice||0))}</span></div>
-    </div>
+    ${order.isManual
+      ? `<div class="alert-box info" style="margin-bottom:12px;font-size:13px">📞 Ручной заказ — принят вне сервиса, только доставка</div>
+         <div class="card card-body" style="margin-bottom:12px;gap:5px;display:flex;flex-direction:column">
+           ${order.deliveryPrice?`<div class="flex justify-between"><span class="text-dim">Доставка</span><span>${fmtPrice(order.deliveryPrice)}</span></div>`:''}
+           <div class="flex justify-between"><span class="font-bold">Сумма заказа</span><span class="font-bold text-primary">${fmtPrice(order.total+(order.deliveryPrice||0))}</span></div>
+         </div>`
+      : `<div class="section-title" style="margin-bottom:6px">Состав</div>
+         <div class="card card-body" style="margin-bottom:12px;gap:5px;display:flex;flex-direction:column">
+           ${(order.items||[]).map(it=>`<div class="flex justify-between"><span>${it.emoji||'🍽️'} ${escHtml(it.name)}${it.variantName?' ('+escHtml(it.variantName)+')':''} ×${it.qty}</span><span class="font-bold">${fmtPrice(it.price*it.qty)}</span></div>`).join('')}
+           <div class="divider"></div>
+           ${order.deliveryPrice?`<div class="flex justify-between"><span class="text-dim">Доставка</span><span>${fmtPrice(order.deliveryPrice)}</span></div>`:''}
+           <div class="flex justify-between"><span class="font-bold">Итого</span><span class="font-bold text-primary">${fmtPrice(order.total+(order.deliveryPrice||0))}</span></div>
+         </div>`}
     ${renderOrderTimeline(order)}
     ${renderAdminOrderActions(order)}`;
   _openSheet('order-overlay');
@@ -925,9 +931,9 @@ async function submitManualOrder() {
   if (!amount) { showToast('Введите сумму заказа','warning'); return; }
   const ordId=genOrderId();
   const _manDate=new Date().toISOString().slice(0,10);
-  await dbSet('orders',ordId,{
+  const orderData={
     id:ordId, venueId:VENUE.id, venueName:VENUE.name,
-    clientPhone:phone, clientName, clientUid:'manual_'+genId(),
+    clientPhone:phone, clientName, clientUid:null,
     address:{street,house,apt}, payment, total:amount,
     deliveryPrice: VENUE.deliveryPrice || 0,
     items:[], comment,
@@ -937,9 +943,13 @@ async function submitManualOrder() {
     acceptedAt:new Date().toISOString(),
     clientNotification:{type:'accepted',seen:false},
     adminBotNotified:true, courierBotNotified:false, cancelledBotNotified:false
-  });
-  closeManualOrder(); tgHaptic('success'); showToast('Заказ создан','success');
-  await loadOrders('active');
+  };
+  const ok=await dbSet('orders',ordId,orderData);
+  if (!ok) { showToast('Ошибка создания заказа. Проверьте подключение.','error'); return; }
+  // Добавляем в локальный массив сразу, не ждём обновления listener
+  _allOrders=[..._allOrders, orderData];
+  closeManualOrder(); tgHaptic('success'); showToast('Ручной заказ создан','success');
+  loadOrders('active');
 }
 
 function closeManualOrder(e) {
