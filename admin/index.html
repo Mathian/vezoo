@@ -104,18 +104,9 @@
       <button class="btn btn-secondary" style="width:100%" onclick="openStatsWithPin()">📊 Статистика</button>
     </div>
     <div class="section">
-      <div class="section-title">🚫 Чёрный список</div>
-      <div class="alert-box info" style="margin-bottom:10px;font-size:12px">Клиенты из ЧС не смогут оформить заказ</div>
-      <div id="blacklist-items" style="display:flex;flex-direction:column;gap:6px;margin-bottom:10px"></div>
-      <div class="field">
-        <label>Телефон клиента</label>
-        <input class="inp" id="bl-phone" type="tel" placeholder="+7 (777) 000-00-00">
-        <button class="btn btn-danger btn-sm" style="margin-top:8px;width:100%" onclick="addToBlacklistByPhone()">+ Добавить в ЧС</button>
-      </div>
-    </div>
-    <div class="section">
       <div class="section-title">Безопасность</div>
-      <button class="btn btn-secondary" style="width:100%" onclick="openChangePinWithPin()">🔑 Сменить ПИН</button>
+      <button class="btn btn-secondary" style="width:100%;margin-bottom:10px" onclick="openChangePinWithPin()">🔑 Сменить ПИН</button>
+      <button class="btn btn-secondary" style="width:100%" onclick="openBlacklistOverlay()">🚫 Чёрный список</button>
     </div>
   </div>
 </div>
@@ -316,6 +307,23 @@
       <div class="btn-row">
         <button class="btn btn-ghost" onclick="closeManualOrder()">Отмена</button>
         <button class="btn btn-primary" onclick="submitManualOrder()">Создать заказ</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- BLACKLIST OVERLAY -->
+<div class="overlay" id="blacklist-overlay" onclick="closeBlacklistOverlay(event)">
+  <div class="sheet" style="max-height:85vh;display:flex;flex-direction:column;overflow:hidden">
+    <div class="sheet-handle"></div>
+    <div style="padding:0 4px 12px"><h2 style="margin:0;font-size:18px">🚫 Чёрный список</h2></div>
+    <div class="alert-box info" style="margin-bottom:10px;font-size:12px;flex-shrink:0">Клиенты из ЧС не смогут оформить заказ в этом заведении</div>
+    <div id="blacklist-items" style="display:flex;flex-direction:column;gap:6px;margin-bottom:12px;overflow-y:auto;flex:1"></div>
+    <div style="flex-shrink:0">
+      <div class="field" style="margin-bottom:0">
+        <label>Телефон клиента</label>
+        <input class="inp" id="bl-phone" type="tel" placeholder="+7 (777) 000-00-00">
+        <button class="btn btn-danger btn-sm" style="margin-top:8px;width:100%" onclick="addToBlacklistByPhone()">+ Добавить в ЧС</button>
       </div>
     </div>
   </div>

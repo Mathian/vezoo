@@ -682,7 +682,6 @@ async function openOrderDetail(orderId) {
 }
 
 function renderAdminOrderActions(order) {
-  const blBtn=order.clientUid?`<button class="btn btn-ghost btn-sm" style="margin-top:8px;color:var(--danger)" onclick="adminBlacklistClient('${order.clientUid}','${(order.clientPhone||'').replace(/'/g,'')}')">🚫 В чёрный список</button>`:'';
   const cancelBtn=`<button class="btn btn-danger btn-sm" onclick="adminCancelOrder('${order.id}')">❌ Отменить</button>`;
   const isKaspiRemote = order.payment === 'kaspi_remote';
   const isPickup = order.deliveryType === 'pickup';
@@ -691,28 +690,28 @@ function renderAdminOrderActions(order) {
       const acceptBtn = isKaspiRemote
         ? `<button class="btn btn-success btn-sm" onclick="adminMarkPaid('${order.id}')">💸 Заказ оплачен</button>`
         : `<button class="btn btn-success btn-sm" onclick="adminAcceptOrder('${order.id}')">✅ Принять</button>`;
-      return `<div class="btn-row">${cancelBtn}${acceptBtn}</div>${blBtn}`;
+      return `<div class="btn-row">${cancelBtn}${acceptBtn}</div>`;
     }
-    if (order.status==='accepted'||order.status==='cooking') return `<div style="display:flex;flex-direction:column;gap:8px"><div class="alert-box info" style="font-size:13px">🏪 Самовывоз</div><div class="btn-row">${cancelBtn}<button class="btn btn-primary btn-sm" onclick="adminIssueOrder('${order.id}')">📦 Выдать клиенту</button></div></div>${blBtn}`;
-    if (order.status==='ready') return `<div class="alert-box success" style="margin-bottom:8px;font-size:13px">✅ Заказ готов к выдаче</div><button class="btn btn-primary" onclick="adminIssueOrder('${order.id}')">📦 Выдан клиенту</button>${blBtn}`;
-    return blBtn;
+    if (order.status==='accepted'||order.status==='cooking') return `<div style="display:flex;flex-direction:column;gap:8px"><div class="alert-box info" style="font-size:13px">🏪 Самовывоз</div><div class="btn-row">${cancelBtn}<button class="btn btn-primary btn-sm" onclick="adminIssueOrder('${order.id}')">📦 Выдать клиенту</button></div></div>`;
+    if (order.status==='ready') return `<div class="alert-box success" style="margin-bottom:8px;font-size:13px">✅ Заказ готов к выдаче</div><button class="btn btn-primary" onclick="adminIssueOrder('${order.id}')">📦 Выдан клиенту</button>`;
+    return '';
   }
   if (order.status==='pending') {
     const acceptBtn = isKaspiRemote
       ? `<button class="btn btn-success btn-sm" onclick="adminMarkPaid('${order.id}')">💸 Заказ оплачен</button>`
       : `<button class="btn btn-success btn-sm" onclick="adminAcceptOrder('${order.id}')">✅ Принять</button>`;
-    return `<div class="btn-row">${cancelBtn}${acceptBtn}</div>${blBtn}`;
+    return `<div class="btn-row">${cancelBtn}${acceptBtn}</div>`;
   }
-  if (order.status==='accepted'||order.status==='cooking') return `<div style="display:flex;flex-direction:column;gap:8px"><button class="btn btn-success btn-sm" onclick="adminMarkReadyForCourier('${order.id}')">✅ Заказ готов</button><div class="btn-row"><button class="btn btn-secondary btn-sm" onclick="adminSearchCourier('${order.id}')">🔍 В общий пул</button><button class="btn btn-primary btn-sm" onclick="openHandoffFlow()">📦 Передать</button></div>${cancelBtn}</div>${blBtn}`;
-  if (order.status==='ready_for_courier') return `<div style="display:flex;flex-direction:column;gap:8px"><div class="alert-box success" style="font-size:13px">⚡ Заказ готов — ждём курьера кафе</div><button class="btn btn-primary btn-sm" onclick="openHandoffFlow()">📦 Передать курьеру</button><button class="btn btn-secondary btn-sm" onclick="adminSearchCourier('${order.id}')">🔍 Выставить в общий пул</button>${cancelBtn}</div>${blBtn}`;
-  if (order.status==='searching_courier') return `<div style="display:flex;flex-direction:column;gap:8px"><div class="alert-box info" style="font-size:13px">⏳ Ждём курьера из пула…</div><button class="btn btn-primary btn-sm" onclick="openHandoffFlow()">📦 Передать курьеру</button>${cancelBtn}</div>${blBtn}`;
-  if (order.status==='courier_assigned') return `<div style="display:flex;flex-direction:column;gap:8px"><div class="alert-box info" style="font-size:13px">🏃 <strong>${escHtml(order.courierName||'Курьер')}</strong> едет к вам${order.courierPhone?' · '+escHtml(order.courierPhone):''}</div><button class="btn btn-success btn-sm" onclick="openHandoffFlow()">📦 Передать заказ курьеру</button>${cancelBtn}</div>${blBtn}`;
-  if (order.status==='delivering') return `<div style="display:flex;flex-direction:column;gap:8px"><div class="alert-box success">🚴 Курьер: <strong>${escHtml(order.courierName||'')}</strong></div>${cancelBtn}</div>${blBtn}`;
+  if (order.status==='accepted'||order.status==='cooking') return `<div style="display:flex;flex-direction:column;gap:8px"><button class="btn btn-success btn-sm" onclick="adminMarkReadyForCourier('${order.id}')">✅ Оповестить курьеров</button><div class="btn-row"><button class="btn btn-secondary btn-sm" onclick="adminSearchCourier('${order.id}')">🔍 Поиск курьера</button><button class="btn btn-primary btn-sm" onclick="openHandoffFlow()">📦 Передать</button></div>${cancelBtn}</div>`;
+  if (order.status==='ready_for_courier') return `<div style="display:flex;flex-direction:column;gap:8px"><div class="alert-box success" style="font-size:13px">⚡ Заказ готов — ждём курьера кафе</div><button class="btn btn-primary btn-sm" onclick="openHandoffFlow()">📦 Передать курьеру</button><button class="btn btn-secondary btn-sm" onclick="adminSearchCourier('${order.id}')">🔍 Поиск курьера</button>${cancelBtn}</div>`;
+  if (order.status==='searching_courier') return `<div style="display:flex;flex-direction:column;gap:8px"><div class="alert-box info" style="font-size:13px">⏳ Ждём курьера из пула…</div><button class="btn btn-primary btn-sm" onclick="openHandoffFlow()">📦 Передать курьеру</button>${cancelBtn}</div>`;
+  if (order.status==='courier_assigned') return `<div style="display:flex;flex-direction:column;gap:8px"><div class="alert-box info" style="font-size:13px">🏃 <strong>${escHtml(order.courierName||'Курьер')}</strong> едет к вам${order.courierPhone?' · '+escHtml(order.courierPhone):''}</div><button class="btn btn-success btn-sm" onclick="openHandoffFlow()">📦 Передать заказ курьеру</button>${cancelBtn}</div>`;
+  if (order.status==='delivering') return `<div class="alert-box success">🚴 Курьер: <strong>${escHtml(order.courierName||'')}</strong></div>${cancelBtn}`;
   if (order.status==='cancelled') {
     const byLabel = {client:'клиентом',operator:'оператором',admin:'администратором'}[order.cancelledBy]||'';
-    return `<div class="alert-box danger">❌ Заказ отменён${byLabel?' '+byLabel:''}</div>${blBtn}`;
+    return `<div class="alert-box danger">❌ Заказ отменён${byLabel?' '+byLabel:''}</div>`;
   }
-  return blBtn;
+  return '';
 }
 
 async function adminAcceptOrder(orderId) {
@@ -1148,7 +1147,16 @@ function copyAdminReport() {
 // ══════════════════════════════════════════════════════════
 async function loadSettingsScreen() {
   if (!VENUE) return;
-  await loadBlacklist();
+}
+
+function openBlacklistOverlay() {
+  _openSheet('blacklist-overlay');
+  loadBlacklist();
+}
+
+function closeBlacklistOverlay(e) {
+  if (e && e.target !== document.getElementById('blacklist-overlay')) return;
+  document.getElementById('blacklist-overlay').classList.remove('open');
 }
 
 async function saveVenueInfo() {
