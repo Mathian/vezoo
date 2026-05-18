@@ -241,6 +241,22 @@
   </div>
 </div>
 
+<!-- VARIANT MODAL (bottom sheet для выбора варианта товара) -->
+<div id="variant-modal" class="vm-overlay hidden" onclick="closeVariantModal()">
+  <div class="vm-sheet" onclick="event.stopPropagation()">
+    <div class="vm-drag-handle"></div>
+    <div id="vm-img"></div>
+    <div class="vm-body">
+      <div id="vm-name" class="vm-title"></div>
+      <div id="vm-desc" class="vm-desc"></div>
+      <div id="vm-variants" class="vm-variants"></div>
+    </div>
+    <div class="vm-footer">
+      <button class="btn btn-secondary" onclick="closeVariantModal()">Закрыть</button>
+    </div>
+  </div>
+</div>
+
 <script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
 <script src="../shared/firebase.js"></script>
 <script src="../shared/agreement.js"></script>

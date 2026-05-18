@@ -310,9 +310,9 @@ async function openVenue(venueId) {
 
   document.getElementById('venue-meta-el').innerHTML = `
     ${cat ? `<span class="cat-pill">${cat.icon || ''} ${cat.name}</span>` : ''}
-    <span class="venue-delivery-info">🚴 ${venue.deliveryTime || '?'} мин</span>
-    <span class="venue-delivery-info">💰 ${fmtPrice(venue.deliveryPrice || 0, _selectedCurrency)}</span>
-    ${venue.workOpen ? `<span class="venue-delivery-info">🕐 ${venue.workOpen}–${venue.workClose}</span>` : ''}`;
+    ${venue.workOpen ? `<span class="venue-delivery-info">🕐 ${venue.workOpen}–${venue.workClose}</span>` : ''}
+    ${venue.address  ? `<span class="venue-delivery-info">📍 ${escHtml(venue.address)}</span>` : ''}
+    ${venue.phone    ? `<a class="venue-delivery-info venue-phone-link" href="tel:${escHtml(venue.phone)}">${escHtml(venue.phone)}</a>` : ''}`;
 
   const isFav = FAVORITES.includes(venueId);
   const favBtn = document.getElementById('venue-fav-btn');
@@ -377,21 +377,18 @@ function renderVenueMenuGrid(cat) {
       : `<div class="menu-card-img"><span style="font-size:44px">${item.emoji || '🍽️'}</span></div>`;
 
     if (item.variants && item.variants.length > 0) {
-      const variantRows = item.variants.map(v => {
+      // Компактная карточка — такая же как у одного варианта, варианты открываются в модалке
+      const minPrice = Math.min(...item.variants.map(v => v.price));
+      const maxPrice = Math.max(...item.variants.map(v => v.price));
+      const priceLabel = minPrice === maxPrice
+        ? fmtPrice(minPrice, _selectedCurrency)
+        : `от ${fmtPrice(minPrice, _selectedCurrency)}`;
+      const totalQty = item.variants.reduce((s, v) => {
         const key = `${item.id}::${v.name}`;
-        const qty = (venueCart.find(c => c.cartKey === key) || { qty: 0 }).qty;
-        return `<div class="variant-row" id="vr-${CSS.escape(key)}">
-          <span class="variant-name">${escHtml(v.name)}</span>
-          <div style="display:flex;align-items:center;gap:4px">
-            <span class="variant-price">${fmtPrice(v.price, _selectedCurrency)}</span>
-            <div class="qty-ctrl">
-              ${qty > 0 ? `<div class="qty-btn" onclick="changeQty('${item.id}',-1,'${v.name}')">−</div><div class="qty-num">${qty}</div>` : ''}
-              <div class="qty-btn add" onclick="changeQty('${item.id}',1,'${v.name}')">+</div>
-            </div>
-          </div>
-        </div>`;
-      }).join('');
-      return `<div class="menu-card menu-card-wide" id="mc-${item.id}">${imgHtml}<div class="menu-card-body"><div class="menu-card-name">${escHtml(item.name)}</div>${item.description ? `<div class="menu-card-desc">${escHtml(item.description)}</div>` : ''}<div class="variants-container" style="margin-top:8px">${variantRows}</div></div></div>`;
+        return s + (venueCart.find(c => c.cartKey === key)?.qty || 0);
+      }, 0);
+      const badge = totalQty > 0 ? `<div class="menu-card-badge">${totalQty}</div>` : '';
+      return `<div class="menu-card" id="mc-${item.id}"><div class="menu-card-img-wrap">${imgHtml}${badge}</div><div class="menu-card-body"><div class="menu-card-name">${escHtml(item.name)}</div>${item.description ? `<div class="menu-card-desc">${escHtml(item.description)}</div>` : ''}<div class="qty-row"><div class="menu-card-price">${priceLabel}</div><div class="qty-ctrl"><div class="qty-btn add" onclick="openVariantModal('${item.id}')">+</div></div></div></div></div>`;
     } else {
       const cartItem = venueCart.find(c => c.cartKey === item.id);
       const qty = cartItem ? cartItem.qty : 0;
@@ -433,11 +430,31 @@ function updateMenuItemUI(itemId) {
   const venueId   = CURRENT_VENUE?.id;
   const venueCart = CART[venueId] || [];
   if (menuItem.variants?.length > 0) {
+    // Обновляем бейдж (суммарное кол-во) на компактной карточке
+    const totalQty = menuItem.variants.reduce((s, v) => {
+      const key = `${itemId}::${v.name}`;
+      return s + (venueCart.find(c => c.cartKey === key)?.qty || 0);
+    }, 0);
+    const card = document.getElementById(`mc-${itemId}`);
+    if (card) {
+      let badge = card.querySelector('.menu-card-badge');
+      if (totalQty > 0) {
+        if (!badge) {
+          badge = document.createElement('div');
+          badge.className = 'menu-card-badge';
+          (card.querySelector('.menu-card-img-wrap') || card).appendChild(badge);
+        }
+        badge.textContent = totalQty;
+      } else if (badge) {
+        badge.remove();
+      }
+    }
+    // Обновляем строки в модалке, если она сейчас открыта для этого товара
     menuItem.variants.forEach(v => {
       const key    = `${itemId}::${v.name}`;
       const qty    = (venueCart.find(c => c.cartKey === key) || { qty: 0 }).qty;
       const safeId = CSS.escape(key);
-      const row    = document.getElementById(`vr-${safeId}`);
+      const row    = document.getElementById(`vmr-${safeId}`);
       if (!row) return;
       const ctrl = row.querySelector('.qty-ctrl');
       if (!ctrl) return;
@@ -453,6 +470,58 @@ function updateMenuItemUI(itemId) {
       ? `<div class="qty-btn" onclick="changeQty('${itemId}',-1)">−</div><div class="qty-num" id="qn-${itemId}">${qty}</div><div class="qty-btn add" onclick="changeQty('${itemId}',1)">+</div>`
       : `<div class="qty-btn add" onclick="changeQty('${itemId}',1)">+</div>`;
   }
+}
+
+// ══════════════════════════════════════════════════════════
+//  VARIANT MODAL
+// ══════════════════════════════════════════════════════════
+function openVariantModal(itemId) {
+  tgHaptic('light');
+  const item = VENUE_MENU.find(i => i.id === itemId);
+  if (!item) return;
+
+  const modal = document.getElementById('variant-modal');
+  modal.dataset.itemId = itemId;
+
+  // Изображение
+  document.getElementById('vm-img').innerHTML = item.imageUrl
+    ? `<img src="${item.imageUrl}" alt="" style="width:100%;height:210px;object-fit:cover" onerror="this.parentElement.innerHTML='<div style=height:120px;background:var(--card-2);display:flex;align-items:center;justify-content:center;font-size:64px>${item.emoji || '🍽️'}</div>'">`
+    : `<div style="height:120px;background:var(--card-2);display:flex;align-items:center;justify-content:center;font-size:64px">${item.emoji || '🍽️'}</div>`;
+
+  document.getElementById('vm-name').textContent = item.name;
+  const descEl = document.getElementById('vm-desc');
+  descEl.textContent = item.description || '';
+  descEl.style.display = item.description ? '' : 'none';
+
+  _renderVariantModalRows(item);
+
+  modal.classList.remove('hidden');
+  requestAnimationFrame(() => modal.classList.add('vm-open'));
+}
+
+function _renderVariantModalRows(item) {
+  const venueId   = CURRENT_VENUE?.id;
+  const venueCart = CART[venueId] || [];
+  document.getElementById('vm-variants').innerHTML = item.variants.map(v => {
+    const key = `${item.id}::${v.name}`;
+    const qty = (venueCart.find(c => c.cartKey === key) || { qty: 0 }).qty;
+    return `<div class="vm-variant-row" id="vmr-${CSS.escape(key)}">
+      <div>
+        <div class="variant-name">${escHtml(v.name)}</div>
+        <div class="variant-price">${fmtPrice(v.price, _selectedCurrency)}</div>
+      </div>
+      <div class="qty-ctrl">
+        ${qty > 0 ? `<div class="qty-btn" onclick="changeQty('${item.id}',-1,'${v.name}')">−</div><div class="qty-num">${qty}</div>` : ''}
+        <div class="qty-btn add" onclick="changeQty('${item.id}',1,'${v.name}')">+</div>
+      </div>
+    </div>`;
+  }).join('');
+}
+
+function closeVariantModal() {
+  const modal = document.getElementById('variant-modal');
+  modal.classList.remove('vm-open');
+  setTimeout(() => modal.classList.add('hidden'), 290);
 }
 
 function updateCartNavBadge() {
