@@ -946,10 +946,8 @@ async function submitManualOrder() {
   };
   const ok=await dbSet('orders',ordId,orderData);
   if (!ok) { showToast('Ошибка создания заказа. Проверьте подключение.','error'); return; }
-  // Добавляем в локальный массив сразу, не ждём обновления listener
-  _allOrders=[..._allOrders, orderData];
+  // Не пушим вручную — watchNewOrders listener подхватит заказ автоматически
   closeManualOrder(); tgHaptic('success'); showToast('Ручной заказ создан','success');
-  loadOrders('active');
 }
 
 function closeManualOrder(e) {
