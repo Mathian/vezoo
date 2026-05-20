@@ -80,7 +80,14 @@ window.addEventListener('DOMContentLoaded', async () => {
   await registerAuthMap(tgId); // ждём записи auth_map — иначе race condition при быстром нажатии
 
   const existing = await dbGet('drivers', tgId);
-  if (!existing) { showScreen('s-no-account'); return; }
+  if (!existing) {
+    if (_fbR) {
+      try { localStorage.removeItem('vez_courier_state'); } catch {}
+      try { localStorage.removeItem(_histKey()); } catch {}
+    }
+    showScreen('s-no-account');
+    return;
+  }
   if (existing.blocked || existing.status === 'blocked') { showScreen('s-blocked'); return; }
 
   if (!existing.agreed) {

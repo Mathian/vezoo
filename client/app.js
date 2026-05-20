@@ -79,7 +79,16 @@ window.addEventListener('DOMContentLoaded', async () => {
   await registerAuthMap(tgId); // ждём — иначе race condition: Rules проверяют auth_map раньше записи
 
   const existing = await dbGet('clients', tgId);
-  if (!existing) { showScreen('s-no-account'); return; }
+  if (!existing) {
+    // Online и документа нет — очищаем устаревший кэш, чтобы не было автовхода при перезапуске
+    if (_fbR) {
+      try { localStorage.removeItem('vez_client_state'); } catch {}
+      try { localStorage.removeItem('vez_client_orders_' + tgId); } catch {}
+      try { localStorage.removeItem('vez_cart'); } catch {}
+    }
+    showScreen('s-no-account');
+    return;
+  }
   if (existing.blocked) { showScreen('s-blocked'); return; }
 
   if (!existing.agreed) {
@@ -145,7 +154,11 @@ async function _ensureOrderHistory() {
       [['clientUid', '==', STATE.uid]],
       null, 'desc', 50
     );
-    if (!recent.length) return;
+    if (!recent.length) {
+      // Если онлайн и Firestore вернул 0 заказов — очищаем устаревший кэш истории
+      if (_fbR) _saveOrdersToStorage([]);
+      return;
+    }
     const existing = _loadOrdersFromStorage();
     const byId = {};
     for (const o of existing) byId[o.id] = o;

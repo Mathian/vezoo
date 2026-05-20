@@ -47,7 +47,13 @@ window.addEventListener('DOMContentLoaded', async () => {
   await registerAuthMap(tgId); // ждём — Rules проверяют auth_map синхронно
 
   const existing = await dbGet('godsa', tgId);
-  if (!existing) { showScreen('s-no-account'); return; }
+  if (!existing) {
+    if (_fbR) {
+      try { localStorage.removeItem('vez_sa_state'); } catch {}
+    }
+    showScreen('s-no-account');
+    return;
+  }
 
   if (!existing.agreed) {
     STATE.user = existing;

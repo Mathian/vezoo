@@ -17,8 +17,9 @@ const WEBAPP_BASE = "https://mathian.github.io/vezoo";
 const PFX = 'vez_'; // localStorage prefix
 
 // ── Firebase state ──
-let db   = null;
-let _fbR = false;
+let db         = null;
+let _fbR       = false;
+let _firebaseUid = null; // uid captured from signInAnonymously credential (more reliable than currentUser)
 
 function initFirebase() {
   return new Promise(resolve => {
@@ -30,7 +31,13 @@ function initFirebase() {
         resolve();
       }, 6000);
       firebase.auth().signInAnonymously()
-        .then(() => { clearTimeout(timer); _fbR = true; console.log('[Firebase] Auth OK'); resolve(); })
+        .then(cred => {
+          clearTimeout(timer);
+          _fbR = true;
+          _firebaseUid = cred?.user?.uid || firebase.auth().currentUser?.uid || null;
+          console.log('[Firebase] Auth OK, uid:', _firebaseUid);
+          resolve();
+        })
         .catch(e  => { clearTimeout(timer); console.warn('[Firebase] Auth fail:', e.message); resolve(); });
     } catch (e) {
       console.error('[Firebase] Init error:', e);
@@ -303,10 +310,11 @@ async function bumpVersion(field) {
 // Writes to auth_map/{firebaseUid}. Each user can only write their own record.
 async function registerAuthMap(tgId) {
   if (!_fbR || !tgId) return;
+  // Use uid from signInAnonymously credential — more reliable than currentUser
+  const uid = _firebaseUid || firebase.auth().currentUser?.uid;
+  if (!uid) { console.warn('[Firebase] registerAuthMap: no firebase uid'); return; }
   try {
-    const firebaseUid = firebase.auth().currentUser?.uid;
-    if (!firebaseUid) return;
-    await db.collection('auth_map').doc(firebaseUid).set(
+    await db.collection('auth_map').doc(uid).set(
       { tgId: String(tgId), _upd: new Date().toISOString() },
       { merge: true }
     );
