@@ -78,7 +78,15 @@ window.addEventListener('DOMContentLoaded', async () => {
   STATE.uid = tgId;
   _saveState();
   const _authOk = await signInWithTelegramId(tgId, 'courier');
-  if (!_authOk) showToast(`⚠️ Firebase auth error: ${_lastAuthError || 'unknown'}`, 'error', 15000);
+  if (!_authOk) {
+    const _ae = typeof _lastAuthError !== 'undefined' ? _lastAuthError : 'unknown';
+    if (_ae === 'auth/credential-mismatch')
+      showToast('🔑 Удалите пользователя в Firebase Console → Authentication → Users и перезайдите', 'error', 30000);
+    else if (_ae === 'auth/too-many-requests')
+      showToast('⏳ Firebase: слишком много попыток. Подождите 30–60 мин или смените сеть.', 'error', 30000);
+    else
+      showToast(`⚠️ Firebase auth: ${_ae}`, 'error', 15000);
+  }
 
   const existing = await dbGet('drivers', tgId);
   if (!existing) {

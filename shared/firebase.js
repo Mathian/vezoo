@@ -68,26 +68,34 @@ async function signInWithTelegramId(tgId, role = 'app', retries = 3) {
       } catch (signInErr) {
         lastErr = signInErr;
         console.log(`[Firebase] signIn failed (${signInErr.code}), trying create…`);
-        // For any signIn failure except fatal ones — attempt account creation.
-        // This handles: user-not-found, invalid-credential, wrong-password,
-        // and any future Firebase SDK error code renames.
-        const isFatal = signInErr.code === 'auth/operation-not-allowed'
-                     || signInErr.code === 'auth/network-request-failed'
-                     || signInErr.code === 'auth/too-many-requests'
-                     || signInErr.code === 'auth/invalid-email';
-        if (isFatal) throw signInErr;
 
+        // Fatal errors — retrying / creating won't help
+        if (signInErr.code === 'auth/operation-not-allowed'
+         || signInErr.code === 'auth/network-request-failed'
+         || signInErr.code === 'auth/too-many-requests'
+         || signInErr.code === 'auth/invalid-email') {
+          throw signInErr;
+        }
+
+        // All other errors (auth/user-not-found, auth/wrong-password,
+        // auth/invalid-credential, auth/invalid-login-credentials, etc.)
+        // → account doesn't exist or password differs → try creating it
         try {
           cred = await firebase.auth().createUserWithEmailAndPassword(email, password);
-          console.log('[Firebase] Created account:', email);
+          console.log('[Firebase] Created new account:', email);
         } catch (createErr) {
           lastErr = createErr;
           if (createErr.code === 'auth/email-already-in-use') {
-            // Account exists — retry sign-in (race condition between create attempts)
-            cred = await firebase.auth().signInWithEmailAndPassword(email, password);
-          } else {
-            throw createErr;
+            // Account EXISTS but signIn failed → password mismatch.
+            // This means a Firebase Auth user was created with different credentials.
+            // FIX: Firebase Console → Authentication → Users → delete this user → retry.
+            console.error('[Firebase] Password mismatch for', email,
+              '— go to Firebase Console → Authentication → Users and delete this account, then reload.');
+            const e = new Error('auth/credential-mismatch');
+            e.code  = 'auth/credential-mismatch';
+            throw e; // exit retry loop — no point retrying
           }
+          throw createErr;
         }
       }
 
@@ -100,8 +108,12 @@ async function signInWithTelegramId(tgId, role = 'app', retries = 3) {
     } catch (e) {
       lastErr = e;
       console.warn(`[Firebase] auth attempt ${attempt + 1}/${retries}: [${e.code}] ${e.message}`);
-      if (e.code === 'auth/operation-not-allowed') {
-        console.error('[Firebase] FATAL: Enable Email/Password in Firebase Console → Authentication → Sign-in methods');
+      // These are terminal — stop immediately, don't exhaust retries
+      if (e.code === 'auth/operation-not-allowed'
+       || e.code === 'auth/credential-mismatch'
+       || e.code === 'auth/too-many-requests') {
+        if (e.code === 'auth/operation-not-allowed')
+          console.error('[Firebase] FATAL: Enable Email/Password in Firebase Console → Authentication → Sign-in methods');
         break;
       }
       if (attempt < retries - 1) await new Promise(r => setTimeout(r, 1200));
