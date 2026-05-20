@@ -392,9 +392,10 @@ function renderVenueMenuGrid(cat) {
     const imgHtml = item.imageUrl
       ? `<div class="menu-card-img"><img src="${item.imageUrl}" alt="${escHtml(item.name)}" loading="lazy" onerror="this.parentElement.innerHTML='<span style=font-size:44px>${item.emoji || '🍽️'}</span>'"></div>`
       : `<div class="menu-card-img"><span style="font-size:44px">${item.emoji || '🍽️'}</span></div>`;
+    // В карточке — только первая строка описания (до первого переноса)
+    const descFirst = item.description ? escHtml(item.description.split('\n')[0]) : '';
 
     if (item.variants && item.variants.length > 0) {
-      // Компактная карточка — такая же как у одного варианта, варианты открываются в модалке
       const minPrice = Math.min(...item.variants.map(v => v.price));
       const maxPrice = Math.max(...item.variants.map(v => v.price));
       const priceLabel = minPrice === maxPrice
@@ -405,11 +406,13 @@ function renderVenueMenuGrid(cat) {
         return s + (venueCart.find(c => c.cartKey === key)?.qty || 0);
       }, 0);
       const badge = totalQty > 0 ? `<div class="menu-card-badge">${totalQty}</div>` : '';
-      return `<div class="menu-card" id="mc-${item.id}"><div class="menu-card-img-wrap">${imgHtml}${badge}</div><div class="menu-card-body"><div class="menu-card-name">${escHtml(item.name)}</div>${item.description ? `<div class="menu-card-desc">${escHtml(item.description)}</div>` : ''}<div class="qty-row"><div class="menu-card-price">${priceLabel}</div><div class="qty-ctrl"><div class="qty-btn add" onclick="openVariantModal('${item.id}')">+</div></div></div></div></div>`;
+      // Вся карточка кликабельна; stopPropagation на + чтобы не открылся дважды
+      return `<div class="menu-card" id="mc-${item.id}" onclick="openVariantModal('${item.id}')"><div class="menu-card-img-wrap">${imgHtml}${badge}</div><div class="menu-card-body"><div class="menu-card-name">${escHtml(item.name)}</div>${descFirst ? `<div class="menu-card-desc">${descFirst}</div>` : ''}<div class="qty-row"><div class="menu-card-price">${priceLabel}</div><div class="qty-ctrl"><div class="qty-btn add" onclick="event.stopPropagation();openVariantModal('${item.id}')">+</div></div></div></div></div>`;
     } else {
       const cartItem = venueCart.find(c => c.cartKey === item.id);
       const qty = cartItem ? cartItem.qty : 0;
-      return `<div class="menu-card" id="mc-${item.id}">${imgHtml}<div class="menu-card-body"><div class="menu-card-name">${escHtml(item.name)}</div>${item.description ? `<div class="menu-card-desc">${escHtml(item.description)}</div>` : ''}<div class="qty-row"><div class="menu-card-price">${fmtPrice(item.price, _selectedCurrency)}</div><div class="qty-ctrl">${qty > 0 ? `<div class="qty-btn" onclick="changeQty('${item.id}',-1)">−</div><div class="qty-num" id="qn-${item.id}">${qty}</div>` : ''}<div class="qty-btn add" onclick="changeQty('${item.id}',1)">+</div></div></div></div></div>`;
+      // Карточка открывает модал; +/- работают inline (stopPropagation)
+      return `<div class="menu-card" id="mc-${item.id}" onclick="openVariantModal('${item.id}')">${imgHtml}<div class="menu-card-body"><div class="menu-card-name">${escHtml(item.name)}</div>${descFirst ? `<div class="menu-card-desc">${descFirst}</div>` : ''}<div class="qty-row"><div class="menu-card-price">${fmtPrice(item.price, _selectedCurrency)}</div><div class="qty-ctrl">${qty > 0 ? `<div class="qty-btn" onclick="event.stopPropagation();changeQty('${item.id}',-1)">−</div><div class="qty-num" id="qn-${item.id}">${qty}</div>` : ''}<div class="qty-btn add" onclick="event.stopPropagation();changeQty('${item.id}',1)">+</div></div></div></div></div>`;
     }
   }).join('');
 }
@@ -481,11 +484,23 @@ function updateMenuItemUI(itemId) {
     });
   } else {
     const qty  = (venueCart.find(c => c.cartKey === itemId) || { qty: 0 }).qty;
+    // Обновляем кнопки в карточке (stopPropagation — карточка сама открывает модал)
     const ctrl = document.querySelector(`#mc-${itemId} .qty-ctrl`);
-    if (!ctrl) return;
-    ctrl.innerHTML = qty > 0
-      ? `<div class="qty-btn" onclick="changeQty('${itemId}',-1)">−</div><div class="qty-num" id="qn-${itemId}">${qty}</div><div class="qty-btn add" onclick="changeQty('${itemId}',1)">+</div>`
-      : `<div class="qty-btn add" onclick="changeQty('${itemId}',1)">+</div>`;
+    if (ctrl) {
+      ctrl.innerHTML = qty > 0
+        ? `<div class="qty-btn" onclick="event.stopPropagation();changeQty('${itemId}',-1)">−</div><div class="qty-num" id="qn-${itemId}">${qty}</div><div class="qty-btn add" onclick="event.stopPropagation();changeQty('${itemId}',1)">+</div>`
+        : `<div class="qty-btn add" onclick="event.stopPropagation();changeQty('${itemId}',1)">+</div>`;
+    }
+    // Обновляем строку в модале, если модал сейчас открыт для этого товара
+    const modalRow = document.getElementById(`vmr-${CSS.escape(itemId)}`);
+    if (modalRow) {
+      const modalCtrl = modalRow.querySelector('.qty-ctrl');
+      if (modalCtrl) {
+        modalCtrl.innerHTML = qty > 0
+          ? `<div class="qty-btn" onclick="changeQty('${itemId}',-1)">−</div><div class="qty-num">${qty}</div><div class="qty-btn add" onclick="changeQty('${itemId}',1)">+</div>`
+          : `<div class="qty-btn add" onclick="changeQty('${itemId}',1)">+</div>`;
+      }
+    }
   }
 }
 
@@ -508,6 +523,7 @@ function openVariantModal(itemId) {
   document.getElementById('vm-name').textContent = item.name;
   const descEl = document.getElementById('vm-desc');
   descEl.textContent = item.description || '';
+  descEl.style.whiteSpace = 'pre-line'; // переносы строк как у администратора
   descEl.style.display = item.description ? '' : 'none';
 
   _renderVariantModalRows(item);
@@ -519,6 +535,23 @@ function openVariantModal(itemId) {
 function _renderVariantModalRows(item) {
   const venueId   = CURRENT_VENUE?.id;
   const venueCart = CART[venueId] || [];
+
+  if (!item.variants || item.variants.length === 0) {
+    // Одиночный товар — одна строка с ценой и кнопками +/-
+    const qty = (venueCart.find(c => c.cartKey === item.id) || { qty: 0 }).qty;
+    document.getElementById('vm-variants').innerHTML = `
+      <div class="vm-variant-row" id="vmr-${CSS.escape(item.id)}">
+        <div>
+          <div class="variant-price">${fmtPrice(item.price, _selectedCurrency)}</div>
+        </div>
+        <div class="qty-ctrl">
+          ${qty > 0 ? `<div class="qty-btn" onclick="changeQty('${item.id}',-1)">−</div><div class="qty-num">${qty}</div>` : ''}
+          <div class="qty-btn add" onclick="changeQty('${item.id}',1)">+</div>
+        </div>
+      </div>`;
+    return;
+  }
+
   document.getElementById('vm-variants').innerHTML = item.variants.map(v => {
     const key = `${item.id}::${v.name}`;
     const qty = (venueCart.find(c => c.cartKey === key) || { qty: 0 }).qty;
