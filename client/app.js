@@ -76,7 +76,7 @@ window.addEventListener('DOMContentLoaded', async () => {
 
   STATE.uid = tgId;
   _saveClientState();
-  await registerAuthMap(tgId); // ждём — иначе race condition: Rules проверяют auth_map раньше записи
+  await signInWithTelegramId(tgId);
 
   const existing = await dbGet('clients', tgId);
   if (!existing) {

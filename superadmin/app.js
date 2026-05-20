@@ -44,10 +44,9 @@ window.addEventListener('DOMContentLoaded', async () => {
 
   STATE.uid = tgId;
   saveState();
-  const _authOk = await registerAuthMap(tgId);
-  if (_fbR && !_authOk) {
-    console.warn('[Boot] auth_map write failed — SA permissions may be broken');
-    showToast('⚠️ Проблема с авторизацией. Настройки → Восстановить доступ.', 'warning', 10000);
+  const _authOk = await signInWithTelegramId(tgId);
+  if (!_authOk) {
+    showToast('⚠️ Нет связи с Firebase. Некоторые действия недоступны.', 'warning', 5000);
   }
 
   const existing = await dbGet('godsa', tgId);
@@ -84,14 +83,14 @@ function saveState() {
 async function recoverAccess() {
   const btn = document.getElementById('sa-recover-access-btn');
   if (btn) { btn.disabled = true; btn.textContent = '⏳ Восстановление...'; }
-  const ok = await registerAuthMap(STATE.uid);
+  const ok = await signInWithTelegramId(STATE.uid);
   if (ok) {
     tgHaptic('success');
     showToast('✅ Доступ восстановлен. Перезагрузка...', 'success', 2000);
     setTimeout(() => location.reload(), 1500);
   } else {
     if (btn) { btn.disabled = false; btn.textContent = '🔄 Восстановить доступ'; }
-    showToast('❌ Не удалось. Добавьте ?reset=1 к URL приложения.', 'error', 10000);
+    showToast('❌ Нет связи с Firebase. Проверьте интернет и попробуйте снова.', 'error', 6000);
   }
 }
 

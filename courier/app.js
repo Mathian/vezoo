@@ -77,7 +77,7 @@ window.addEventListener('DOMContentLoaded', async () => {
 
   STATE.uid = tgId;
   _saveState();
-  await registerAuthMap(tgId); // ждём записи auth_map — иначе race condition при быстром нажатии
+  await signInWithTelegramId(tgId);
 
   const existing = await dbGet('drivers', tgId);
   if (!existing) {

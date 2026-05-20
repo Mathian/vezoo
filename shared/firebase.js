@@ -17,33 +17,72 @@ const WEBAPP_BASE = "https://mathian.github.io/vezoo";
 const PFX = 'vez_'; // localStorage prefix
 
 // ── Firebase state ──
-let db         = null;
-let _fbR       = false;
-let _firebaseUid = null; // uid captured from signInAnonymously credential (more reliable than currentUser)
+let db           = null;
+let _fbR         = false;
+let _firebaseUid = null;
 
+// ── Deterministic email-based auth ──
+// Each Telegram user authenticates with a stable email tgId@vezoo.delivery.
+// The Firebase UID from email/password auth is permanent — it never changes
+// with WebView resets, unlike anonymous auth UIDs.
+// Firestore rules extract the tgId from the JWT email claim, eliminating
+// the auth_map collection entirely.
+const _AUTH_SUFFIX = '@vezoo.delivery';
+const _AUTH_SECRET = 'Kz9mQv4r';
+
+// Only initialises the SDK and Firestore — does NOT authenticate.
+// Call signInWithTelegramId(tgId) right after getting the Telegram ID.
 function initFirebase() {
   return new Promise(resolve => {
     try {
       if (!firebase.apps.length) firebase.initializeApp(FIREBASE_CONFIG);
       db = firebase.firestore();
-      const timer = setTimeout(() => {
-        console.warn('[Firebase] Auth timeout — offline mode');
-        resolve();
-      }, 6000);
-      firebase.auth().signInAnonymously()
-        .then(cred => {
-          clearTimeout(timer);
-          _fbR = true;
-          _firebaseUid = cred?.user?.uid || firebase.auth().currentUser?.uid || null;
-          console.log('[Firebase] Auth OK, uid:', _firebaseUid);
-          resolve();
-        })
-        .catch(e  => { clearTimeout(timer); console.warn('[Firebase] Auth fail:', e.message); resolve(); });
+      console.log('[Firebase] SDK + Firestore ready');
+      resolve();
     } catch (e) {
       console.error('[Firebase] Init error:', e);
       resolve();
     }
   });
+}
+
+// Authenticates with a deterministic Firebase email/password derived from tgId.
+// On first call: creates the Firebase Auth account automatically.
+// Sets _fbR = true and _firebaseUid on success.
+// Returns true on success, false on failure (network issues etc.).
+async function signInWithTelegramId(tgId, retries = 3) {
+  if (!db || !tgId) return false;
+  const email    = `${tgId}${_AUTH_SUFFIX}`;
+  const password = `VZ${_AUTH_SECRET}${String(tgId).slice(-4)}`;
+
+  for (let attempt = 0; attempt < retries; attempt++) {
+    try {
+      let cred;
+      try {
+        cred = await firebase.auth().signInWithEmailAndPassword(email, password);
+      } catch (signInErr) {
+        // Account doesn't exist yet — create it on first login
+        if (signInErr.code === 'auth/user-not-found'
+            || signInErr.code === 'auth/invalid-credential'
+            || signInErr.code === 'auth/wrong-password'
+            || signInErr.code === 'auth/invalid-email') {
+          console.log('[Firebase] Creating email auth account for tgId:', tgId);
+          cred = await firebase.auth().createUserWithEmailAndPassword(email, password);
+        } else {
+          throw signInErr;
+        }
+      }
+      _fbR         = true;
+      _firebaseUid = cred?.user?.uid || null;
+      console.log('[Firebase] Email auth OK, uid:', _firebaseUid, 'tgId:', tgId);
+      return true;
+    } catch (e) {
+      console.warn(`[Firebase] signInWithTelegramId attempt ${attempt + 1}/${retries}:`, e.code, e.message);
+      if (attempt < retries - 1) await new Promise(r => setTimeout(r, 1000));
+    }
+  }
+  _fbR = false;
+  return false;
 }
 
 // ── Write (merge) ──
@@ -305,29 +344,12 @@ async function bumpVersion(field) {
   } catch (e) { console.warn('[Version] bump failed:', e.message); }
 }
 
-// ── Firebase Auth Mapping ──
-// Maps anonymous Firebase UID → Telegram ID so Firestore Rules can resolve identity.
-// Writes to auth_map/{firebaseUid}. Each user can only write their own record.
-// Returns true on success, false on failure.
-// Retries up to `retries` times with 800ms delay — handles WebView session resets
-// where the new anonymous Firebase UID needs a fresh auth_map entry.
+// ── Firebase Auth Mapping (DEPRECATED — no-op) ──
+// auth_map is no longer used. tgId is now encoded directly in the Firebase Auth
+// email (tgId@vezoo.delivery) and extracted from the JWT by Firestore Rules.
+// This function is kept as a no-op so existing call sites don't break.
 async function registerAuthMap(tgId, retries = 2) {
-  if (!_fbR || !tgId) return false;
-  const uid = _firebaseUid || firebase.auth().currentUser?.uid;
-  if (!uid) { console.warn('[Firebase] registerAuthMap: no firebase uid'); return false; }
-  for (let attempt = 0; attempt < retries; attempt++) {
-    try {
-      await db.collection('auth_map').doc(uid).set(
-        { tgId: String(tgId), _upd: new Date().toISOString() },
-        { merge: true }
-      );
-      return true;
-    } catch (e) {
-      console.warn(`[Firebase] auth_map attempt ${attempt + 1}/${retries}:`, e.message);
-      if (attempt < retries - 1) await new Promise(r => setTimeout(r, 800));
-    }
-  }
-  return false;
+  return true;
 }
 
 // ── Generate unique ID ──
