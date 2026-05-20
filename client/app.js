@@ -76,7 +76,7 @@ window.addEventListener('DOMContentLoaded', async () => {
 
   STATE.uid = tgId;
   _saveClientState();
-  await signInWithTelegramId(tgId);
+  await signInWithTelegramId(tgId, 'client');
 
   const existing = await dbGet('clients', tgId);
   if (!existing) {

@@ -46,13 +46,21 @@ function initFirebase() {
   });
 }
 
-// Authenticates with a deterministic Firebase email/password derived from tgId.
-// On first call: creates the Firebase Auth account automatically.
+// Authenticates with a deterministic Firebase email/password derived from tgId + role.
+// Role-specific email prevents session conflicts when the same user has multiple roles:
+//   client  → tgId@vezoo.client
+//   admin   → tgId@vezoo.admin
+//   sa      → tgId@vezoo.sa
+//   courier → tgId@vezoo.courier
+// Firestore rules still work: tgIdOf() splits by '@' → always returns the tgId part.
+// On first call for a given role: creates the Firebase Auth account automatically.
 // Sets _fbR = true and _firebaseUid on success.
-// Returns true on success, false on failure (network issues etc.).
-async function signInWithTelegramId(tgId, retries = 3) {
+// Returns true on success, false on failure (no network / Email/Password not enabled).
+// IMPORTANT: Email/Password sign-in must be enabled in Firebase Console →
+//            Authentication → Sign-in methods → Email/Password → Enable.
+async function signInWithTelegramId(tgId, role = 'app', retries = 3) {
   if (!db || !tgId) return false;
-  const email    = `${tgId}${_AUTH_SUFFIX}`;
+  const email    = `${tgId}@vezoo.${role}`;
   const password = `VZ${_AUTH_SECRET}${String(tgId).slice(-4)}`;
 
   for (let attempt = 0; attempt < retries; attempt++) {
@@ -61,23 +69,40 @@ async function signInWithTelegramId(tgId, retries = 3) {
       try {
         cred = await firebase.auth().signInWithEmailAndPassword(email, password);
       } catch (signInErr) {
-        // Account doesn't exist yet — create it on first login
+        console.log('[Firebase] signIn error:', signInErr.code);
+        // "user not found" or "invalid credential" (Firebase merges these in newer SDKs)
+        // → first-time login for this role: create the account
         if (signInErr.code === 'auth/user-not-found'
             || signInErr.code === 'auth/invalid-credential'
-            || signInErr.code === 'auth/wrong-password'
-            || signInErr.code === 'auth/invalid-email') {
-          console.log('[Firebase] Creating email auth account for tgId:', tgId);
-          cred = await firebase.auth().createUserWithEmailAndPassword(email, password);
+            || signInErr.code === 'auth/wrong-password') {
+          console.log('[Firebase] Creating email auth account:', email);
+          try {
+            cred = await firebase.auth().createUserWithEmailAndPassword(email, password);
+          } catch (createErr) {
+            if (createErr.code === 'auth/email-already-in-use') {
+              // Race: account was created between our signIn and create attempts — retry signIn
+              cred = await firebase.auth().signInWithEmailAndPassword(email, password);
+            } else {
+              throw createErr;
+            }
+          }
         } else {
+          // auth/operation-not-allowed → Email/Password not enabled in Firebase Console
+          // auth/network-request-failed → no internet
           throw signInErr;
         }
       }
       _fbR         = true;
       _firebaseUid = cred?.user?.uid || null;
-      console.log('[Firebase] Email auth OK, uid:', _firebaseUid, 'tgId:', tgId);
+      console.log('[Firebase] Auth OK uid:', _firebaseUid, 'email:', email);
       return true;
     } catch (e) {
       console.warn(`[Firebase] signInWithTelegramId attempt ${attempt + 1}/${retries}:`, e.code, e.message);
+      if (e.code === 'auth/operation-not-allowed') {
+        // No point retrying — Email/Password auth is disabled in Firebase Console.
+        console.error('[Firebase] FATAL: Enable Email/Password in Firebase Console → Authentication → Sign-in methods');
+        break;
+      }
       if (attempt < retries - 1) await new Promise(r => setTimeout(r, 1000));
     }
   }

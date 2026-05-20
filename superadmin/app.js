@@ -44,7 +44,7 @@ window.addEventListener('DOMContentLoaded', async () => {
 
   STATE.uid = tgId;
   saveState();
-  const _authOk = await signInWithTelegramId(tgId);
+  const _authOk = await signInWithTelegramId(tgId, 'sa');
   if (!_authOk) {
     showToast('⚠️ Нет связи с Firebase. Некоторые действия недоступны.', 'warning', 5000);
   }
@@ -83,7 +83,7 @@ function saveState() {
 async function recoverAccess() {
   const btn = document.getElementById('sa-recover-access-btn');
   if (btn) { btn.disabled = true; btn.textContent = '⏳ Восстановление...'; }
-  const ok = await signInWithTelegramId(STATE.uid);
+  const ok = await signInWithTelegramId(STATE.uid, 'sa');
   if (ok) {
     tgHaptic('success');
     showToast('✅ Доступ восстановлен. Перезагрузка...', 'success', 2000);

@@ -77,7 +77,7 @@ window.addEventListener('DOMContentLoaded', async () => {
 
   STATE.uid = tgId;
   _saveState();
-  await signInWithTelegramId(tgId);
+  await signInWithTelegramId(tgId, 'courier');
 
   const existing = await dbGet('drivers', tgId);
   if (!existing) {
