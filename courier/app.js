@@ -77,7 +77,8 @@ window.addEventListener('DOMContentLoaded', async () => {
 
   STATE.uid = tgId;
   _saveState();
-  await signInWithTelegramId(tgId, 'courier');
+  const _authOk = await signInWithTelegramId(tgId, 'courier');
+  if (!_authOk) showToast(`⚠️ Firebase auth error: ${_lastAuthError || 'unknown'}`, 'error', 15000);
 
   const existing = await dbGet('drivers', tgId);
   if (!existing) {

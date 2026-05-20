@@ -20,14 +20,13 @@ const PFX = 'vez_'; // localStorage prefix
 let db           = null;
 let _fbR         = false;
 let _firebaseUid = null;
+let _lastAuthError = null; // last error code from signInWithTelegramId (for UI diagnostics)
 
 // ── Deterministic email-based auth ──
-// Each Telegram user authenticates with a stable email tgId@vezoo.delivery.
-// The Firebase UID from email/password auth is permanent — it never changes
-// with WebView resets, unlike anonymous auth UIDs.
-// Firestore rules extract the tgId from the JWT email claim, eliminating
-// the auth_map collection entirely.
-const _AUTH_SUFFIX = '@vezoo.delivery';
+// All roles use tgId@vezoo.delivery — single known-valid TLD, no role suffix needed.
+// Multiple role apps can share the same Firebase Auth account without conflict because
+// each Telegram WebApp runs in an isolated WebView with its own auth session.
+// Firestore rules extract the tgId via: request.auth.token.get('email','').split('@')[0]
 const _AUTH_SECRET = 'Kz9mQv4r';
 
 // Only initialises the SDK and Firestore — does NOT authenticate.
@@ -46,67 +45,71 @@ function initFirebase() {
   });
 }
 
-// Authenticates with a deterministic Firebase email/password derived from tgId + role.
-// Role-specific email prevents session conflicts when the same user has multiple roles:
-//   client  → tgId@vezoo.client
-//   admin   → tgId@vezoo.admin
-//   sa      → tgId@vezoo.sa
-//   courier → tgId@vezoo.courier
-// Firestore rules still work: tgIdOf() splits by '@' → always returns the tgId part.
-// On first call for a given role: creates the Firebase Auth account automatically.
-// Sets _fbR = true and _firebaseUid on success.
-// Returns true on success, false on failure (no network / Email/Password not enabled).
-// IMPORTANT: Email/Password sign-in must be enabled in Firebase Console →
+// Authenticates with a deterministic Firebase email/password derived from tgId.
+// Email: tgId@vezoo.delivery  Password: VZ{secret}{last4digitsOfTgId}
+// On first call: creates the Firebase Auth account automatically.
+// Sets _fbR = true and _firebaseUid on success, _lastAuthError on failure.
+// Returns true on success, false on failure.
+// IMPORTANT: Email/Password sign-in MUST be enabled in Firebase Console →
 //            Authentication → Sign-in methods → Email/Password → Enable.
 async function signInWithTelegramId(tgId, role = 'app', retries = 3) {
-  if (!db || !tgId) return false;
-  const email    = `${tgId}@vezoo.${role}`;
+  _lastAuthError = null;
+  if (!db || !tgId) { _lastAuthError = 'no-db'; return false; }
+
+  const email    = `${tgId}@vezoo.delivery`;
   const password = `VZ${_AUTH_SECRET}${String(tgId).slice(-4)}`;
 
+  let lastErr = null;
   for (let attempt = 0; attempt < retries; attempt++) {
     try {
       let cred;
       try {
         cred = await firebase.auth().signInWithEmailAndPassword(email, password);
       } catch (signInErr) {
-        console.log('[Firebase] signIn error:', signInErr.code);
-        // "user not found" or "invalid credential" (Firebase merges these in newer SDKs)
-        // → first-time login for this role: create the account
-        if (signInErr.code === 'auth/user-not-found'
-            || signInErr.code === 'auth/invalid-credential'
-            || signInErr.code === 'auth/wrong-password') {
-          console.log('[Firebase] Creating email auth account:', email);
-          try {
-            cred = await firebase.auth().createUserWithEmailAndPassword(email, password);
-          } catch (createErr) {
-            if (createErr.code === 'auth/email-already-in-use') {
-              // Race: account was created between our signIn and create attempts — retry signIn
-              cred = await firebase.auth().signInWithEmailAndPassword(email, password);
-            } else {
-              throw createErr;
-            }
+        lastErr = signInErr;
+        console.log(`[Firebase] signIn failed (${signInErr.code}), trying create…`);
+        // For any signIn failure except fatal ones — attempt account creation.
+        // This handles: user-not-found, invalid-credential, wrong-password,
+        // and any future Firebase SDK error code renames.
+        const isFatal = signInErr.code === 'auth/operation-not-allowed'
+                     || signInErr.code === 'auth/network-request-failed'
+                     || signInErr.code === 'auth/too-many-requests'
+                     || signInErr.code === 'auth/invalid-email';
+        if (isFatal) throw signInErr;
+
+        try {
+          cred = await firebase.auth().createUserWithEmailAndPassword(email, password);
+          console.log('[Firebase] Created account:', email);
+        } catch (createErr) {
+          lastErr = createErr;
+          if (createErr.code === 'auth/email-already-in-use') {
+            // Account exists — retry sign-in (race condition between create attempts)
+            cred = await firebase.auth().signInWithEmailAndPassword(email, password);
+          } else {
+            throw createErr;
           }
-        } else {
-          // auth/operation-not-allowed → Email/Password not enabled in Firebase Console
-          // auth/network-request-failed → no internet
-          throw signInErr;
         }
       }
-      _fbR         = true;
-      _firebaseUid = cred?.user?.uid || null;
+
+      _fbR           = true;
+      _firebaseUid   = cred?.user?.uid || null;
+      _lastAuthError = null;
       console.log('[Firebase] Auth OK uid:', _firebaseUid, 'email:', email);
       return true;
+
     } catch (e) {
-      console.warn(`[Firebase] signInWithTelegramId attempt ${attempt + 1}/${retries}:`, e.code, e.message);
+      lastErr = e;
+      console.warn(`[Firebase] auth attempt ${attempt + 1}/${retries}: [${e.code}] ${e.message}`);
       if (e.code === 'auth/operation-not-allowed') {
-        // No point retrying — Email/Password auth is disabled in Firebase Console.
         console.error('[Firebase] FATAL: Enable Email/Password in Firebase Console → Authentication → Sign-in methods');
         break;
       }
-      if (attempt < retries - 1) await new Promise(r => setTimeout(r, 1000));
+      if (attempt < retries - 1) await new Promise(r => setTimeout(r, 1200));
     }
   }
-  _fbR = false;
+
+  _fbR           = false;
+  _lastAuthError = lastErr?.code || 'unknown';
   return false;
 }
 
