@@ -751,25 +751,32 @@ function renderMyOrders() {
     html = '<div class="empty" style="padding-top:40px"><div class="empty-icon">📦</div><div class="empty-text">Нет активных доставок</div></div>';
   }
 
-  // History section (from localStorage — no Firebase query)
+  // History section — только последние 24 часа (из localStorage, без Firebase-запроса)
   if (_myHistory.length) {
-    const dayEarnings = _myHistory.reduce((s,o)=>s+(o.deliveryPrice||0),0);
-    html += `<div class="section-title" style="padding:4px 4px 4px;margin-top:8px">
-      История (${_myHistory.length}) · <span class="text-primary font-bold">${fmtPrice(dayEarnings)}</span>
-    </div>`;
-    html += _myHistory.slice(0, 30).map(o => `
-      <div class="delivery-card" style="opacity:.85">
-        <div class="delivery-card-hdr">
-          <div>
-            <div class="font-bold" style="font-size:13px">${escHtml(o.venueName||'Заведение')}</div>
-            <div class="text-xs text-dim">${fmtTime(o.deliveredAt||o.createdAt)} · #${(o.id||'').slice(-6)}</div>
+    const cutoff = Date.now() - 24 * 60 * 60 * 1000;
+    const recentHistory = _myHistory.filter(o => {
+      const ts = o.deliveredAt || o.createdAt;
+      return ts && new Date(ts).getTime() >= cutoff;
+    });
+    if (recentHistory.length) {
+      const dayEarnings = recentHistory.reduce((s,o)=>s+(o.deliveryPrice||0),0);
+      html += `<div class="section-title" style="padding:4px 4px 4px;margin-top:8px">
+        За 24 часа (${recentHistory.length}) · <span class="text-primary font-bold">${fmtPrice(dayEarnings)}</span>
+      </div>`;
+      html += recentHistory.map(o => `
+        <div class="delivery-card" style="opacity:.85">
+          <div class="delivery-card-hdr">
+            <div>
+              <div class="font-bold" style="font-size:13px">${escHtml(o.venueName||'Заведение')}</div>
+              <div class="text-xs text-dim">${fmtDate(o.deliveredAt||o.createdAt)} · #${(o.id||'').slice(-6)}</div>
+            </div>
+            <div class="text-success font-bold">${fmtPrice(o.deliveryPrice||0)}</div>
           </div>
-          <div class="text-success font-bold">${fmtPrice(o.deliveryPrice||0)}</div>
-        </div>
-        <div class="delivery-card-body text-sm text-dim">
-          ${o.address?`📍 ${escHtml(o.address.street)} ${escHtml(o.address.house)}`:'🏪 Самовывоз'}
-        </div>
-      </div>`).join('');
+          <div class="delivery-card-body text-sm text-dim">
+            ${o.address?`📍 ${escHtml(o.address.street)} ${escHtml(o.address.house)}`:'🏪 Самовывоз'}
+          </div>
+        </div>`).join('');
+    }
   }
 
   list.innerHTML = html;
