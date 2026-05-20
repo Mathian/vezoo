@@ -44,7 +44,11 @@ window.addEventListener('DOMContentLoaded', async () => {
 
   STATE.uid = tgId;
   saveState();
-  await registerAuthMap(tgId); // ждём — Rules проверяют auth_map синхронно
+  const _authOk = await registerAuthMap(tgId);
+  if (_fbR && !_authOk) {
+    console.warn('[Boot] auth_map write failed — SA permissions may be broken');
+    showToast('⚠️ Проблема с авторизацией. Настройки → Восстановить доступ.', 'warning', 10000);
+  }
 
   const existing = await dbGet('godsa', tgId);
   if (!existing) {
@@ -74,6 +78,21 @@ window.addEventListener('DOMContentLoaded', async () => {
 
 function saveState() {
   try { localStorage.setItem('vez_sa_state', JSON.stringify({ tgId: STATE.uid, user: STATE.user })); } catch {}
+}
+
+// ── Восстановление прав доступа ──
+async function recoverAccess() {
+  const btn = document.getElementById('sa-recover-access-btn');
+  if (btn) { btn.disabled = true; btn.textContent = '⏳ Восстановление...'; }
+  const ok = await registerAuthMap(STATE.uid);
+  if (ok) {
+    tgHaptic('success');
+    showToast('✅ Доступ восстановлен. Перезагрузка...', 'success', 2000);
+    setTimeout(() => location.reload(), 1500);
+  } else {
+    if (btn) { btn.disabled = false; btn.textContent = '🔄 Восстановить доступ'; }
+    showToast('❌ Не удалось. Добавьте ?reset=1 к URL приложения.', 'error', 10000);
+  }
 }
 
 // ══════════════════════════════════════════════════════════

@@ -308,17 +308,26 @@ async function bumpVersion(field) {
 // ── Firebase Auth Mapping ──
 // Maps anonymous Firebase UID → Telegram ID so Firestore Rules can resolve identity.
 // Writes to auth_map/{firebaseUid}. Each user can only write their own record.
-async function registerAuthMap(tgId) {
-  if (!_fbR || !tgId) return;
-  // Use uid from signInAnonymously credential — more reliable than currentUser
+// Returns true on success, false on failure.
+// Retries up to `retries` times with 800ms delay — handles WebView session resets
+// where the new anonymous Firebase UID needs a fresh auth_map entry.
+async function registerAuthMap(tgId, retries = 2) {
+  if (!_fbR || !tgId) return false;
   const uid = _firebaseUid || firebase.auth().currentUser?.uid;
-  if (!uid) { console.warn('[Firebase] registerAuthMap: no firebase uid'); return; }
-  try {
-    await db.collection('auth_map').doc(uid).set(
-      { tgId: String(tgId), _upd: new Date().toISOString() },
-      { merge: true }
-    );
-  } catch (e) { console.warn('[Firebase] auth map:', e.message); }
+  if (!uid) { console.warn('[Firebase] registerAuthMap: no firebase uid'); return false; }
+  for (let attempt = 0; attempt < retries; attempt++) {
+    try {
+      await db.collection('auth_map').doc(uid).set(
+        { tgId: String(tgId), _upd: new Date().toISOString() },
+        { merge: true }
+      );
+      return true;
+    } catch (e) {
+      console.warn(`[Firebase] auth_map attempt ${attempt + 1}/${retries}:`, e.message);
+      if (attempt < retries - 1) await new Promise(r => setTimeout(r, 800));
+    }
+  }
+  return false;
 }
 
 // ── Generate unique ID ──

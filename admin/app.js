@@ -49,7 +49,13 @@ window.addEventListener('DOMContentLoaded', async () => {
 
   STATE.uid = tgId;
   saveState();
-  await registerAuthMap(tgId); // ждём записи auth_map — иначе race condition при быстром нажатии
+  const _authOk = await registerAuthMap(tgId);
+  if (_fbR && !_authOk) {
+    // Firebase онлайн, но auth_map не записался → все права будут слетать.
+    // Показываем предупреждение; кнопка «Восстановить доступ» в настройках позволит исправить.
+    console.warn('[Boot] auth_map write failed — permissions may be broken');
+    showToast('⚠️ Проблема с авторизацией. Зайдите в Настройки → Восстановить доступ.', 'warning', 10000);
+  }
 
   const existing = await dbGet('admins', tgId);
   if (!existing) {
@@ -224,6 +230,23 @@ async function changeAdminPin() {
   document.getElementById('new-pin-input').value = '';
   document.getElementById('change-pin-overlay').classList.remove('open');
   tgHaptic('success'); showToast('PIN изменён', 'success');
+}
+
+// ── Восстановление прав доступа ──
+// Вызывается вручную при "слетевших" правах: повторно записывает auth_map
+// и перезагружает страницу, чтобы Firestore Rules подхватили новый маппинг.
+async function recoverAccess() {
+  const btn = document.getElementById('recover-access-btn');
+  if (btn) { btn.disabled = true; btn.textContent = '⏳ Восстановление...'; }
+  const ok = await registerAuthMap(STATE.uid);
+  if (ok) {
+    tgHaptic('success');
+    showToast('✅ Доступ восстановлен. Перезагрузка...', 'success', 2000);
+    setTimeout(() => location.reload(), 1500);
+  } else {
+    if (btn) { btn.disabled = false; btn.textContent = '🔄 Восстановить доступ'; }
+    showToast('❌ Не удалось. Попробуйте: меню → открыть ссылку → добавить ?reset=1 в конец URL.', 'error', 10000);
+  }
 }
 
 // ══════════════════════════════════════════════════════════
