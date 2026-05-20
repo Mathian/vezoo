@@ -46,7 +46,7 @@ window.addEventListener('DOMContentLoaded', async () => {
   saveState();
   const _authOk = await signInWithTelegramId(tgId, 'sa');
   if (!_authOk) {
-    showToast('⚠️ Нет связи с Firebase. Некоторые действия недоступны.', 'warning', 5000);
+    showToast(`⚠️ Firebase auth error: ${_lastAuthError || 'unknown'}`, 'error', 15000);
   }
 
   const existing = await dbGet('godsa', tgId);
