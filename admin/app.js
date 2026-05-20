@@ -710,7 +710,7 @@ function renderAdminOrderActions(order) {
   }
   if (order.status==='accepted'||order.status==='cooking') return `<div style="display:flex;flex-direction:column;gap:8px"><button class="btn btn-success btn-sm" onclick="adminMarkReadyForCourier('${order.id}')">✅ Оповестить курьеров</button><div class="btn-row"><button class="btn btn-secondary btn-sm" onclick="adminSearchCourier('${order.id}')">🔍 Поиск курьера</button><button class="btn btn-primary btn-sm" onclick="openHandoffFlow()">📦 Передать</button></div>${cancelBtn}</div>`;
   if (order.status==='ready_for_courier') return `<div style="display:flex;flex-direction:column;gap:8px"><div class="alert-box success" style="font-size:13px">⚡ Заказ готов — ждём курьера кафе</div><button class="btn btn-primary btn-sm" onclick="openHandoffFlow()">📦 Передать курьеру</button><button class="btn btn-secondary btn-sm" onclick="adminSearchCourier('${order.id}')">🔍 Поиск курьера</button>${cancelBtn}</div>`;
-  if (order.status==='searching_courier') return `<div style="display:flex;flex-direction:column;gap:8px"><div class="alert-box info" style="font-size:13px">⏳ Ждём курьера из пула…</div><button class="btn btn-primary btn-sm" onclick="openHandoffFlow()">📦 Передать курьеру</button>${cancelBtn}</div>`;
+  if (order.status==='searching_courier') return `<div style="display:flex;flex-direction:column;gap:8px"><div class="alert-box info" style="font-size:13px">⏳ Ждём курьера из пула…</div><button class="btn btn-secondary btn-sm" onclick="adminRevertToVenueCouriers('${order.id}')">🏠 Только свои курьеры</button><button class="btn btn-primary btn-sm" onclick="openHandoffFlow()">📦 Передать курьеру</button>${cancelBtn}</div>`;
   if (order.status==='courier_assigned') return `<div style="display:flex;flex-direction:column;gap:8px"><div class="alert-box info" style="font-size:13px">🏃 <strong>${escHtml(order.courierName||'Курьер')}</strong> едет к вам${order.courierPhone?' · '+escHtml(order.courierPhone):''}</div><button class="btn btn-success btn-sm" onclick="openHandoffFlow()">📦 Передать заказ курьеру</button>${cancelBtn}</div>`;
   if (order.status==='delivering') return `<div class="alert-box success">🚴 Курьер: <strong>${escHtml(order.courierName||'')}</strong></div>${cancelBtn}`;
   if (order.status==='cancelled') {
@@ -760,6 +760,15 @@ async function adminSearchCourier(orderId) {
   if (!ok) { showToast('Ошибка: нет прав или нет сети.','error'); return; }
   _patchAllOrders(orderId,patch);
   tgHaptic('success'); showToast('Заказ выставлен в пул курьеров','success'); closeOrderSheet(); loadOrders(_ordersTab);
+}
+
+async function adminRevertToVenueCouriers(orderId) {
+  // Возврат из общего пула обратно к своим курьерам заведения
+  const patch = { status:'ready_for_courier', courierUid:null, courierName:null, courierBotNotified:false, readyForCourierAt:new Date().toISOString() };
+  const ok = await dbSet('orders', orderId, patch);
+  if (!ok) { showToast('Ошибка: нет прав или нет сети.', 'error'); return; }
+  _patchAllOrders(orderId, patch);
+  tgHaptic('success'); showToast('Заказ возвращён своим курьерам', 'success'); closeOrderSheet(); loadOrders(_ordersTab);
 }
 
 async function adminHandOverCourier(orderId) {
