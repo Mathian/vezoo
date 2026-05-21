@@ -569,13 +569,47 @@ function normPhone(raw) {
 }
 
 // ─────────────────────── Phone call helper ───────────────────────
+// iOS Telegram runs inside WKWebView which silently drops programmatic
+// tel: navigation — Apple treats hidden-element .click() as non-user-initiated.
+// On iOS we show a bottom sheet with a VISIBLE <a href="tel:"> that the user
+// physically taps, satisfying WKWebView's "user gesture" requirement.
+// On Android window.location works fine for tel: scheme navigation.
 function callPhone(phone) {
-  const a = document.createElement('a');
-  a.href = 'tel:' + phone;
-  a.style.display = 'none';
-  document.body.appendChild(a);
-  a.click();
-  document.body.removeChild(a);
+  if (!phone) return;
+  const cleaned = String(phone).replace(/[\s\-\(\)]/g, '');
+  if (!cleaned) return;
+  const tel = 'tel:' + cleaned;
+
+  const isIos = tg?.platform === 'ios' || tg?.platform === 'ios_x'
+             || /iPhone|iPad|iPod/i.test(navigator.userAgent);
+  if (isIos) { _callSheetShow(String(phone), tel); return; }
+
+  // Android / desktop — direct navigation works
+  window.location.href = tel;
+}
+
+function _callSheetShow(displayPhone, tel) {
+  let el = document.getElementById('_vcall-sheet');
+  if (el) el.remove();
+  el = document.createElement('div');
+  el.id = '_vcall-sheet';
+  el.style.cssText = 'position:fixed;inset:0;z-index:10000;display:flex;align-items:flex-end;background:rgba(0,0,0,.55)';
+  el.onclick = e => { if (e.target === el) el.remove(); };
+  el.innerHTML = `
+    <div style="background:var(--card-bg,#1e1e2e);width:100%;border-radius:20px 20px 0 0;padding:20px 20px 44px;text-align:center">
+      <div style="width:36px;height:4px;background:rgba(255,255,255,.15);border-radius:2px;margin:0 auto 18px"></div>
+      <div style="font-size:11px;color:var(--text-dim,#888);letter-spacing:.8px;margin-bottom:8px">ПОЗВОНИТЬ</div>
+      <div style="font-size:22px;font-weight:700;letter-spacing:1px;color:var(--text,#f0f0f5);margin-bottom:24px">${escHtml(displayPhone)}</div>
+      <a href="${tel}" onclick="document.getElementById('_vcall-sheet')?.remove()"
+         style="display:block;background:#22c55e;color:#fff;border-radius:14px;padding:16px;font-size:16px;font-weight:600;text-decoration:none;margin-bottom:10px">
+        📞 Позвонить
+      </a>
+      <button onclick="document.getElementById('_vcall-sheet').remove()"
+              style="width:100%;background:rgba(255,255,255,.07);border:none;color:var(--text-dim,#888);border-radius:14px;padding:14px;font-size:15px;cursor:pointer">
+        Отмена
+      </button>
+    </div>`;
+  document.body.appendChild(el);
 }
 
 // ─────────────────────── Order timeline ───────────────────────
