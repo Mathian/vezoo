@@ -1009,11 +1009,21 @@ function watchActiveOrders() {
 
       let justFinished = [];
       if (removedChanges.length) {
+        // MUST use { source: 'server' } here — the Firestore cache at the time of a
+        // 'removed' event still holds the PRE-WRITE document snapshot (e.g. status:'accepted'
+        // with clientNotification.seen:true). A plain get() would return that stale cache
+        // and the cancellation notification would never fire. Server fetch guarantees
+        // the post-write state (status:'cancelled', clientNotification.seen:false).
         const freshDocs = await Promise.all(
           removedChanges.map(c =>
-            db.collection('orders').doc(c.doc.id).get()
+            db.collection('orders').doc(c.doc.id).get({ source: 'server' })
               .then(doc => doc.exists ? { id: doc.id, ...doc.data() } : { id: c.doc.id, ...c.doc.data() })
-              .catch(() => ({ id: c.doc.id, ...c.doc.data() }))
+              .catch(() =>
+                // Server unreachable — fall back to cache
+                db.collection('orders').doc(c.doc.id).get()
+                  .then(doc => doc.exists ? { id: doc.id, ...doc.data() } : { id: c.doc.id, ...c.doc.data() })
+                  .catch(() => ({ id: c.doc.id, ...c.doc.data() }))
+              )
           )
         );
         justFinished = freshDocs;
