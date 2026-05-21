@@ -569,11 +569,11 @@ function normPhone(raw) {
 }
 
 // ─────────────────────── Phone call helper ───────────────────────
-// iOS Telegram runs inside WKWebView which silently drops programmatic
-// tel: navigation — Apple treats hidden-element .click() as non-user-initiated.
-// On iOS we show a bottom sheet with a VISIBLE <a href="tel:"> that the user
-// physically taps, satisfying WKWebView's "user gesture" requirement.
-// On Android window.location works fine for tel: scheme navigation.
+// Telegram's iOS WKWebView blocks ALL tel: navigation — even visible <a href="tel:">
+// taps get swallowed by Telegram's navigation interceptor.
+// Fix: use Telegram.WebApp.openLink('tel:...') which bypasses WKWebView navigation
+// and passes the tel: scheme directly to iOS's native URL handler.
+// On Android/web window.location works fine for tel: scheme navigation.
 function callPhone(phone) {
   if (!phone) return;
   const cleaned = String(phone).replace(/[\s\-\(\)]/g, '');
@@ -588,7 +588,11 @@ function callPhone(phone) {
   window.location.href = tel;
 }
 
+// Stores the tel: URI for the sheet's call button (set before showing)
+let _pendingCallTel = '';
+
 function _callSheetShow(displayPhone, tel) {
+  _pendingCallTel = tel;
   let el = document.getElementById('_vcall-sheet');
   if (el) el.remove();
   el = document.createElement('div');
@@ -600,16 +604,28 @@ function _callSheetShow(displayPhone, tel) {
       <div style="width:36px;height:4px;background:rgba(255,255,255,.15);border-radius:2px;margin:0 auto 18px"></div>
       <div style="font-size:11px;color:var(--text-dim,#888);letter-spacing:.8px;margin-bottom:8px">ПОЗВОНИТЬ</div>
       <div style="font-size:22px;font-weight:700;letter-spacing:1px;color:var(--text,#f0f0f5);margin-bottom:24px">${escHtml(displayPhone)}</div>
-      <a href="${tel}" onclick="document.getElementById('_vcall-sheet')?.remove()"
-         style="display:block;background:#22c55e;color:#fff;border-radius:14px;padding:16px;font-size:16px;font-weight:600;text-decoration:none;margin-bottom:10px">
+      <button id="_vcall-dial-btn"
+         style="display:block;width:100%;background:#22c55e;color:#fff;border:none;border-radius:14px;padding:16px;font-size:16px;font-weight:600;cursor:pointer;margin-bottom:10px">
         📞 Позвонить
-      </a>
+      </button>
       <button onclick="document.getElementById('_vcall-sheet').remove()"
               style="width:100%;background:rgba(255,255,255,.07);border:none;color:var(--text-dim,#888);border-radius:14px;padding:14px;font-size:15px;cursor:pointer">
         Отмена
       </button>
     </div>`;
   document.body.appendChild(el);
+
+  // Attach handler after DOM insertion so closure captures correct tel value.
+  // tg.openLink passes tel: to iOS natively — this is the only method that works
+  // inside Telegram's WKWebView without being intercepted.
+  document.getElementById('_vcall-dial-btn').addEventListener('click', () => {
+    document.getElementById('_vcall-sheet')?.remove();
+    if (tg?.openLink) {
+      tg.openLink(_pendingCallTel);
+    } else {
+      window.location.href = _pendingCallTel;
+    }
+  });
 }
 
 // ─────────────────────── Order timeline ───────────────────────
