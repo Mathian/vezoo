@@ -334,7 +334,7 @@ async function openVenue(venueId) {
     ${cat ? `<span class="cat-pill">${cat.icon || ''} ${cat.name}</span>` : ''}
     ${venue.workOpen ? `<span class="venue-delivery-info">🕐 ${venue.workOpen}–${venue.workClose}</span>` : ''}
     ${venue.address  ? `<span class="venue-delivery-info">📍 ${escHtml(venue.address)}</span>` : ''}
-    ${venue.phone    ? `<a class="venue-delivery-info venue-phone-link" href="tel:${escHtml(venue.phone)}" onclick="event.preventDefault();callPhone('${escHtml(venue.phone)}')">${escHtml(venue.phone)}</a>` : ''}`;
+    ${venue.phone    ? `<a class="venue-delivery-info venue-phone-link" href="tel:${escHtml(venue.phone)}" onclick="event.preventDefault();callPhone('${escHtml(venue.phone)}')" >${escHtml(venue.phone)}</a>` : ''}`;
 
   const isFav = FAVORITES.includes(venueId);
   const favBtn = document.getElementById('venue-fav-btn');

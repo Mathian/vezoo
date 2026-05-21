@@ -569,64 +569,33 @@ function normPhone(raw) {
 }
 
 // ─────────────────────── Phone call helper ───────────────────────
-// iOS Telegram WKWebView intercepts tel: navigation, so JS-based approaches
-// (window.location.href, tg.openLink) are unreliable.
-// Best approach: a pure <a href="tel:"> with NO onclick — removing the element
-// from DOM inside an onclick cancels the href navigation in some WKWebView versions.
-// href is set via setAttribute (not innerHTML string interpolation) to prevent XSS.
-// Sheet is removed via visibilitychange when user returns from the phone app.
-// On Android/web: window.location.href = tel works fine.
+// Android/web: window.location.href = 'tel:...' opens the dialler directly.
+// iOS Telegram WKWebView blocks all tel: navigation at the policy level —
+// window.location, tg.openLink and <a href="tel:"> all get silently swallowed.
+// iOS fallback: copy the number to clipboard and show a toast with instructions.
 function callPhone(phone) {
   if (!phone) return;
   const cleaned = String(phone).replace(/[\s\-\(\)]/g, '');
   if (!cleaned) return;
-  const tel = 'tel:' + cleaned;
 
   const isIos = tg?.platform === 'ios' || tg?.platform === 'ios_x'
              || /iPhone|iPad|iPod/i.test(navigator.userAgent);
-  if (isIos) { _callSheetShow(String(phone), tel); return; }
 
-  // Android / desktop — direct navigation works
-  window.location.href = tel;
-}
-
-function _callSheetShow(displayPhone, tel) {
-  let el = document.getElementById('_vcall-sheet');
-  if (el) el.remove();
-  el = document.createElement('div');
-  el.id = '_vcall-sheet';
-  el.style.cssText = 'position:fixed;inset:0;z-index:10000;display:flex;align-items:flex-end;background:rgba(0,0,0,.55)';
-  el.onclick = e => { if (e.target === el) el.remove(); };
-  el.innerHTML = `
-    <div style="background:var(--card-bg,#1e1e2e);width:100%;border-radius:20px 20px 0 0;padding:20px 20px 44px;text-align:center">
-      <div style="width:36px;height:4px;background:rgba(255,255,255,.15);border-radius:2px;margin:0 auto 18px"></div>
-      <div style="font-size:11px;color:var(--text-dim,#888);letter-spacing:.8px;margin-bottom:8px">ПОЗВОНИТЬ</div>
-      <div style="font-size:22px;font-weight:700;letter-spacing:1px;color:var(--text,#f0f0f5);margin-bottom:24px">${escHtml(displayPhone)}</div>
-      <a id="_vcall-dial-link"
-         style="display:block;background:#22c55e;color:#fff;border-radius:14px;padding:16px;font-size:16px;font-weight:600;text-decoration:none;margin-bottom:10px">
-        📞 Позвонить
-      </a>
-      <button onclick="document.getElementById('_vcall-sheet').remove()"
-              style="width:100%;background:rgba(255,255,255,.07);border:none;color:var(--text-dim,#888);border-radius:14px;padding:14px;font-size:15px;cursor:pointer">
-        Отмена
-      </button>
-    </div>`;
-  document.body.appendChild(el);
-
-  // Set href via setAttribute — never via innerHTML string, prevents XSS.
-  // tel is already sanitised: 'tel:' + digits/+/- only.
-  // No onclick on the link — removing element from DOM inside onclick
-  // can cancel href navigation in WKWebView before iOS handles the tel: scheme.
-  document.getElementById('_vcall-dial-link').setAttribute('href', tel);
-
-  // Remove sheet automatically when user returns from the phone app.
-  function _onVisibility() {
-    if (!document.hidden) {
-      document.getElementById('_vcall-sheet')?.remove();
-      document.removeEventListener('visibilitychange', _onVisibility);
+  if (isIos) {
+    // Clipboard API works fine inside Telegram WKWebView
+    const copy = navigator.clipboard?.writeText(cleaned);
+    if (copy) {
+      copy
+        .then(() => showToast('📋 Номер скопирован — откройте «Телефон»', 'info', 4000))
+        .catch(() => showToast('📞 ' + String(phone) + ' — наберите вручную', 'info', 5000));
+    } else {
+      showToast('📞 ' + String(phone) + ' — наберите вручную', 'info', 5000);
     }
+    return;
   }
-  document.addEventListener('visibilitychange', _onVisibility);
+
+  // Android / desktop — direct navigation opens the dialler
+  window.location.href = 'tel:' + cleaned;
 }
 
 // ─────────────────────── Order timeline ───────────────────────
