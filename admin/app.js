@@ -671,7 +671,8 @@ function _patchAllOrders(orderId, patch) {
 }
 
 async function openOrderDetail(orderId) {
-  const order=_allOrders.find(o=>o.id===orderId);
+  // History orders live in _histOrders, active/pending in _allOrders
+  const order = _allOrders.find(o=>o.id===orderId) || _histOrders.find(o=>o.id===orderId);
   if (!order) return;
   const addr=order.address;
   const addrStr=typeof addr==='string'?addr:(addr?((`${addr.street||''} ${addr.house||''}${addr.apt?', кв.'+addr.apt:''}`).trim()||'—'):'—');

@@ -600,16 +600,24 @@ function callPhone(phone) {
 
 // ─────────────────────── Order timeline ───────────────────────
 function renderOrderTimeline(order) {
+  const _cancelBy = { client: 'клиентом', admin: 'администратором', operator: 'оператором' };
+  const cancelLabel = 'Отменён' + (order.cancelledBy
+    ? ' ' + (_cancelBy[order.cancelledBy] || order.cancelledBy)
+    : '');
+
   const events = [
-    { label: 'Создан',            time: order.createdAt },
-    { label: 'Принят',            time: order.acceptedAt },
-    { label: 'Поиск курьера',     time: order.searchStartedAt },
-    { label: 'Курьер назначен',   time: order.assignedAt },
-    { label: 'Передан курьеру',   time: order.handedOverAt },
-    { label: 'Доставлен',         time: order.deliveredAt },
-    { label: 'Выдан клиенту',     time: order.issuedAt },
-    { label: 'Отменён',           time: order.cancelledAt },
-  ].filter(e => e.time);
+    { label: 'Создан',                     time: order.createdAt },
+    { label: 'Принят',                      time: order.acceptedAt },
+    { label: 'Оповещены свои курьеры',      time: order.readyForCourierAt },
+    { label: 'Выставлен на поиск курьера',  time: order.searchStartedAt },
+    { label: 'Курьер назначен',             time: order.assignedAt },
+    { label: 'Передан курьеру',             time: order.handedOverAt },
+    { label: 'Доставлен',                   time: order.deliveredAt },
+    { label: 'Выдан клиенту',              time: order.issuedAt },
+    { label: cancelLabel,                   time: order.cancelledAt },
+  ].filter(e => e.time)
+   .sort((a, b) => a.time.localeCompare(b.time));
+
   if (!events.length) return '';
   return `
     <div class="section-title" style="margin:12px 0 6px">Хронология</div>
