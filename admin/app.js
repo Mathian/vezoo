@@ -1111,7 +1111,6 @@ async function generateAdminReport() {
     const cancelled   = orders.filter(o=>o.status==='cancelled');
     const cancelCl    = cancelled.filter(o=>o.cancelledBy==='client');
     const cancelVen   = cancelled.filter(o=>o.cancelledBy==='admin'||o.cancelledBy==='operator');
-    const returns     = orders.filter(o=>o.returnAt);
     const delivered   = orders.filter(o=>o.status==='delivered'||o.status==='issued');
     const delivPool   = delivered.filter(o=>o.courierUid&&!permUids.has(o.courierUid));
     const delivPerm   = delivered.filter(o=>o.courierUid&&permUids.has(o.courierUid));
@@ -1121,13 +1120,8 @@ async function generateAdminReport() {
     const courierMap = {};
     for (const o of delivered) {
       if (!o.courierUid) continue;
-      if (!courierMap[o.courierUid]) courierMap[o.courierUid]={ name:o.courierName||'—', phone:o.courierPhone||'', delivered:0, returns:0 };
+      if (!courierMap[o.courierUid]) courierMap[o.courierUid]={ name:o.courierName||'—', phone:o.courierPhone||'', delivered:0 };
       courierMap[o.courierUid].delivered++;
-    }
-    for (const o of returns) {
-      const uid = o.returnedByUid; if (!uid) continue;
-      if (!courierMap[uid]) courierMap[uid]={ name:o.returnedByName||'—', phone:o.courierPhone||'', delivered:0, returns:0 };
-      courierMap[uid].returns++;
     }
 
     // TOP-10
@@ -1148,7 +1142,6 @@ async function generateAdminReport() {
     rep += `Отменённые заказы: ${cancelled.length}\n`;
     rep += `-Отменённые клиентами: ${cancelCl.length}\n`;
     rep += `-Отменённые заведением: ${cancelVen.length}\n`;
-    rep += `Возвраты курьерами: ${returns.length}\n\n`;
     rep += `Доставлено: ${delivered.length}\n`;
     rep += `-Через поиск курьера: ${delivPool.length}\n`;
     rep += `-Постоянными курьерами: ${delivPerm.length}\n`;
@@ -1159,7 +1152,6 @@ async function generateAdminReport() {
       for (const [,c] of entries) {
         rep += `\n${c.name} (${c.phone||'—'}):\n`;
         rep += `-Доставлено: ${c.delivered}\n`;
-        rep += `-Возвраты: ${c.returns}\n`;
       }
     }
     if (top10.length) {

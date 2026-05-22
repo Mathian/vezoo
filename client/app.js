@@ -10,14 +10,12 @@ let CURRENT_VENUE = null;
 let VENUE_MENU    = [];
 let CART          = {};
 let ACTIVE_ORDERS = [];
-let FAVORITES     = [];
 let _ordersUnsub  = null;
 let _shownNotifs  = new Set();
 let _cdIntervals  = {};
 let _paymentMethod   = 'cash';
 let _deliveryType    = 'delivery';
 let _intercomChecked = false;
-let _favFilter       = false;
 let _cartOpenedFrom  = 'venue';
 const _selectedCurrency = '₸';
 
@@ -60,7 +58,6 @@ window.addEventListener('DOMContentLoaded', async () => {
     const s = JSON.parse(localStorage.getItem('vez_client_state') || '{}');
     if (s.tgId === tgId) STATE.user = s.user || null;
     CART      = JSON.parse(localStorage.getItem('vez_cart') || '{}');
-    FAVORITES = JSON.parse(localStorage.getItem('vez_favorites') || '[]');
   } catch {}
 
   await initFirebase();
@@ -131,7 +128,6 @@ function _saveClientState() {
   try { localStorage.setItem('vez_client_state', JSON.stringify({ tgId: STATE.uid, user: STATE.user })); } catch {}
 }
 function _saveCart()      { try { localStorage.setItem('vez_cart', JSON.stringify(CART)); } catch {} }
-function _saveFavorites() { try { localStorage.setItem('vez_favorites', JSON.stringify(FAVORITES)); } catch {} }
 
 // ── Agreement ──
 async function submitAgree() {
@@ -189,7 +185,6 @@ async function _ensureOrderHistory() {
 // ── Init main ──
 async function initMain() {
   document.getElementById('main-nav').style.display = 'flex';
-  FAVORITES = JSON.parse(localStorage.getItem('vez_favorites') || '[]');
   // Pre-load app versions for cache validation
   await _getAppVersions();
   // Point 3: recover history from Firestore if localStorage was cleared
@@ -245,15 +240,14 @@ function filterVenues(el, catId) {
 }
 
 function renderVenues(catId) {
-  let list = _favFilter ? VENUES.filter(v => FAVORITES.includes(v.id)) : VENUES;
+  let list = VENUES;
   if (catId) list = list.filter(v => v.categoryId === catId);
   const container = document.getElementById('home-venues');
   if (!list.length) {
-    container.innerHTML = `<div class="empty"><div class="empty-icon">🏪</div><div class="empty-text">${_favFilter ? 'Нет избранных' : 'Заведений пока нет'}</div></div>`;
+    container.innerHTML = `<div class="empty"><div class="empty-icon">🏪</div><div class="empty-text">Заведений пока нет</div></div>`;
     return;
   }
   container.innerHTML = list.map(v => {
-    const isFav  = FAVORITES.includes(v.id);
     const cat    = CATEGORIES.find(c => c.id === v.categoryId);
     const open   = isVenueOpen(v);
     const cover  = v.coverUrl
@@ -269,7 +263,6 @@ function renderVenues(catId) {
         <div class="venue-card-body">
           <div class="flex justify-between items-center">
             <div class="venue-card-name">${escHtml(v.name)}${cartBadge}</div>
-            <button class="venue-fav${isFav ? ' active' : ''}" onclick="event.stopPropagation();toggleFav('${v.id}',this)">${isFav ? '❤️' : '🤍'}</button>
           </div>
           <div class="venue-card-meta">
             ${cat ? `<span class="cat-pill">${cat.icon || ''} ${cat.name}</span>` : ''}
@@ -290,20 +283,6 @@ function isVenueOpen(v) {
   const [ch, cm] = v.workClose.split(':').map(Number);
   const mins = now.getHours() * 60 + now.getMinutes();
   return mins >= oh * 60 + om && mins < ch * 60 + cm;
-}
-
-function toggleFavFilter() {
-  _favFilter = !_favFilter;
-  document.getElementById('fav-filter-btn').textContent = _favFilter ? '❤️' : '🤍';
-  renderVenues(null);
-  document.querySelectorAll('#home-cat-tabs .cat-tab').forEach((b, i) => b.classList.toggle('active', i === 0));
-}
-
-function toggleFav(venueId, btn) {
-  const idx = FAVORITES.indexOf(venueId);
-  if (idx >= 0) { FAVORITES.splice(idx, 1); btn.textContent = '🤍'; btn.classList.remove('active'); }
-  else          { FAVORITES.push(venueId); btn.textContent = '❤️'; btn.classList.add('active'); }
-  _saveFavorites();
 }
 
 // ══════════════════════════════════════════════════════════
@@ -336,17 +315,11 @@ async function openVenue(venueId) {
     ${venue.address  ? `<span class="venue-delivery-info">📍 ${escHtml(venue.address)}</span>` : ''}
     ${venue.phone    ? `<a class="venue-delivery-info venue-phone-link" href="tel:${escHtml(venue.phone)}" onclick="event.preventDefault();callPhone('${escHtml(venue.phone)}')" >${escHtml(venue.phone)}</a>` : ''}`;
 
-  const isFav = FAVORITES.includes(venueId);
-  const favBtn = document.getElementById('venue-fav-btn');
-  favBtn.textContent = isFav ? '❤️' : '🤍';
-  favBtn.classList.toggle('active', isFav);
-
   showScreen('s-venue');
   await loadVenueMenu(venueId);
 }
 
 function backToHome() { showScreen('s-home'); setNav(document.getElementById('nav-home')); }
-function toggleCurrentVenueFav() { if (!CURRENT_VENUE) return; toggleFav(CURRENT_VENUE.id, document.getElementById('venue-fav-btn')); }
 
 async function loadVenueMenu(venueId) {
   const grid = document.getElementById('venue-menu-grid');
@@ -1312,16 +1285,6 @@ function loadSettings2() {
     document.getElementById('saved-apt').value    = saved.apt    || '';
   }
 
-  // Favourites
-  const favList   = document.getElementById('favorites-list');
-  const favVenues = VENUES.filter(v => FAVORITES.includes(v.id));
-  if (!favVenues.length) { favList.innerHTML = '<div class="text-dim text-sm">Нет избранных заведений</div>'; return; }
-  favList.innerHTML = favVenues.map(v => `
-    <div class="list-item" onclick="openVenue('${v.id}');setNav(document.getElementById('nav-home'))">
-      <div class="li-icon yellow">${CATEGORIES.find(c => c.id === v.categoryId)?.icon || '🏪'}</div>
-      <div class="li-body"><div class="li-title">${v.name}</div><div class="li-sub">${isVenueOpen(v) ? 'Открыто' : 'Закрыто'}</div></div>
-      <div class="chevron">›</div>
-    </div>`).join('');
 }
 
 // ── Rate limit для сохранения адреса ──────────────────────

@@ -262,14 +262,11 @@ function _renderSaVenueSheetHtml(venue) {
       <div class="section-title">Основное</div>
       <div class="field"><label>Название *</label><input class="inp" id="sa-ven-name" placeholder="Кафе «Уют»" value="${venue?.name||''}" maxlength="80"></div>
       <div class="field"><label>Категория *</label><select class="inp" id="sa-ven-cat"><option value="">Выберите...</option>${catsOpts}</select></div>
-      <div class="field"><label>Описание</label><textarea class="inp" id="sa-ven-desc" rows="2" maxlength="500">${venue?.description||''}</textarea></div>
 
       <div class="section-title">Расположение</div>
-      <div class="field"><label>Город</label><input class="inp" id="sa-ven-city" placeholder="Алматы" value="${venue?.cityName||''}" maxlength="60"></div>
       <div class="inp-row">
         <div class="field"><label>Улица *</label><input class="inp" id="sa-ven-street" placeholder="ул. Абая" value="${venue?.addrStreet||''}"></div>
         <div class="field" style="max-width:88px"><label>Дом *</label><input class="inp" id="sa-ven-house" placeholder="10" value="${venue?.addrHouse||''}"></div>
-        <div class="field" style="max-width:78px"><label>Офис</label><input class="inp" id="sa-ven-office" placeholder="5" value="${venue?.addrOffice||''}"></div>
       </div>
       <div class="field"><label>Телефон</label><input class="inp" id="sa-ven-phone" type="tel" placeholder="+7 (777) 000-00-00" value="${venue?.phone||''}"></div>
 
@@ -284,7 +281,6 @@ function _renderSaVenueSheetHtml(venue) {
         <div class="field"><label>Время доставки (мин)</label><input class="inp" id="sa-ven-deltime" type="number" value="${venue?.deliveryTime||30}" min="5"></div>
         <div class="field"><label>Стоимость доставки</label><input class="inp" id="sa-ven-delprice" type="number" value="${venue?.deliveryPrice||0}" min="0"></div>
       </div>
-      <div class="field"><label>Мин. сумма заказа</label><input class="inp" id="sa-ven-minorder" type="number" value="${venue?.minOrder||0}" min="0"></div>
       <div class="section-title" style="margin-top:4px">Способы оплаты</div>
       <div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:6px">
         <button class="pay-tag${_saVenPayMethods.cash?' active-cash':''}" id="sa-ven-pay-cash" onclick="toggleSaVenPayTag('cash')">💵 Наличные</button>
@@ -432,17 +428,13 @@ function previewSaVenCover(input) {
 async function saveSaVenue(venueId) {
   const name    = document.getElementById('sa-ven-name').value.trim();
   const catId   = document.getElementById('sa-ven-cat').value;
-  const desc    = document.getElementById('sa-ven-desc').value.trim();
-  const cityName = document.getElementById('sa-ven-city').value.trim();
   const street  = document.getElementById('sa-ven-street').value.trim();
   const house   = document.getElementById('sa-ven-house').value.trim();
-  const office  = document.getElementById('sa-ven-office').value.trim();
   const phone   = document.getElementById('sa-ven-phone').value.trim();
   const open    = document.getElementById('sa-ven-open').value;
   const close   = document.getElementById('sa-ven-close').value;
   const delTime = parseInt(document.getElementById('sa-ven-deltime').value)||30;
   const delPrice= parseInt(document.getElementById('sa-ven-delprice').value)||0;
-  const minOrd  = parseInt(document.getElementById('sa-ven-minorder').value)||0;
   const onlineEnabled = document.getElementById('sa-ven-online').checked;
   const coverUrl = document.getElementById('sa-ven-cover-url').value.trim() || _saVenCoverDataUrl || '';
 
@@ -450,17 +442,16 @@ async function saveSaVenue(venueId) {
   if (!catId)  { showToast('Выберите категорию', 'warning'); return; }
   if (!street || !house) { showToast('Введите улицу и дом', 'warning'); return; }
 
-  const addrParts = [street, house, office ? 'оф. ' + office : ''].filter(Boolean);
-  const address = addrParts.join(', ');
+  const address = [street, house].join(', ');
 
   const isNew = !venueId || venueId === 'null';
   const vId = isNew ? genId() : venueId;
   const data = {
-    id: vId, name, categoryId: catId, description: desc,
-    addrStreet: street, addrHouse: house, addrOffice: office,
-    address, phone, cityName,
+    id: vId, name, categoryId: catId,
+    addrStreet: street, addrHouse: house,
+    address, phone,
     workOpen: open, workClose: close,
-    deliveryTime: delTime, deliveryPrice: delPrice, minOrder: minOrd,
+    deliveryTime: delTime, deliveryPrice: delPrice,
     paymentMethods: _saVenPayMethods,
     coverUrl, onlineOrdersEnabled: onlineEnabled,
     status: 'approved', blocked: false,
@@ -663,79 +654,41 @@ async function loadSaSettings() {
   tabs.forEach((t, i) => t.classList.toggle('active', i === 0));
 }
 
-function setSaPeriod(days, el) {
-  document.querySelectorAll('.period-tab').forEach(b=>b.classList.remove('active'));
-  el.classList.add('active');
-  _saStatsPeriod = days;
-  // Clear custom date inputs when using quick tabs
-  const dfrom = document.getElementById('sa-date-from');
-  const dto   = document.getElementById('sa-date-to');
-  if (dfrom) dfrom.value = '';
-  if (dto)   dto.value   = '';
-  loadSaStats();
-}
-
-function loadSaStatsCustom() {
-  // Deactivate period tabs when using custom range
-  document.querySelectorAll('.period-tab').forEach(b=>b.classList.remove('active'));
-  _saStatsPeriod = -1; // -1 = custom range
-  loadSaStats();
-}
-
 async function loadSaStats() {
-  // H-3: Use session-level cache for static data (venues list, client count).
-  // Only orders are queried per-period to avoid loading the full collection each time.
-  if (!_saVenuesCache)    _saVenuesCache = await dbGetAll('venues');
-  if (_saClientCount === null) {
-    const clients = await dbQuery('clients', 'agreed', '==', true);
-    _saClientCount = clients.length;
-  }
+  // H-3: Use session-level cache for venues list.
+  if (!_saVenuesCache) _saVenuesCache = await dbGetAll('venues');
   const venues = _saVenuesCache;
 
-  // Query only the orders that fall within the selected period.
-  let orders;
-  if (_saStatsPeriod === 0) {
-    // All-time: limit to 2000 to avoid excessive reads
-    orders = await dbGetAll('orders', 'createdAt', 'desc', 2000);
-  } else if (_saStatsPeriod === -1) {
-    // Custom date range
-    const dfrom = document.getElementById('sa-date-from')?.value;
-    const dto   = document.getElementById('sa-date-to')?.value;
-    if (dfrom || dto) {
-      const conditions = [];
-      if (dfrom) conditions.push(['createdAt', '>=', dfrom + 'T00:00:00.000Z']);
-      if (dto)   conditions.push(['createdAt', '<=', dto   + 'T23:59:59.999Z']);
-      orders = await dbQueryWhere('orders', conditions, 'createdAt', 'desc', 2000);
-    } else {
-      orders = [];
-    }
-  } else {
-    // Quick period (7/30/90 days): query only from cutoff onwards
-    // REQUIRES Firestore index: orders — createdAt ASC (single-field, auto-created)
-    const cutoff = new Date(Date.now() - _saStatsPeriod * 86400000).toISOString();
-    orders = await dbQueryWhere('orders', [['createdAt', '>=', cutoff]], 'createdAt', 'desc', 2000);
+  // Always use custom date range — both dates required
+  const dfrom = document.getElementById('sa-date-from')?.value;
+  const dto   = document.getElementById('sa-date-to')?.value;
+  if (!dfrom || !dto) {
+    document.getElementById('sa-stats-venues').innerHTML =
+      '<div class="empty" style="padding:30px 24px"><div class="empty-icon">📅</div><div class="empty-text">Выберите период</div></div>';
+    return;
   }
 
-  const revenue = orders.filter(o=>o.status==='delivered').reduce((s,o)=>s+(o.total||0),0);
-  const grid    = document.getElementById('sa-stats-grid');
-  grid.innerHTML = `
-    <div class="stat-card"><div class="stat-val">${venues.filter(v=>v.status==='approved').length}</div><div class="stat-lbl">Заведений</div></div>
-    <div class="stat-card"><div class="stat-val">${orders.filter(o=>o.status==='delivered').length}</div><div class="stat-lbl">Доставлено</div></div>
-    <div class="stat-card"><div class="stat-val">${_saClientCount}</div><div class="stat-lbl">Клиентов</div></div>
-    <div class="stat-card"><div class="stat-val text-primary">${fmtPrice(revenue)}</div><div class="stat-lbl">Оборот</div></div>`;
+  const conditions = [
+    ['createdAt', '>=', dfrom + 'T00:00:00.000Z'],
+    ['createdAt', '<=', dto   + 'T23:59:59.999Z']
+  ];
+  const orders = await dbQueryWhere('orders', conditions, 'createdAt', 'desc', 2000);
 
   const venueStats = venues.filter(v=>v.status==='approved').map(v => {
-    const vo  = orders.filter(o=>o.venueId===v.id);
-    const del = vo.filter(o=>o.status==='delivered');
-    const rev = del.reduce((s,o)=>s+(o.total||0),0);
-    return { id: v.id, name: v.name, orders: vo.length, delivered: del.length, revenue: rev };
-  }).sort((a,b)=>b.revenue-a.revenue);
+    const vo     = orders.filter(o=>o.venueId===v.id);
+    const del    = vo.filter(o=>o.status==='delivered');
+    const pickup = vo.filter(o=>o.status==='issued');
+    return { id: v.id, name: v.name, total: vo.length, delivered: del.length, pickup: pickup.length };
+  }).sort((a,b)=>b.delivered-a.delivered);
 
-  document.getElementById('sa-stats-venues').innerHTML = venueStats.filter(v=>v.orders>0).map(v=>`
+  document.getElementById('sa-stats-venues').innerHTML = venueStats.filter(v=>v.total>0).map(v=>`
     <div class="list-item" style="cursor:default">
       <div class="li-icon yellow">🏪</div>
-      <div class="li-body"><div class="li-title">${escHtml(v.name)}</div><div class="li-sub">${v.delivered} доставлено из ${v.orders}</div></div>
-      <div class="li-price">${fmtPrice(v.revenue)}</div>
+      <div class="li-body">
+        <div class="li-title">${escHtml(v.name)}</div>
+        <div class="li-sub">Доставлено: ${v.delivered}</div>
+        <div class="li-sub">Самовывоз: ${v.pickup}</div>
+      </div>
     </div>`).join('') || '<div class="empty" style="padding:30px 24px"><div class="empty-icon">📊</div><div class="empty-text">Нет данных за период</div></div>';
 }
 

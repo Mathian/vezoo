@@ -61,7 +61,6 @@
       <div class="logo-text"><span>Vezoo</span></div>
     </div>
     <div class="page-hdr-end" style="display:flex;align-items:center;gap:8px;flex:1;justify-content:flex-end;min-width:0;overflow:hidden">
-      <button class="btn-icon btn-ghost" onclick="toggleFavFilter()" id="fav-filter-btn" title="Избранное" style="flex-shrink:0">🤍</button>
     </div>
   </div>
   <div id="home-cat-tabs" class="cat-tabs" style="padding-top:12px"></div>
@@ -77,7 +76,6 @@
       <div class="venue-cover-overlay"></div>
     </div>
     <button class="back-btn" onclick="backToHome()" style="position:absolute;top:14px;left:16px;z-index:10">←</button>
-    <button class="venue-fav" id="venue-fav-btn" onclick="toggleCurrentVenueFav()" style="position:absolute;top:14px;right:16px;z-index:10">🤍</button>
   </div>
   <div class="content" style="padding-top:14px;gap:10px">
     <div class="flex justify-between items-center">
@@ -189,11 +187,6 @@
       <button class="btn btn-secondary btn-sm" onclick="saveAddress()">💾 Сохранить адрес</button>
     </div>
 
-    <!-- Favourites -->
-    <div class="section">
-      <div class="section-title">Избранные заведения</div>
-      <div id="favorites-list"></div>
-    </div>
   </div>
 </div>
 
