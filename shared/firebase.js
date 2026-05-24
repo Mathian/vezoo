@@ -598,6 +598,65 @@ function callPhone(phone) {
   window.location.href = 'tel:' + cleaned;
 }
 
+// ─────────────────────── PIN gate overlay ───────────────────────
+// Shows a temporary full-screen PIN pad. Calls onSuccess() if PIN matches `role`.
+// Used by recoverAccess() in admin and superadmin to confirm identity before reconnecting.
+function _requirePin(role, title, onSuccess) {
+  const existing = document.getElementById('_vez-pin-gate');
+  if (existing) existing.remove();
+  let buf = '';
+
+  const el = document.createElement('div');
+  el.id = '_vez-pin-gate';
+  el.style.cssText = 'position:fixed;inset:0;z-index:20000;display:flex;align-items:center;justify-content:center;background:rgba(0,0,0,.75)';
+  el.innerHTML = `
+    <div style="background:var(--card-bg,#1e1e2e);border-radius:20px;padding:28px 24px;width:290px;text-align:center">
+      <div style="font-size:15px;font-weight:700;margin-bottom:6px">${escHtml(title)}</div>
+      <div id="_pgmsg" style="font-size:12px;color:var(--text-dim,#888);margin-bottom:18px">Введите PIN-код</div>
+      <div style="display:flex;justify-content:center;gap:12px;margin-bottom:22px">
+        ${[0,1,2,3].map(i=>`<div id="_pgd${i}" style="width:14px;height:14px;border-radius:50%;border:2px solid var(--text-dim,#888);transition:background .15s"></div>`).join('')}
+      </div>
+      <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:8px;margin-bottom:14px">
+        ${[1,2,3,4,5,6,7,8,9,'',0,'⌫'].map(d=>`
+          <button onclick="window._pgIn('${d}')" style="background:rgba(255,255,255,.08);border:none;color:var(--text,#f0f0f5);border-radius:12px;padding:15px;font-size:19px;font-weight:600;cursor:pointer;${d===''?'pointer-events:none;opacity:0':''}">${d}</button>`).join('')}
+      </div>
+      <button onclick="document.getElementById('_vez-pin-gate')?.remove();delete window._pgIn"
+              style="width:100%;background:transparent;border:none;color:var(--text-dim,#888);padding:10px;font-size:14px;cursor:pointer">Отмена</button>
+    </div>`;
+  document.body.appendChild(el);
+
+  const dots = () => {
+    for (let i = 0; i < 4; i++) {
+      const d = document.getElementById('_pgd' + i);
+      if (d) d.style.background = i < buf.length ? 'var(--primary,#6c63ff)' : '';
+    }
+  };
+
+  window._pgIn = async digit => {
+    if (digit === '⌫') { buf = buf.slice(0, -1); dots(); return; }
+    if (digit === '' || buf.length >= 4) return;
+    buf += String(digit);
+    dots();
+    if (buf.length < 4) return;
+
+    const ok = await verifyPin(role, buf);
+    if (ok) {
+      document.getElementById('_vez-pin-gate')?.remove();
+      delete window._pgIn;
+      onSuccess();
+    } else {
+      tgHaptic('error');
+      const msg = document.getElementById('_pgmsg');
+      for (let i = 0; i < 4; i++) {
+        const d = document.getElementById('_pgd' + i);
+        if (d) d.style.background = 'var(--danger,#e74c3c)';
+      }
+      if (msg) msg.textContent = 'Неверный PIN. Попробуйте снова';
+      setTimeout(() => { buf = ''; dots(); if (msg) msg.textContent = 'Введите PIN-код'; }, 900);
+    }
+  };
+}
+
 // ─────────────────────── Order timeline ───────────────────────
 function renderOrderTimeline(order) {
   const _cancelBy = { client: 'клиентом', admin: 'администратором', operator: 'оператором' };

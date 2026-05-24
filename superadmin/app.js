@@ -87,7 +87,12 @@ function saveState() {
 }
 
 // ── Восстановление прав доступа ──
-async function recoverAccess() {
+// Требует ввод PIN перед повторной аутентификацией.
+function recoverAccess() {
+  _requirePin('superadmin', 'Восстановить доступ', _doRecoverAccess);
+}
+
+async function _doRecoverAccess() {
   const btn = document.getElementById('sa-recover-access-btn');
   if (btn) { btn.disabled = true; btn.textContent = '⏳ Восстановление...'; }
   const ok = await signInWithTelegramId(STATE.uid, 'sa');
@@ -183,10 +188,11 @@ async function changePinSa() {
 // ══════════════════════════════════════════════════════════
 function initMain() {
   document.getElementById('main-nav').style.display = 'flex';
-  loadCategories();
+  ALL_CATS = VENUE_CATEGORIES; // populate for venue form category dropdown
   loadPendingBadges();
-  showScreen('s-categories');
-  setNav(document.getElementById('nav-cats'));
+  showScreen('s-venues');
+  setNav(document.getElementById('nav-venues'));
+  loadAllVenues();
 }
 
 async function loadPendingBadges() {

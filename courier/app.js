@@ -760,17 +760,21 @@ function renderMyOrders() {
     html = '<div class="empty" style="padding-top:40px"><div class="empty-icon">📦</div><div class="empty-text">Нет активных доставок</div></div>';
   }
 
-  // History section — только последние 24 часа (из localStorage, без Firebase-запроса)
+  // History section — заказы за вчера и сегодня (по локальной дате)
   if (_myHistory.length) {
-    const cutoff = Date.now() - 24 * 60 * 60 * 1000;
+    const _ld = d => d.getFullYear() + '-' + String(d.getMonth()+1).padStart(2,'0') + '-' + String(d.getDate()).padStart(2,'0');
+    const today     = _ld(new Date());
+    const yesterday = _ld(new Date(Date.now() - 86400000));
     const recentHistory = _myHistory.filter(o => {
       const ts = o.deliveredAt || o.createdAt;
-      return ts && new Date(ts).getTime() >= cutoff;
+      if (!ts) return false;
+      const d = _ld(new Date(ts));
+      return d === today || d === yesterday;
     });
     if (recentHistory.length) {
       const dayEarnings = recentHistory.reduce((s,o)=>s+(o.deliveryPrice||0),0);
       html += `<div class="section-title" style="padding:4px 4px 4px;margin-top:8px">
-        За 24 часа (${recentHistory.length}) · <span class="text-primary font-bold">${fmtPrice(dayEarnings)}</span>
+        История (${recentHistory.length}) · <span class="text-primary font-bold">${fmtPrice(dayEarnings)}</span>
       </div>`;
       html += recentHistory.map(o => `
         <div class="delivery-card" style="opacity:.85">

@@ -237,8 +237,12 @@ async function changeAdminPin() {
 }
 
 // ── Восстановление прав доступа ──
-// Повторно выполняет email-аутентификацию и перезагружает страницу.
-async function recoverAccess() {
+// Требует ввод PIN перед повторной аутентификацией.
+function recoverAccess() {
+  _requirePin('admin', 'Восстановить доступ', _doRecoverAccess);
+}
+
+async function _doRecoverAccess() {
   const btn = document.getElementById('recover-access-btn');
   if (btn) { btn.disabled = true; btn.textContent = '⏳ Восстановление...'; }
   const ok = await signInWithTelegramId(STATE.uid, 'admin');
@@ -1081,14 +1085,12 @@ async function loadStats() {
   const todayOnline    = todayOrd.filter(o=>!o.isManual);
   const todayDelivered = todayOrd.filter(o=>o.status==='delivered'||o.status==='issued');
   const todayCancelled = todayOrd.filter(o=>o.status==='cancelled');
-  const todayReturns   = todayOrd.filter(o=>o.returnAt);
   const todayDelSum    = todayDelivered.reduce((s,o)=>s+(o.total||0)+(o.deliveryPrice||0),0);
   document.getElementById('stats-today-grid').innerHTML=`
     <div class="stat-card"><div class="stat-val">${todayOnline.length}</div><div class="stat-lbl">Заказы</div></div>
     <div class="stat-card"><div class="stat-val text-success">${todayDelivered.length}</div><div class="stat-lbl">Доставлено</div></div>
     <div class="stat-card"><div class="stat-val text-danger">${todayCancelled.length}</div><div class="stat-lbl">Отменено</div></div>
-    <div class="stat-card"><div class="stat-val text-warning">${todayReturns.length}</div><div class="stat-lbl">Возвраты</div></div>
-    <div class="stat-card" style="grid-column:span 2"><div class="stat-val text-primary">${fmtPrice(todayDelSum)}</div><div class="stat-lbl">Сумма доставок</div></div>`;
+    <div class="stat-card" style="grid-column:span 3"><div class="stat-val text-primary">${fmtPrice(todayDelSum)}</div><div class="stat-lbl">Сумма доставок</div></div>`;
 
 }
 
