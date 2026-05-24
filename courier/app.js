@@ -706,7 +706,8 @@ function watchMyOrders() {
       snap.docChanges().forEach(change => {
         if (change.type === 'removed') {
           const finished = { id: change.doc.id, ...change.doc.data() };
-          if (finished.status === 'delivered') {
+          // Use deliveredAt as the reliable indicator — status may be stale in Firestore cache
+          if (finished.deliveredAt) {
             const existingIds = new Set(_myHistory.map(o => o.id));
             if (!existingIds.has(finished.id)) {
               _myHistory = [finished, ..._myHistory]
@@ -854,13 +855,14 @@ async function openMyOrder(orderId) {
 async function courierDeliver(orderId) {
   const doDeliver = async () => {
     const deliveredAt = new Date().toISOString();
+    // Capture BEFORE await — onSnapshot may clear _myOrders before we resume
+    const finished = _myOrders.find(o => o.id === orderId);
     await dbSet('orders', orderId, {
-      status: 'delivered', active: false,       // Дыра №5
+      status: 'delivered', active: false,
       deliveredAt,
       clientNotification: { type: 'delivered', seen: false }
     });
     // Optimistic local update — remove from _myOrders immediately, don't wait for onSnapshot
-    const finished = _myOrders.find(o => o.id === orderId);
     _myOrders = _myOrders.filter(o => o.id !== orderId);
     if (finished) {
       const deliveredEntry = { ...finished, status: 'delivered', active: false, deliveredAt };
