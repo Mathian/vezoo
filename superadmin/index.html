@@ -137,6 +137,15 @@
       <div id="sa-users-list" style="display:flex;flex-direction:column;gap:8px"></div>
     </div>
 
+    <!-- Order cleanup -->
+    <div class="section-title">Очистка заказов</div>
+    <div class="card card-body" style="display:flex;flex-direction:column;gap:12px">
+      <div style="font-size:12px;color:var(--text-dim);line-height:1.5">Удалить заказы, созданные <b>до</b> выбранной даты (включительно). Заказы от этой даты и новее останутся нетронутыми.</div>
+      <div class="field"><label>Удалить заказы до даты</label><input class="inp" type="date" id="sa-clear-orders-date" style="padding:8px 12px;font-size:14px"></div>
+      <button class="btn btn-outline btn-sm" style="border-color:var(--danger);color:var(--danger)" onclick="clearOrdersBefore()">🗑 Очистить заказы</button>
+      <div id="sa-clear-orders-result" style="font-size:12px;color:var(--text-dim);display:none"></div>
+    </div>
+
     <!-- Access recovery -->
     <div class="section">
       <div class="section-title">Доступ</div>

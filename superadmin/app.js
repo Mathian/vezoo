@@ -86,6 +86,74 @@ function saveState() {
   try { localStorage.setItem('vez_sa_state', JSON.stringify({ tgId: STATE.uid, user: STATE.user })); } catch {}
 }
 
+// ══════════════════════════════════════════════════════════
+//  ORDER CLEANUP
+// ══════════════════════════════════════════════════════════
+
+// Удаляет заказы с createdAt < cutoffDate (по индексу — без чтения всей коллекции).
+// Firestore использует индекс по createdAt, поэтому запрос возвращает только
+// нужные документы напрямую, без перебора всего архива.
+async function clearOrdersBefore() {
+  const dateVal = document.getElementById('sa-clear-orders-date')?.value;
+  if (!dateVal) { showToast('Выберите дату', 'warning'); return; }
+
+  // cutoff: всё до конца выбранного дня (включительно)
+  const cutoffISO = dateVal + 'T23:59:59.999Z';
+
+  const confirmed = await new Promise(resolve => {
+    if (tg?.showConfirm) {
+      tg.showConfirm(
+        `Удалить все заказы до ${dateVal} включительно?\nЭто действие необратимо.`,
+        ok => resolve(ok)
+      );
+    } else {
+      resolve(confirm(`Удалить все заказы до ${dateVal} включительно?\nЭто действие необратимо.`));
+    }
+  });
+  if (!confirmed) return;
+
+  const btn    = document.querySelector('[onclick="clearOrdersBefore()"]');
+  const result = document.getElementById('sa-clear-orders-result');
+  if (btn)    { btn.disabled = true; btn.textContent = '⏳ Удаление...'; }
+  if (result) { result.style.display = 'block'; result.textContent = 'Идёт удаление...'; }
+
+  try {
+    let totalDeleted = 0;
+
+    while (true) {
+      // Индексированный запрос — Firestore читает только нужные документы
+      const snap = await db.collection('orders')
+        .where('createdAt', '<', cutoffISO)
+        .limit(500)
+        .get();
+
+      if (snap.empty) break;
+
+      // Пакетное удаление (до 500 за раз — лимит Firestore)
+      const batch = db.batch();
+      snap.docs.forEach(doc => batch.delete(doc.ref));
+      await batch.commit();
+
+      totalDeleted += snap.docs.length;
+      if (result) result.textContent = `Удалено: ${totalDeleted}...`;
+
+      // Если вернулось меньше 500 — это последняя страница
+      if (snap.docs.length < 500) break;
+    }
+
+    tgHaptic('success');
+    const msg = `✅ Удалено заказов: ${totalDeleted}`;
+    if (result) result.textContent = msg;
+    showToast(msg, 'success');
+  } catch (e) {
+    const msg = '❌ Ошибка: ' + (e.message || e);
+    if (result) result.textContent = msg;
+    showToast(msg, 'error', 6000);
+  } finally {
+    if (btn) { btn.disabled = false; btn.textContent = '🗑 Очистить заказы'; }
+  }
+}
+
 // ── Восстановление прав доступа ──
 // Требует ввод PIN перед повторной аутентификацией.
 function recoverAccess() {
