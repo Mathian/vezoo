@@ -514,7 +514,7 @@ async function acceptOrder(orderId) {
     _shownAssigned.add(orderId);
     closeAcceptSheet();
     tgHaptic('success');
-    showToast('Заказ принят! Едете в кафе.', 'success');
+    showToast('Заказ принят! Направляйтесь в кафе.', 'success');
     navToMyOrders();
   } catch (e) {
     if (e.code === 'taken') {
@@ -630,7 +630,7 @@ async function acceptBundleOrders() {
     ids.forEach(id => _shownAssigned.add(id));
     closeAcceptSheet();
     tgHaptic('success');
-    showToast(`Принято ${ids.length} заказ(а)! Едете в кафе.`, 'success');
+    showToast(`Принято ${ids.length} заказ(а)! Направляйтесь в кафе.`, 'success');
     navToMyOrders();
   } catch (e) {
     if (e.code === 'taken') {
@@ -840,7 +840,7 @@ async function openMyOrder(orderId) {
 
     ${order.status === 'courier_assigned'
       ? `<div class="alert-box info" style="text-align:center;font-size:14px;margin-bottom:12px">
-           🏃 Едете в кафе за заказом.<br>
+           🏃 Направляйтесь в кафе за заказом.<br>
            <span style="font-size:12px;color:var(--text-dim)">Оператор передаст заказ и подтвердит выдачу</span>
          </div>`
       : `<div class="btn-row" style="margin-top:24px">
