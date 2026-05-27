@@ -188,7 +188,8 @@ function _requestContactAndRegister() {
         createdAt: new Date().toISOString()
       };
 
-      await dbSet('clients', STATE.uid, newUser);
+      const ok = await dbSet('clients', STATE.uid, newUser);
+      if (!ok) { showToast('Ошибка сохранения аккаунта. Проверьте подключение.', 'error', 6000); showScreen('s-no-account'); return; }
       STATE.user = newUser;
       _saveClientState();
 

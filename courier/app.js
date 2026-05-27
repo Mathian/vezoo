@@ -165,7 +165,8 @@ function _requestContactAndRegister() {
         status: 'pending', agreed: false, totalDeliveries: 0,
         createdAt: new Date().toISOString()
       };
-      await dbSet('drivers', STATE.uid, newUser);
+      const ok = await dbSet('drivers', STATE.uid, newUser);
+      if (!ok) { showToast('Ошибка сохранения аккаунта. Проверьте подключение.', 'error', 6000); showScreen('s-no-account'); return; }
       STATE.user = newUser; _saveState();
       document.getElementById('s-agree').style.display = 'flex';
     } catch (err) {

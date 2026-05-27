@@ -132,7 +132,8 @@ function _requestContactAndRegister() {
       const lastName  = tgUser?.last_name  || '';
       const name      = [firstName, lastName].filter(Boolean).join(' ').trim() || firstName || 'Администратор';
       const newUser   = { phone, tgId: String(STATE.uid), firstName, name, agreed: false, createdAt: new Date().toISOString() };
-      await dbSet('admins', STATE.uid, newUser);
+      const ok = await dbSet('admins', STATE.uid, newUser);
+      if (!ok) { showToast('Ошибка сохранения аккаунта. Проверьте подключение.', 'error', 6000); showScreen('s-no-account'); return; }
       STATE.user = newUser; saveState();
       showAgreement();
     } catch (err) {
