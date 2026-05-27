@@ -65,19 +65,29 @@ window.addEventListener('DOMContentLoaded', async () => {
   if (!existing) {
     if (_fbR) {
       try { localStorage.removeItem('vez_admin_state'); } catch {}
+      _requestContactAndRegister();
+    } else {
+      const sub = document.getElementById('no-account-sub');
+      if (sub) sub.innerHTML = 'Нет соединения.<br>Проверьте интернет и попробуйте снова.';
+      const btn = document.getElementById('no-account-btn');
+      if (btn) btn.style.display = 'none';
+      showScreen('s-no-account');
     }
-    showScreen('s-no-account');
     return;
   }
   if (existing.blocked) { showScreen('s-blocked'); return; }
+
+  // Q2 fix: set STATE.user before conditional returns so phone is available in submitAgree()
+  STATE.user = existing; saveState();
+
   if (!existing.agreed) { showAgreement(); return; }
 
   if (!existing.name) {
     const autoName = _getTgName() || 'Администратор';
     await dbSet('admins', tgId, { name: autoName });
     existing.name = autoName;
+    STATE.user = existing; saveState();
   }
-  STATE.user = existing; saveState();
   // SA-triggered per-user cache reset
   if (existing.resetCache === true && !sessionStorage.getItem('_vez_reset_done')) {
     sessionStorage.setItem('_vez_reset_done', '1');
@@ -98,6 +108,42 @@ function saveState() {
   try { localStorage.setItem('vez_admin_state', JSON.stringify({ tgId: STATE.uid, user: STATE.user })); } catch {}
 }
 
+function _requestContactAndRegister() {
+  if (!tg?.requestContact) {
+    const sub = document.getElementById('no-account-sub');
+    if (sub) sub.innerHTML = 'Обновите Telegram до последней версии<br>для автоматической регистрации.';
+    showScreen('s-no-account');
+    return;
+  }
+  tg.requestContact(async response => {
+    if (response.status !== 'sent' || !response.contact) {
+      showScreen('s-no-account');
+      return;
+    }
+    try {
+      const raw       = String(response.contact.phone_number).replace(/\D/g, '');
+      const phone     = '+' + (raw.startsWith('8') && raw.length === 11 ? '7' + raw.slice(1) : raw);
+      const tgUser    = tg?.initDataUnsafe?.user;
+      const firstName = tgUser?.first_name || response.contact.first_name || '';
+      const lastName  = tgUser?.last_name  || '';
+      const name      = [firstName, lastName].filter(Boolean).join(' ').trim() || firstName || 'Администратор';
+      const newUser   = { phone, tgId: String(STATE.uid), firstName, name, agreed: false, createdAt: new Date().toISOString() };
+      await dbSet('admins', STATE.uid, newUser);
+      STATE.user = newUser; saveState();
+      showAgreement();
+    } catch (err) {
+      showToast('Ошибка регистрации: ' + (err.message || err), 'error', 6000);
+      showScreen('s-no-account');
+    }
+  });
+}
+
+function retryRequestContact() {
+  document.getElementById('s-no-account').classList.remove('active');
+  document.getElementById('s-splash').classList.add('active');
+  _requestContactAndRegister();
+}
+
 // ══════════════════════════════════════════════════════════
 //  AGREEMENT
 // ══════════════════════════════════════════════════════════
@@ -109,8 +155,7 @@ function showAgreement() {
 async function submitAgree() {
   const btn = document.getElementById('agree-btn');
   if (btn) { btn.disabled = true; btn.classList.add('btn-loading'); }
-  // Bot already created the admins doc — just mark agreed and set name
-  const existingDoc = await dbGet('admins', STATE.uid) || {};
+  const existingDoc = STATE.user || {};
   const autoName = _getTgName() || existingDoc.firstName || existingDoc.name || 'Администратор';
   const patch = { agreed: true, name: autoName, _upd: new Date().toISOString() };
   await dbSet('admins', STATE.uid, patch);

@@ -93,18 +93,25 @@ window.addEventListener('DOMContentLoaded', async () => {
     if (_fbR) {
       try { localStorage.removeItem('vez_courier_state'); } catch {}
       try { localStorage.removeItem(_histKey()); } catch {}
+      _requestContactAndRegister();
+    } else {
+      const sub = document.getElementById('no-account-sub');
+      if (sub) sub.innerHTML = 'Нет соединения.<br>Проверьте интернет и попробуйте снова.';
+      const btn = document.getElementById('no-account-btn');
+      if (btn) btn.style.display = 'none';
+      showScreen('s-no-account');
     }
-    showScreen('s-no-account');
     return;
   }
   if (existing.blocked || existing.status === 'blocked') { showScreen('s-blocked'); return; }
+
+  // Q2 fix: всегда устанавливаем STATE.user до условных возвратов
+  STATE.user = existing; _saveState();
 
   if (!existing.agreed) {
     document.getElementById('s-agree').style.display = 'flex';
     return;
   }
-
-  STATE.user = existing; _saveState();
   // SA-triggered per-user cache reset
   if (existing.resetCache === true && !sessionStorage.getItem('_vez_reset_done')) {
     sessionStorage.setItem('_vez_reset_done', '1');
@@ -123,6 +130,51 @@ function _getTgName() {
 
 function _saveState() {
   try { localStorage.setItem('vez_courier_state', JSON.stringify({ tgId: STATE.uid, user: STATE.user })); } catch {}
+}
+
+// ══════════════════════════════════════════════════════════
+//  REGISTRATION VIA MINIAPP (tg.requestContact)
+// ══════════════════════════════════════════════════════════
+function _requestContactAndRegister() {
+  if (!tg?.requestContact) {
+    const sub = document.getElementById('no-account-sub');
+    if (sub) sub.innerHTML = 'Обновите Telegram до последней версии<br>для автоматической регистрации.';
+    showScreen('s-no-account');
+    return;
+  }
+
+  tg.requestContact(async response => {
+    if (response.status !== 'sent' || !response.contact) {
+      showScreen('s-no-account');
+      return;
+    }
+    try {
+      const raw       = String(response.contact.phone_number).replace(/\D/g, '');
+      const phone     = '+' + (raw.startsWith('8') && raw.length === 11 ? '7' + raw.slice(1) : raw);
+      const tgUser    = tg?.initDataUnsafe?.user;
+      const firstName = tgUser?.first_name || response.contact.first_name || '';
+      const lastName  = tgUser?.last_name  || '';
+      const name      = [firstName, lastName].filter(Boolean).join(' ').trim() || firstName || 'Курьер';
+
+      const newUser = {
+        phone, tgId: String(STATE.uid), firstName, name,
+        status: 'pending', agreed: false, totalDeliveries: 0,
+        createdAt: new Date().toISOString()
+      };
+      await dbSet('drivers', STATE.uid, newUser);
+      STATE.user = newUser; _saveState();
+      document.getElementById('s-agree').style.display = 'flex';
+    } catch (err) {
+      showToast('Ошибка регистрации: ' + (err.message || err), 'error', 6000);
+      showScreen('s-no-account');
+    }
+  });
+}
+
+function retryRequestContact() {
+  document.getElementById('s-no-account').classList.remove('active');
+  document.getElementById('s-splash').classList.add('active');
+  _requestContactAndRegister();
 }
 
 // ── Agreement ──

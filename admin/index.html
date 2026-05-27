@@ -24,7 +24,14 @@
 <!-- ERROR SCREENS -->
 <div id="s-blocked" class="screen no-nav"><div class="splash"><div class="splash-logo">🚫</div><div class="splash-title">Доступ закрыт</div><div class="splash-sub">Аккаунт заблокирован.</div></div></div>
 <div id="s-no-uid" class="screen no-nav"><div class="splash"><div class="splash-logo">🤖</div><div class="splash-title">Нужен бот</div><div class="splash-sub">Откройте через Telegram-бот администратора Vezoo.</div></div></div>
-<div id="s-no-account" class="screen no-nav"><div class="splash"><div class="splash-logo">❌</div><div class="splash-title">Аккаунт не найден</div><div class="splash-sub">Аккаунт администратора не существует.<br>Зарегистрируйтесь через бота Vezoo.</div></div></div>
+<div id="s-no-account" class="screen no-nav">
+  <div class="splash">
+    <div class="splash-logo">📱</div>
+    <div class="splash-title">Нужен телефон</div>
+    <div class="splash-sub" id="no-account-sub">Для регистрации необходимо<br>поделиться номером телефона.</div>
+    <button class="btn btn-primary" id="no-account-btn" style="margin-top:24px;min-width:220px" onclick="retryRequestContact()">📱 Поделиться номером</button>
+  </div>
+</div>
 
 <!-- AGREEMENT -->
 <div id="s-agree" class="agree-screen" style="display:none">

@@ -86,16 +86,28 @@ window.addEventListener('DOMContentLoaded', async () => {
 
   const existing = await dbGet('clients', tgId);
   if (!existing) {
-    // Online и документа нет — очищаем устаревший кэш, чтобы не было автовхода при перезапуске
     if (_fbR) {
+      // New user — register directly from MiniApp via tg.requestContact()
       try { localStorage.removeItem('vez_client_state'); } catch {}
       try { localStorage.removeItem('vez_client_orders_' + tgId); } catch {}
       try { localStorage.removeItem('vez_cart'); } catch {}
+      _requestContactAndRegister();
+    } else {
+      // Offline + no local record — can't proceed
+      const sub = document.getElementById('no-account-sub');
+      if (sub) sub.innerHTML = 'Нет соединения.<br>Проверьте интернет и попробуйте снова.';
+      const btn = document.getElementById('no-account-btn');
+      if (btn) btn.style.display = 'none';
+      showScreen('s-no-account');
     }
-    showScreen('s-no-account');
     return;
   }
+
   if (existing.blocked) { showScreen('s-blocked'); return; }
+
+  // ── Всегда устанавливаем STATE.user сразу — чтобы телефон был доступен
+  //    в submitAgree() и в профиле уже при первом открытии (Q2 fix)
+  STATE.user = existing; _saveClientState();
 
   if (!existing.agreed) {
     document.getElementById('s-agree').style.display = 'flex';
@@ -106,8 +118,9 @@ window.addEventListener('DOMContentLoaded', async () => {
     const autoName = _getTgName() || existing.firstName || 'Пользователь';
     await dbSet('clients', tgId, { name: autoName });
     existing.name = autoName;
+    STATE.user = existing; _saveClientState();
   }
-  STATE.user = existing; _saveClientState();
+
   // SA-triggered per-user cache reset
   if (existing.resetCache === true && !sessionStorage.getItem('_vez_reset_done')) {
     sessionStorage.setItem('_vez_reset_done', '1');
@@ -128,6 +141,70 @@ function _saveClientState() {
   try { localStorage.setItem('vez_client_state', JSON.stringify({ tgId: STATE.uid, user: STATE.user })); } catch {}
 }
 function _saveCart()      { try { localStorage.setItem('vez_cart', JSON.stringify(CART)); } catch {} }
+
+// ══════════════════════════════════════════════════════════
+//  REGISTRATION VIA MINIAPP (tg.requestContact)
+// ══════════════════════════════════════════════════════════
+
+// Запрашивает номер телефона через нативный Telegram-диалог.
+// Telegram гарантирует, что это номер самого пользователя — нельзя отправить чужой.
+// Доступно с Bot API 7.2 (большинство Telegram-клиентов поддерживают).
+function _requestContactAndRegister() {
+  if (!tg?.requestContact) {
+    // Старая версия Telegram — показываем экран с просьбой обновить
+    const sub = document.getElementById('no-account-sub');
+    if (sub) sub.innerHTML = 'Обновите Telegram до последней версии<br>для автоматической регистрации.';
+    showScreen('s-no-account');
+    return;
+  }
+
+  // Держим сплэш пока идёт запрос
+  tg.requestContact(async response => {
+    if (response.status !== 'sent' || !response.contact) {
+      // Пользователь нажал «Отмена»
+      showScreen('s-no-account');
+      return;
+    }
+
+    try {
+      // Нормализация номера (+7 для 8-ки, иначе +X как есть)
+      const raw   = String(response.contact.phone_number).replace(/\D/g, '');
+      const phone = '+' + (raw.startsWith('8') && raw.length === 11 ? '7' + raw.slice(1) : raw);
+
+      const tgUser    = tg?.initDataUnsafe?.user;
+      const firstName = tgUser?.first_name || response.contact.first_name || '';
+      const lastName  = tgUser?.last_name  || '';
+      const name      = [firstName, lastName].filter(Boolean).join(' ').trim() || firstName || 'Пользователь';
+
+      const newUser = {
+        phone,
+        tgId:      String(STATE.uid),
+        firstName,
+        name,
+        agreed:    false,
+        createdAt: new Date().toISOString()
+      };
+
+      await dbSet('clients', STATE.uid, newUser);
+      STATE.user = newUser;
+      _saveClientState();
+
+      // Показываем соглашение
+      document.getElementById('s-agree').style.display = 'flex';
+    } catch (err) {
+      showToast('Ошибка регистрации: ' + (err.message || err), 'error', 6000);
+      showScreen('s-no-account');
+    }
+  });
+}
+
+// Кнопка «Поделиться номером» на экране s-no-account
+function retryRequestContact() {
+  // Возвращаем сплэш и повторяем запрос
+  document.getElementById('s-no-account').classList.remove('active');
+  document.getElementById('s-splash').classList.add('active');
+  _requestContactAndRegister();
+}
 
 // ── Agreement ──
 async function submitAgree() {
