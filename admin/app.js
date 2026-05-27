@@ -115,22 +115,20 @@ function _requestContactAndRegister() {
     showScreen('s-no-account');
     return;
   }
-  // Telegram передаёт (isSent: boolean, event: ContactRequestedEvent) — два аргумента.
-  tg.requestContact(async (isSentOrEvent, eventObj) => {
-    let contact = null;
-    if (typeof isSentOrEvent === 'boolean') {
-      if (!isSentOrEvent) { showScreen('s-no-account'); return; }
-      contact = eventObj?.contact ?? null;
-    } else {
-      if (isSentOrEvent?.status !== 'sent') { showScreen('s-no-account'); return; }
-      contact = isSentOrEvent?.contact ?? null;
-    }
-    if (!contact?.phone_number) { showScreen('s-no-account'); return; }
+  // callback(isSent: boolean, event: { status, responseUnsafe: { phone_number, first_name, ... } })
+  tg.requestContact(async (isSent, event) => {
+    if (!isSent) { showScreen('s-no-account'); return; }
+
+    const rd           = event?.responseUnsafe || {};
+    const phone_number = rd.phone_number || rd.contact?.phone_number || '';
+    const ev_firstName = rd.first_name   || rd.contact?.first_name   || '';
+
+    if (!phone_number) { showScreen('s-no-account'); return; }
     try {
-      const raw       = String(contact.phone_number).replace(/\D/g, '');
+      const raw       = String(phone_number).replace(/\D/g, '');
       const phone     = '+' + (raw.startsWith('8') && raw.length === 11 ? '7' + raw.slice(1) : raw);
       const tgUser    = tg?.initDataUnsafe?.user;
-      const firstName = tgUser?.first_name || contact.first_name || '';
+      const firstName = tgUser?.first_name || ev_firstName || '';
       const lastName  = tgUser?.last_name  || '';
       const name      = [firstName, lastName].filter(Boolean).join(' ').trim() || firstName || 'Администратор';
       const newUser   = { phone, tgId: String(STATE.uid), firstName, name, agreed: false, createdAt: new Date().toISOString() };

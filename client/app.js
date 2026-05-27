@@ -158,26 +158,24 @@ function _requestContactAndRegister() {
     return;
   }
 
-  // Telegram передаёт (isSent: boolean, event: ContactRequestedEvent) — два аргумента.
-  // Для совместимости со старыми клиентами обрабатываем оба варианта.
-  tg.requestContact(async (isSentOrEvent, eventObj) => {
-    let contact = null;
-    if (typeof isSentOrEvent === 'boolean') {
-      if (!isSentOrEvent) { showScreen('s-no-account'); return; }
-      contact = eventObj?.contact ?? null;
-    } else {
-      // Старый клиент: первый аргумент — объект события
-      if (isSentOrEvent?.status !== 'sent') { showScreen('s-no-account'); return; }
-      contact = isSentOrEvent?.contact ?? null;
-    }
-    if (!contact?.phone_number) { showScreen('s-no-account'); return; }
+  // callback(isSent: boolean, event: { status, responseUnsafe: { phone_number, first_name, ... } })
+  // Телефон находится в event.responseUnsafe, НЕ в event.contact
+  tg.requestContact(async (isSent, event) => {
+    if (!isSent) { showScreen('s-no-account'); return; }
+
+    // responseUnsafe — плоский объект с данными контакта
+    const rd           = event?.responseUnsafe || {};
+    const phone_number = rd.phone_number || rd.contact?.phone_number || '';
+    const ev_firstName = rd.first_name   || rd.contact?.first_name   || '';
+
+    if (!phone_number) { showScreen('s-no-account'); return; }
 
     try {
-      const raw   = String(contact.phone_number).replace(/\D/g, '');
+      const raw   = String(phone_number).replace(/\D/g, '');
       const phone = '+' + (raw.startsWith('8') && raw.length === 11 ? '7' + raw.slice(1) : raw);
 
       const tgUser    = tg?.initDataUnsafe?.user;
-      const firstName = tgUser?.first_name || contact.first_name || '';
+      const firstName = tgUser?.first_name || ev_firstName || '';
       const lastName  = tgUser?.last_name  || '';
       const name      = [firstName, lastName].filter(Boolean).join(' ').trim() || firstName || 'Пользователь';
 
