@@ -836,7 +836,8 @@ async function adminCancelOrder(orderId) {
 }
 
 async function adminSearchCourier(orderId) {
-  const patch={status:'searching_courier',courierUid:null,courierName:null,courierBotNotified:false,searchStartedAt:new Date().toISOString()};
+  const patch={status:'searching_courier',courierUid:null,courierName:null,courierBotNotified:false,
+               courierNotifyId:Date.now().toString(36),searchStartedAt:new Date().toISOString()};
   const ok = await dbSet('orders',orderId,patch);
   if (!ok) { showToast('Ошибка: нет прав или нет сети.','error'); return; }
   _patchAllOrders(orderId,patch);
@@ -845,7 +846,8 @@ async function adminSearchCourier(orderId) {
 
 async function adminRevertToVenueCouriers(orderId) {
   // Возврат из общего пула обратно к своим курьерам заведения
-  const patch = { status:'ready_for_courier', courierUid:null, courierName:null, courierBotNotified:false, readyForCourierAt:new Date().toISOString() };
+  const patch = { status:'ready_for_courier', courierUid:null, courierName:null, courierBotNotified:false,
+                  courierNotifyId:Date.now().toString(36), readyForCourierAt:new Date().toISOString() };
   const ok = await dbSet('orders', orderId, patch);
   if (!ok) { showToast('Ошибка: нет прав или нет сети.', 'error'); return; }
   _patchAllOrders(orderId, patch);
@@ -865,7 +867,8 @@ async function adminHandOverCourier(orderId) {
 async function adminMarkReadyForCourier(orderId) {
   // courierUid:null — явно сбрасываем, чтобы правило курьера (courierUid==null) в Rules сработало
   const patch={ status:'ready_for_courier', readyForCourierAt:new Date().toISOString(),
-                courierUid:null, courierName:null, courierBotNotified:false };
+                courierUid:null, courierName:null, courierBotNotified:false,
+                courierNotifyId:Date.now().toString(36) };
   const ok = await dbSet('orders',orderId,patch);
   if (!ok) { showToast('Ошибка: нет прав или нет сети.','error'); return; }
   _patchAllOrders(orderId,patch);
