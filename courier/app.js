@@ -143,16 +143,22 @@ function _requestContactAndRegister() {
     return;
   }
 
-  tg.requestContact(async response => {
-    if (response.status !== 'sent' || !response.contact) {
-      showScreen('s-no-account');
-      return;
+  // Telegram передаёт (isSent: boolean, event: ContactRequestedEvent) — два аргумента.
+  tg.requestContact(async (isSentOrEvent, eventObj) => {
+    let contact = null;
+    if (typeof isSentOrEvent === 'boolean') {
+      if (!isSentOrEvent) { showScreen('s-no-account'); return; }
+      contact = eventObj?.contact ?? null;
+    } else {
+      if (isSentOrEvent?.status !== 'sent') { showScreen('s-no-account'); return; }
+      contact = isSentOrEvent?.contact ?? null;
     }
+    if (!contact?.phone_number) { showScreen('s-no-account'); return; }
     try {
-      const raw       = String(response.contact.phone_number).replace(/\D/g, '');
+      const raw       = String(contact.phone_number).replace(/\D/g, '');
       const phone     = '+' + (raw.startsWith('8') && raw.length === 11 ? '7' + raw.slice(1) : raw);
       const tgUser    = tg?.initDataUnsafe?.user;
-      const firstName = tgUser?.first_name || response.contact.first_name || '';
+      const firstName = tgUser?.first_name || contact.first_name || '';
       const lastName  = tgUser?.last_name  || '';
       const name      = [firstName, lastName].filter(Boolean).join(' ').trim() || firstName || 'Курьер';
 
