@@ -846,6 +846,9 @@ function _toggleKaspiPhoneField() {
     const ph = document.getElementById('kaspi-phone-inp');
     if (ph && !ph.value && STATE.user?.phone) ph.value = STATE.user.phone;
   }
+  // Плашка "Сдача" — только при наличных
+  const hint = document.getElementById('cash-change-hint');
+  if (hint) hint.style.display = _paymentMethod === 'cash' ? 'inline-flex' : 'none';
 }
 
 // ── Submit order ──
