@@ -852,8 +852,11 @@ function renderMyOrders() {
         const priceColor = o.cancelledDuringDelivery ? '#d4920a'
           : o.cancelledAt ? 'var(--danger)'
           : 'var(--success)';
-        const cancelBadge = o.cancelledAt
-          ? ` · <span style="color:var(--danger);font-size:10px;font-weight:700">отменён</span>` : '';
+        const cancelBadge = o.cancelledDuringDelivery
+          ? ` · <span style="color:#d4920a;font-size:10px;font-weight:700">возврат</span>`
+          : o.cancelledAt
+          ? ` · <span style="color:var(--danger);font-size:10px;font-weight:700">отменён</span>`
+          : '';
         return `
         <div class="delivery-card" style="opacity:.85">
           <div class="delivery-card-hdr">
