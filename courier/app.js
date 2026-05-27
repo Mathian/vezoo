@@ -234,14 +234,17 @@ async function _ensureDeliveryHistory() {
       [['courierUid', '==', STATE.uid], ['active', '==', false]],
       null, 'desc', 50
     );
-    const delivered = recent.filter(o => o.status === 'delivered');
+    const delivered = recent.filter(o =>
+      o.status === 'delivered' ||
+      (o.status === 'cancelled' && (o.cancelledDuringDelivery || o.cancelledWhileAssigned))
+    );
     if (!delivered.length) return;
     const existing = _loadHistoryFromStorage();
     const byId = {};
     for (const o of existing) byId[o.id] = o;
     let changed = false;
     for (const fresh of delivered) {
-      // Add new deliveries OR update stale entries (e.g. cached as 'delivering')
+      // Add new entries OR update stale (e.g. cached as 'delivering')
       if (!byId[fresh.id] || byId[fresh.id].status !== fresh.status) {
         byId[fresh.id] = fresh;
         changed = true;
@@ -249,7 +252,7 @@ async function _ensureDeliveryHistory() {
     }
     if (changed) {
       const merged = Object.values(byId)
-        .sort((a, b) => (b.deliveredAt || b.createdAt || '').localeCompare(a.deliveredAt || a.createdAt || ''));
+        .sort((a, b) => (b.cancelledAt || b.deliveredAt || b.createdAt || '').localeCompare(a.cancelledAt || a.deliveredAt || a.createdAt || ''));
       _saveHistoryToStorage(merged);
     }
   } catch (e) { console.warn('[boot] ensureDeliveryHistory:', e.message); }
@@ -759,16 +762,22 @@ function watchMyOrders() {
     .where('courierUid', '==', STATE.uid)
     .where('active', '==', true)
     .onSnapshot(snap => {
-      // Capture delivered orders as they leave the active query
+      // Capture finished orders as they leave the active query
       snap.docChanges().forEach(change => {
         if (change.type === 'removed') {
           const finished = { id: change.doc.id, ...change.doc.data() };
-          // Use deliveredAt as the reliable indicator — status may be stale in Firestore cache
-          if (finished.deliveredAt) {
+          // Добавляем в историю:
+          // 1) Доставленные (deliveredAt) — зелёный
+          // 2) Отменённые во время доставки (cancelledDuringDelivery) — жёлтый, сумма засчитывается
+          // 3) Отменённые пока курьер назначен (cancelledWhileAssigned) — красный, не в заработок
+          const wasDelivered            = !!finished.deliveredAt;
+          const wasCancelledWithCourier = finished.status === 'cancelled'
+            && (finished.cancelledDuringDelivery || finished.cancelledWhileAssigned);
+          if (wasDelivered || wasCancelledWithCourier) {
             const existingIds = new Set(_myHistory.map(o => o.id));
             if (!existingIds.has(finished.id)) {
               _myHistory = [finished, ..._myHistory]
-                .sort((a, b) => (b.deliveredAt || b.createdAt || '').localeCompare(a.deliveredAt || a.createdAt || ''));
+                .sort((a, b) => (b.cancelledAt || b.deliveredAt || b.createdAt || '').localeCompare(a.cancelledAt || a.deliveredAt || a.createdAt || ''));
               _saveHistoryToStorage(_myHistory);
             }
           }
@@ -824,29 +833,41 @@ function renderMyOrders() {
     const today     = _ld(new Date());
     const yesterday = _ld(new Date(Date.now() - 86400000));
     const recentHistory = _myHistory.filter(o => {
-      const ts = o.deliveredAt || o.createdAt;
+      const ts = o.cancelledAt || o.deliveredAt || o.createdAt;
       if (!ts) return false;
       const d = _ld(new Date(ts));
       return d === today || d === yesterday;
     });
     if (recentHistory.length) {
-      const dayEarnings = recentHistory.reduce((s,o)=>s+(o.deliveryPrice||0),0);
+      // В заработок идут: доставленные + отменённые во время доставки (жёлтые)
+      // Не идут: отменённые пока курьер был назначен (красные)
+      const dayEarnings = recentHistory
+        .filter(o => !o.cancelledAt || o.cancelledDuringDelivery)
+        .reduce((s,o) => s+(o.deliveryPrice||0), 0);
       html += `<div class="section-title" style="padding:4px 4px 4px;margin-top:8px">
         История (${recentHistory.length}) · <span class="text-primary font-bold">${fmtPrice(dayEarnings)}</span>
       </div>`;
-      html += recentHistory.map(o => `
+      html += recentHistory.map(o => {
+        // Цвет суммы: зелёный — доставка; жёлтый — отменён во время доставки; красный — отменён до передачи
+        const priceColor = o.cancelledDuringDelivery ? '#d4920a'
+          : o.cancelledAt ? 'var(--danger)'
+          : 'var(--success)';
+        const cancelBadge = o.cancelledAt
+          ? ` · <span style="color:var(--danger);font-size:10px;font-weight:700">отменён</span>` : '';
+        return `
         <div class="delivery-card" style="opacity:.85">
           <div class="delivery-card-hdr">
             <div>
               <div class="font-bold" style="font-size:13px">${escHtml(o.venueName||'Заведение')}</div>
-              <div class="text-xs text-dim">${fmtDate(o.deliveredAt||o.createdAt)} · #${(o.id||'').slice(-6)}</div>
+              <div class="text-xs text-dim">${fmtDate(o.cancelledAt||o.deliveredAt||o.createdAt)} · #${(o.id||'').slice(-6)}${cancelBadge}</div>
             </div>
-            <div class="text-success font-bold">${fmtPrice(o.deliveryPrice||0)}</div>
+            <div style="color:${priceColor};font-weight:700">${fmtPrice(o.deliveryPrice||0)}</div>
           </div>
           <div class="delivery-card-body text-sm text-dim">
             ${o.address?`📍 ${escHtml(o.address.street)} ${escHtml(o.address.house)}`:'🏪 Самовывоз'}
           </div>
-        </div>`).join('');
+        </div>`;
+      }).join('');
     }
   }
 

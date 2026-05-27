@@ -825,7 +825,21 @@ async function adminMarkPaid(orderId) {
 
 async function adminCancelOrder(orderId) {
   const doCancel=async()=>{
-    const patch={status:'cancelled',active:false,cancelledAt:new Date().toISOString(),cancelledBy:'admin',cancelledBotNotified:true,clientNotification:{type:'cancelled',seen:false,message:'Ваш заказ отменён администратором.'}};
+    const order = _allOrders.find(o=>o.id===orderId) || _histOrders.find(o=>o.id===orderId);
+    // Флаги для истории курьера:
+    // delivering        → курьер вёз заказ, доставка засчитывается (жёлтая сумма)
+    // courier_assigned  → курьер принял, но не забрал (красная сумма, в заработок не идёт)
+    // иначе             → курьер не участвовал, в его историю не попадает
+    const wasDuringDelivery = order?.status === 'delivering';
+    const wasAssigned       = order?.status === 'courier_assigned';
+    const patch={
+      status:'cancelled', active:false,
+      cancelledAt:new Date().toISOString(),
+      cancelledBy:'admin', cancelledBotNotified:true,
+      clientNotification:{type:'cancelled',seen:false,message:'Ваш заказ отменён администратором.'},
+      ...(wasDuringDelivery ? { cancelledDuringDelivery: true }  : {}),
+      ...(wasAssigned       ? { cancelledWhileAssigned:  true }  : {})
+    };
     const ok = await dbSet('orders',orderId,patch);
     if (!ok) { showToast('Ошибка: нет прав или нет сети.','error'); return; }
     _patchAllOrders(orderId,patch);
