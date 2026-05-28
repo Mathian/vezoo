@@ -628,6 +628,9 @@ async function saAddCourierToVenue(venueId) {
 
 async function saRemoveCourierFromVenue(uid, venueId) {
   await dbDelete('courier_venue_links', uid);
+  // Очищаем привязку в документе курьера — иначе у него в приложении
+  // остаётся "своё заведение" и продолжают приходить его заявки
+  await dbSet('drivers', uid, { primaryVenueId: null, primaryVenueName: null });
   showToast('Курьер удалён', 'info');
   await _loadSaVenueCouriers(venueId);
 }

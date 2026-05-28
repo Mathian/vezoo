@@ -268,8 +268,9 @@ async function initMain() {
   }
 
   // Primary venue label
-  if (COURIER_DATA?.primaryVenueName) {
-    document.getElementById('primary-venue-label').textContent = COURIER_DATA.primaryVenueName;
+  const _venLabelEl = document.getElementById('primary-venue-label');
+  if (_venLabelEl) {
+    _venLabelEl.textContent = COURIER_DATA?.primaryVenueName || 'Не привязан к заведению';
   }
 
   // Дыра №8: warm up venue cache
