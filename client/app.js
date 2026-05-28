@@ -11,7 +11,11 @@ let VENUE_MENU    = [];
 let CART          = {};
 let ACTIVE_ORDERS = [];
 let _ordersUnsub  = null;
-let _shownNotifs  = new Set();
+let _shownNotifs      = new Set();
+// Tracks which notification overlay is currently open for each orderId.
+// When a newer notification arrives for the same order, the old one is
+// closed automatically so only one notification per order is ever visible.
+const _openNotifByOrder = {};
 let _cdIntervals  = {};
 let _paymentMethod   = 'cash';
 let _deliveryType    = 'delivery';
@@ -431,6 +435,11 @@ async function loadVenueMenu(venueId) {
   }
 
   VENUE_MENU = allItems.filter(i => i.available !== false);
+
+  // Auto-clean cart: remove positions that were deleted or hidden since last visit
+  const _pruned = _pruneCartForVenue(venueId);
+  if (_pruned > 0) showToast(`${_pruned} позиц. удалено из корзины (недоступны)`, 'warning', 4000);
+
   const menuCats = ['Все', ...new Set(VENUE_MENU.map(i => i.category).filter(Boolean))];
   document.getElementById('venue-cat-tabs').innerHTML = menuCats.map((c, i) =>
     `<button class="cat-tab${i === 0 ? ' active' : ''}" onclick="filterVenueMenu(this,'${c}')">${c}</button>`
@@ -484,6 +493,29 @@ function renderVenueMenuGrid(cat) {
 }
 
 // ── Cart management ──
+
+// Removes cart items for venueId that are no longer in VENUE_MENU
+// (deleted or hidden by admin). Returns the count of removed items.
+function _pruneCartForVenue(venueId) {
+  const cart = CART[venueId];
+  if (!cart?.length) return 0;
+  const validIds = new Set(VENUE_MENU.map(i => i.id));
+  const before = cart.length;
+  CART[venueId] = cart.filter(c => validIds.has(c.id));
+  if (!CART[venueId].length) delete CART[venueId];
+  const removed = before - (CART[venueId]?.length ?? 0);
+  if (removed > 0) { _saveCart(); updateCartNavBadge(); }
+  return removed;
+}
+
+// Clears the entire cart for a given venue (user-initiated)
+function clearVenueCart(venueId) {
+  delete CART[venueId];
+  _saveCart(); updateCartNavBadge();
+  renderCartOverview(); tgHaptic('light');
+  showToast('Корзина очищена', 'info');
+}
+
 function changeQty(itemId, delta, variantName = null) {
   tgHaptic('light');
   const menuItem = VENUE_MENU.find(i => i.id === itemId);
@@ -690,6 +722,7 @@ function renderCartOverview() {
           <span class="font-bold text-primary">${fmtPrice(totPrc, _selectedCurrency)}</span>
         </div>
         <div class="btn-row">
+          <button class="btn btn-ghost btn-sm" style="color:var(--danger)" onclick="clearVenueCart('${venueId}')">🗑️ Удалить</button>
           <button class="btn btn-secondary btn-sm" onclick="openVenueFromCart('${venueId}')">➕ Добавить</button>
           <button class="btn btn-primary btn-sm" onclick="openCartFromOverview('${venueId}')">Оформить →</button>
         </div>
@@ -715,6 +748,9 @@ async function openCartFromOverview(venueId) {
       const bundle = await dbGet('menu_bundles', venueId);
       VENUE_MENU = (bundle?.items || []).filter(i => i.available !== false);
     }
+    // Prune cart in case items were hidden/deleted since the menu was cached
+    const _pruned = _pruneCartForVenue(venueId);
+    if (_pruned > 0) showToast(`${_pruned} позиц. удалено из корзины (недоступны)`, 'warning', 4000);
   }
   _cartOpenedFrom = 'overview';
   renderCartScreen();
@@ -1056,10 +1092,18 @@ function watchActiveOrders() {
         _showClientNotification(o);
       }
     });
-    // Also show notifications for orders that just finished (removed from active query)
+    // Also show notifications for orders that just finished (removed from active query).
+    // Apply the same priority check as the active loop — defensive guard against
+    // stale clientNotification that wasn't updated before active became false.
     justFinished.forEach(o => {
       const n = o.clientNotification;
       if (!n || n.seen) return;
+      const notifLvl  = _notifLevel[n.type]    || 0;
+      const statusLvl = _statusLevel[o.status] || 0;
+      if (notifLvl < statusLvl) {
+        dbSet('orders', o.id, { clientNotification: { ...n, seen: true } });
+        return;
+      }
       const key = `${o.id}:${n.type}`;
       if (!_shownNotifs.has(key)) {
         _shownNotifs.add(key);
@@ -1133,6 +1177,15 @@ function _showClientNotification(order) {
   const notifMap = { accepted: 'notif-accepted', ready: 'notif-accepted', cancelled: 'notif-cancelled', delivering: 'notif-delivering', delivered: 'notif-delivered', issued: 'notif-delivered' };
   const notifId  = notifMap[type];
   if (!notifId) return;
+
+  // Close the previous notification for THIS order if it's a different overlay.
+  // This prevents stacking when the admin rapidly moves through statuses while
+  // the client has the app open in the background.
+  const prevId = _openNotifByOrder[order.id];
+  if (prevId && prevId !== notifId) {
+    document.getElementById(prevId)?.classList.remove('open');
+  }
+  _openNotifByOrder[order.id] = notifId;
   if (type === 'accepted') {
     const mins = order.deliveryMinutes || 60;
     const h = Math.floor(mins / 60), m = mins % 60;
@@ -1162,6 +1215,10 @@ function _showClientNotification(order) {
 
 function closeNotif(id) {
   document.getElementById(id)?.classList.remove('open');
+  // Remove order tracking for this overlay so stale entries don't accumulate
+  for (const orderId of Object.keys(_openNotifByOrder)) {
+    if (_openNotifByOrder[orderId] === id) delete _openNotifByOrder[orderId];
+  }
   tgHaptic('light');
 }
 
