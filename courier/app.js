@@ -45,6 +45,18 @@ let _myHistory        = [];
 function _histKey() { return 'vez_courier_hist_' + (STATE.uid || 'anon'); }
 function _loadHistoryFromStorage() { try { return JSON.parse(localStorage.getItem(_histKey())||'[]'); } catch { return []; } }
 function _saveHistoryToStorage(h)  { try { localStorage.setItem(_histKey(), JSON.stringify(h)); } catch {} }
+// Pending-set: IDs of orders accepted by this courier that haven't been confirmed
+// as finished yet. Used by _ensureDeliveryHistory at next boot to read only those
+// specific docs instead of a full 50-doc query.
+function _pendingHistKey() { return 'vez_courier_pending_' + (STATE.uid || 'anon'); }
+function _loadPendingIds() {
+  try { return new Set(JSON.parse(localStorage.getItem(_pendingHistKey()) || '[]')); }
+  catch { return new Set(); }
+}
+function _savePendingIds(set) {
+  try { localStorage.setItem(_pendingHistKey(), JSON.stringify([...set])); }
+  catch {}
+}
 let _shownImportant   = new Set();
 let _openMyOrderId    = null;
 
@@ -226,34 +238,58 @@ async function checkCourierStatus() {
 // Runs every boot (not just when empty) so deliveries completed while the app
 // was closed are added to history without waiting for a docChanges() event.
 async function _ensureDeliveryHistory() {
+  // Optimized: read only the IDs that were active at the previous session
+  // (stored in _pendingHistKey). Typical cost: 0–3 reads instead of up to 50.
+  const pending = _loadPendingIds();
+  if (!pending.size) return; // nothing to check — 0 Firestore reads
+
   try {
-    // No orderBy — the existing composite index covers (courierUid + active).
-    // Adding orderBy('createdAt') would require a 3-field index that doesn't exist.
-    // Sort in JS after fetching.
-    const recent = await dbQueryWhere('orders',
-      [['courierUid', '==', STATE.uid], ['active', '==', false]],
-      null, 'desc', 50
-    );
-    const delivered = recent.filter(o =>
-      o.status === 'delivered' ||
-      (o.status === 'cancelled' && (o.cancelledDuringDelivery || o.cancelledWhileAssigned))
-    );
-    if (!delivered.length) return;
+    const ids  = [...pending];
+    const docs = await Promise.all(ids.map(id => dbGet('orders', id)));
+
     const existing = _loadHistoryFromStorage();
     const byId = {};
     for (const o of existing) byId[o.id] = o;
-    let changed = false;
-    for (const fresh of delivered) {
-      // Add new entries OR update stale (e.g. cached as 'delivering')
-      if (!byId[fresh.id] || byId[fresh.id].status !== fresh.status) {
-        byId[fresh.id] = fresh;
-        changed = true;
+
+    let histChanged = false;
+    let pendChanged = false;
+    const newPending = new Set(pending);
+
+    for (let i = 0; i < ids.length; i++) {
+      const id  = ids[i];
+      const doc = docs[i];
+
+      if (!doc || doc.courierUid !== STATE.uid) {
+        // Deleted or returned/reassigned — drop from pending, skip history
+        newPending.delete(id);
+        pendChanged = true;
+        continue;
       }
+
+      if (doc.active === false) {
+        // Order finished — decide whether it belongs in history
+        const addToHist = doc.status === 'delivered'
+          || (doc.status === 'cancelled'
+              && (doc.cancelledDuringDelivery || doc.cancelledWhileAssigned));
+
+        if (addToHist && (!byId[id] || byId[id].status !== doc.status)) {
+          byId[id] = { id, ...doc };
+          histChanged = true;
+        }
+        // Always remove from pending when inactive
+        newPending.delete(id);
+        pendChanged = true;
+      }
+      // else: still active — leave in pending
     }
-    if (changed) {
+
+    if (histChanged) {
       const merged = Object.values(byId)
         .sort((a, b) => (b.cancelledAt || b.deliveredAt || b.createdAt || '').localeCompare(a.cancelledAt || a.deliveredAt || a.createdAt || ''));
       _saveHistoryToStorage(merged);
+    }
+    if (pendChanged) {
+      _savePendingIds(newPending);
     }
   } catch (e) { console.warn('[boot] ensureDeliveryHistory:', e.message); }
 }
@@ -730,6 +766,15 @@ function watchMyOrders() {
       .filter(o => o.status === 'courier_assigned' || o.status === 'delivering')
       .sort((a, b) => (a.createdAt || '').localeCompare(b.createdAt || ''));
 
+    // Register active order IDs in pending set so _ensureDeliveryHistory can
+    // find them at next boot without a full query.
+    if (active.length) {
+      const _pids = _loadPendingIds();
+      let _pchg = false;
+      for (const o of active) { if (!_pids.has(o.id)) { _pids.add(o.id); _pchg = true; } }
+      if (_pchg) _savePendingIds(_pids);
+    }
+
     const cnt = _myOrders.length;
     document.getElementById('my-badge').textContent = cnt;
     document.getElementById('my-badge').classList.toggle('hidden', cnt === 0);
@@ -782,6 +827,10 @@ function watchMyOrders() {
               _saveHistoryToStorage(_myHistory);
             }
           }
+          // Order left the active query — remove from pending immediately so the
+          // next boot doesn't need to re-fetch an already-settled order.
+          const _pids = _loadPendingIds();
+          if (_pids.has(finished.id)) { _pids.delete(finished.id); _savePendingIds(_pids); }
         }
       });
       _applyMyOrders(snap.docs.map(d => ({ id: d.id, ...d.data() })));

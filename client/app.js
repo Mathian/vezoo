@@ -226,39 +226,42 @@ async function submitAgree() {
   initMain();
 }
 
-// ── Boot history sync — always runs to fix stale statuses and recover cleared localStorage ──
-// Key scenario: app was closed while order was being delivered → localStorage has stale
-// status ('delivering'). On next open, Firestore has 'delivered'/'cancelled' but docChanges()
-// never fired. This sync corrects the mismatch so the client sees the right status.
+// ── Boot history sync — reads ONLY orders that were in-flight when app closed ──
+// Key scenario: app was closed while order was 'delivering' → localStorage has stale status.
+// On next open, Firestore has 'delivered'/'cancelled' but docChanges() never fired.
+//
+// Optimisation: final-state orders (delivered/cancelled/issued) never change — no need to
+// re-read them every session. We read only the IDs that were still active (non-final) in
+// localStorage. Typically 0–2 docs instead of a full 50-doc query.
 async function _ensureOrderHistory() {
+  const FINAL = ['delivered', 'cancelled', 'issued'];
+  const stored = _loadOrdersFromStorage();
+
+  // Only orders that could have changed while the app was closed
+  const needsSync = stored.filter(o => !FINAL.includes(o.status));
+  if (!needsSync.length) return; // Everything already final — nothing to read
+
   try {
-    // No orderBy — a single equality filter needs no composite index.
-    // Adding orderBy('createdAt') would require a composite index (clientUid+createdAt)
-    // that does not yet exist; if the query throws, history never updates.
-    // We sort in JS instead.
-    const recent = await dbQueryWhere('orders',
-      [['clientUid', '==', STATE.uid]],
-      null, 'desc', 50
+    const freshDocs = await Promise.all(
+      needsSync.map(o => dbGet('orders', o.id))
     );
-    if (!recent.length) {
-      // Если онлайн и Firestore вернул 0 заказов — очищаем устаревший кэш истории
-      if (_fbR) _saveOrdersToStorage([]);
-      return;
-    }
-    const existing = _loadOrdersFromStorage();
+
     const byId = {};
-    for (const o of existing) byId[o.id] = o;
+    for (const o of stored) byId[o.id] = o;
+
     let changed = false;
-    for (const fresh of recent) {
-      // Add missing orders OR update any whose cached status differs from Firestore
-      if (!byId[fresh.id] || byId[fresh.id].status !== fresh.status) {
-        byId[fresh.id] = fresh;
+    for (let i = 0; i < needsSync.length; i++) {
+      const fresh   = freshDocs[i];
+      const orderId = needsSync[i].id;
+      if (!fresh) continue; // order no longer exists — keep local copy as-is
+      if ((byId[orderId]?.status ?? '') !== fresh.status) {
+        byId[orderId] = { id: orderId, ...fresh };
         changed = true;
       }
     }
+
     if (changed) {
-      const all = Object.values(byId).sort((a, b) => (b.createdAt || '').localeCompare(a.createdAt || ''));
-      _saveOrdersToStorage(all);
+      _saveOrdersToStorage(Object.values(byId));
     }
   } catch (e) { console.warn('[boot] ensureOrderHistory:', e.message); }
 }
