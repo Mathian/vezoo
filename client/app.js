@@ -790,11 +790,31 @@ function renderCartScreen() {
     </div>`).join('');
   wrap.innerHTML = `<div class="card card-body" style="display:flex;flex-direction:column">${itemsHtml}</div>`;
 
-  const itemsTotal    = venueCartTotal(venueId);
-  const deliveryPrice = CURRENT_VENUE?.deliveryPrice || 0;
+  const itemsTotal     = venueCartTotal(venueId);
+  const rawDelivery    = CURRENT_VENUE?.deliveryPrice || 0;
+  const isPickupNow    = _deliveryType === 'pickup';
+
+  // Free delivery logic (delivery orders only; pickup is always free)
+  const freeDelEnabled = !isPickupNow && (CURRENT_VENUE?.freeDeliveryEnabled || false);
+  const freeDelFrom    = freeDelEnabled ? (CURRENT_VENUE?.freeDeliveryFrom || 0) : 0;
+  const isFree         = freeDelEnabled && freeDelFrom > 0 && itemsTotal >= freeDelFrom;
+  const clientDelivery = isPickupNow ? 0 : (isFree ? 0 : rawDelivery);
+
   document.getElementById('cart-items-sum').textContent      = fmtPrice(itemsTotal, _selectedCurrency);
-  document.getElementById('cart-delivery-price').textContent = _deliveryType === 'pickup' ? 'Бесплатно' : fmtPrice(deliveryPrice, _selectedCurrency);
-  document.getElementById('cart-total-final').textContent    = fmtPrice(itemsTotal + (_deliveryType === 'pickup' ? 0 : deliveryPrice), _selectedCurrency);
+  document.getElementById('cart-delivery-price').textContent = (isPickupNow || isFree) ? '🎁 Бесплатно' : fmtPrice(rawDelivery, _selectedCurrency);
+  document.getElementById('cart-total-final').textContent    = fmtPrice(itemsTotal + clientDelivery, _selectedCurrency);
+
+  // Free delivery progress hint
+  const hintEl = document.getElementById('cart-free-del-hint');
+  if (hintEl) {
+    if (!isPickupNow && freeDelEnabled && freeDelFrom > 0 && !isFree) {
+      const diff = freeDelFrom - itemsTotal;
+      hintEl.textContent = `Ещё ${fmtPrice(diff, _selectedCurrency)} — и доставка бесплатна 🎁`;
+      hintEl.style.display = '';
+    } else {
+      hintEl.style.display = 'none';
+    }
+  }
 
   const saved = STATE.user?.savedAddress;
   if (saved) {
@@ -902,7 +922,11 @@ async function submitOrder() {
   const freshTotal = recalcItems.reduce((s, c) => s + c.price * c.qty, 0);
 
   const orderId = genOrderId();
-  const deliveryPrice = isPickup ? 0 : (CURRENT_VENUE.deliveryPrice || 0);
+  const rawDeliveryPrice    = CURRENT_VENUE.deliveryPrice || 0;
+  const _freeDelEnabled     = !isPickup && (CURRENT_VENUE.freeDeliveryEnabled || false);
+  const _freeDelFrom        = _freeDelEnabled ? (CURRENT_VENUE.freeDeliveryFrom || 0) : 0;
+  const _freeDeliveryApplied = _freeDelEnabled && _freeDelFrom > 0 && freshTotal >= _freeDelFrom;
+  const deliveryPrice       = isPickup ? 0 : (_freeDeliveryApplied ? 0 : rawDeliveryPrice);
   const _orderDate = new Date().toISOString().slice(0, 10);
   const order = {
     id: orderId, venueId, venueName: CURRENT_VENUE.name,
@@ -911,6 +935,9 @@ async function submitOrder() {
     currency: _selectedCurrency,
     items: recalcItems.map(c => ({ id: c.id, name: c.name, price: c.price, qty: c.qty, emoji: c.emoji, variantName: c.variantName || null })),
     total: freshTotal, deliveryPrice,
+    // courierDeliveryPrice: only stored when free delivery hides the real price from client.
+    // Courier always earns the full rawDeliveryPrice regardless of client-side discount.
+    ...(_freeDeliveryApplied ? { courierDeliveryPrice: rawDeliveryPrice } : {}),
     address: isPickup ? null : { street, house, apt, hasIntercom: _intercomChecked },
     payment: _paymentMethod, deliveryType: _deliveryType, comment,
     ...(kaspiPhone ? { kaspiPhone } : {}),

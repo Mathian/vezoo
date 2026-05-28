@@ -760,7 +760,11 @@ async function openOrderDetail(orderId) {
          <div class="card card-body" style="margin-bottom:12px;gap:5px;display:flex;flex-direction:column">
            ${(order.items||[]).map(it=>`<div class="flex justify-between"><span>${it.emoji||'🍽️'} ${escHtml(it.name)}${it.variantName?' ('+escHtml(it.variantName)+')':''} ×${it.qty}</span><span class="font-bold">${fmtPrice(it.price*it.qty)}</span></div>`).join('')}
            <div class="divider"></div>
-           ${order.deliveryPrice?`<div class="flex justify-between"><span class="text-dim">Доставка</span><span>${fmtPrice(order.deliveryPrice)}</span></div>`:''}
+           ${order.courierDeliveryPrice
+             ? `<div class="flex justify-between"><span class="text-dim">Доставка</span><span style="color:var(--success)">🎁 Бесплатно</span></div>
+                <div class="flex justify-between"><span class="text-dim">Вознаграждение курьеру</span><span>${fmtPrice(order.courierDeliveryPrice)}</span></div>`
+             : (order.deliveryPrice ? `<div class="flex justify-between"><span class="text-dim">Доставка</span><span>${fmtPrice(order.deliveryPrice)}</span></div>` : '')
+           }
            <div class="flex justify-between"><span class="font-bold">Итого</span><span class="font-bold text-primary">${fmtPrice(order.total+(order.deliveryPrice||0))}</span></div>
          </div>`}
     ${renderOrderTimeline(order)}

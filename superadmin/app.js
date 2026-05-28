@@ -355,7 +355,18 @@ function _renderSaVenueSheetHtml(venue) {
         <div class="field"><label>Время доставки (мин)</label><input class="inp" id="sa-ven-deltime" type="number" value="${venue?.deliveryTime||30}" min="5"></div>
         <div class="field"><label>Стоимость доставки</label><input class="inp" id="sa-ven-delprice" type="number" value="${venue?.deliveryPrice||0}" min="0"></div>
       </div>
-      <div class="section-title" style="margin-top:4px">Способы оплаты</div>
+      <div class="toggle-row" style="margin-top:8px">
+        <div>
+          <div style="font-weight:600;font-size:14px">Бесплатная доставка</div>
+          <div style="font-size:12px;color:var(--text-dim);margin-top:2px">Клиент не платит за доставку при заказе от N ₸. Курьер получает оплату в любом случае.</div>
+        </div>
+        <label class="toggle"><input type="checkbox" id="sa-ven-freedel-enabled" ${venue?.freeDeliveryEnabled?'checked':''} onchange="toggleSaFreeDelInput()"><span class="toggle-sl"></span></label>
+      </div>
+      <div id="sa-ven-freedel-wrap" style="${venue?.freeDeliveryEnabled?'':'display:none'}margin-top:6px">
+        <div class="field" style="margin:0"><label>Бесплатная доставка от (₸)</label><input class="inp" id="sa-ven-freedel-from" type="number" min="0" placeholder="8000" value="${venue?.freeDeliveryFrom||''}"></div>
+      </div>
+
+      <div class="section-title" style="margin-top:8px">Способы оплаты</div>
       <div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:6px">
         <button class="pay-tag${_saVenPayMethods.cash?' active-cash':''}" id="sa-ven-pay-cash" onclick="toggleSaVenPayTag('cash')">💵 Наличные</button>
         <button class="pay-tag${_saVenPayMethods.kaspi_qr?' active-kaspi':''}" id="sa-ven-pay-kaspi_qr" onclick="toggleSaVenPayTag('kaspi_qr')">📱 Kaspi QR</button>
@@ -488,6 +499,12 @@ function toggleSaVenPayTag(method) {
   btn.className = _saVenPayMethods[method] ? 'pay-tag ' + activeClass : 'pay-tag';
 }
 
+function toggleSaFreeDelInput() {
+  const enabled = document.getElementById('sa-ven-freedel-enabled')?.checked;
+  const wrap    = document.getElementById('sa-ven-freedel-wrap');
+  if (wrap) wrap.style.display = enabled ? '' : 'none';
+}
+
 function previewSaVenCover(input) {
   const file = input.files[0]; if (!file) return;
   const reader = new FileReader();
@@ -507,9 +524,11 @@ async function saveSaVenue(venueId) {
   const phone   = document.getElementById('sa-ven-phone').value.trim();
   const open    = document.getElementById('sa-ven-open').value;
   const close   = document.getElementById('sa-ven-close').value;
-  const delTime = parseInt(document.getElementById('sa-ven-deltime').value)||30;
-  const delPrice= parseInt(document.getElementById('sa-ven-delprice').value)||0;
-  const onlineEnabled = document.getElementById('sa-ven-online').checked;
+  const delTime        = parseInt(document.getElementById('sa-ven-deltime').value)||30;
+  const delPrice       = parseInt(document.getElementById('sa-ven-delprice').value)||0;
+  const freeDelEnabled = document.getElementById('sa-ven-freedel-enabled')?.checked || false;
+  const freeDelFrom    = parseInt(document.getElementById('sa-ven-freedel-from')?.value) || 0;
+  const onlineEnabled  = document.getElementById('sa-ven-online').checked;
   const coverUrl = document.getElementById('sa-ven-cover-url').value.trim() || _saVenCoverDataUrl || '';
 
   if (!name)   { showToast('Введите название', 'warning'); return; }
@@ -526,6 +545,8 @@ async function saveSaVenue(venueId) {
     address, phone,
     workOpen: open, workClose: close,
     deliveryTime: delTime, deliveryPrice: delPrice,
+    freeDeliveryEnabled: freeDelEnabled,
+    freeDeliveryFrom: freeDelEnabled ? freeDelFrom : 0,
     paymentMethods: _saVenPayMethods,
     coverUrl, onlineOrdersEnabled: onlineEnabled,
     status: 'approved', blocked: false,

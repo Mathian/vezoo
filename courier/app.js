@@ -45,6 +45,10 @@ let _myHistory        = [];
 function _histKey() { return 'vez_courier_hist_' + (STATE.uid || 'anon'); }
 function _loadHistoryFromStorage() { try { return JSON.parse(localStorage.getItem(_histKey())||'[]'); } catch { return []; } }
 function _saveHistoryToStorage(h)  { try { localStorage.setItem(_histKey(), JSON.stringify(h)); } catch {} }
+// Returns the actual delivery earnings for the courier.
+// Uses courierDeliveryPrice when set (free-delivery scenario where client paid 0
+// but venue still owes the courier the full fee); falls back to deliveryPrice.
+function _courierEarns(o) { return o.courierDeliveryPrice || o.deliveryPrice || 0; }
 // Pending-set: IDs of orders accepted by this courier that haven't been confirmed
 // as finished yet. Used by _ensureDeliveryHistory at next boot to read only those
 // specific docs instead of a full 50-doc query.
@@ -464,7 +468,7 @@ function _importantOrderCard(order) {
           <div class="font-bold" style="font-size:14px">⚡ ${escHtml(order.venueName || 'Заведение')}</div>
           <div class="text-xs text-dim">#${(order.id || '').slice(-6)} · ${fmtDate(order.createdAt)}</div>
         </div>
-        <div class="text-primary font-bold">${fmtPrice(order.deliveryPrice || 0)}</div>
+        <div class="text-primary font-bold">${fmtPrice(_courierEarns(order))}</div>
       </div>
       <div class="delivery-card-body" style="font-size:13px">
         <div>📍 ${escHtml(addrStr)}</div>
@@ -481,7 +485,7 @@ function _poolBundleCard(orders, myVenueId, lockedVenueId) {
   const isOwn  = first.venueId === myVenueId;
   const pool   = isOwn ? 'venue' : 'available';
   const ids    = orders.map(o => o.id).join(',');
-  const totalDelivery = orders.reduce((s,o) => s+(o.deliveryPrice||0), 0);
+  const totalDelivery = orders.reduce((s,o) => s+_courierEarns(o), 0);
   const totalAmt      = orders.reduce((s,o) => s+(o.total||0)+(o.deliveryPrice||0), 0);
 
   // Locked = courier has active orders from a DIFFERENT venue
@@ -557,7 +561,7 @@ async function openAcceptSheet(orderId, pool) {
       <div class="flex justify-between"><span class="text-dim">Адрес кафе</span><span style="text-align:right;max-width:60%">${escHtml(venueAddr)}</span></div>
       <div class="flex justify-between"><span class="text-dim">Доставка</span><span style="text-align:right;max-width:60%">${addr ? `${escHtml(addr.street)} ${escHtml(addr.house)}${addr.apt ? ', кв.' + escHtml(addr.apt) : ''}` : 'Самовывоз'}</span></div>
       <div class="flex justify-between"><span class="text-dim">Оплата</span><span>${paymentLabel(order.payment)}</span></div>
-      <div class="flex justify-between"><span class="text-dim">Вознаграждение</span><span class="font-bold text-primary">${fmtPrice(order.deliveryPrice || 0)}</span></div>
+      <div class="flex justify-between"><span class="text-dim">Вознаграждение</span><span class="font-bold text-primary">${fmtPrice(_courierEarns(order))}</span></div>
     </div>
     <div class="section-title" style="margin-bottom:6px">Состав</div>
     <div class="card card-body" style="margin-bottom:14px;gap:4px;display:flex;flex-direction:column">
@@ -653,7 +657,7 @@ async function openBundleAcceptSheet(orderIdsStr, pool) {
   let venueAddr = '—';
   try { venueAddr = (await _getVenueCached(first.venueId))?.address || '—'; } catch {} // Дыра №8
 
-  const totalDelivery = orders.reduce((s,o)=>s+(o.deliveryPrice||0),0);
+  const totalDelivery = orders.reduce((s,o)=>s+_courierEarns(o),0);
 
   const content = document.getElementById('accept-order-content');
   const orderCards = orders.map((o,i) => {
@@ -893,7 +897,7 @@ function renderMyOrders() {
       // Не идут: отменённые пока курьер был назначен (красные)
       const dayEarnings = recentHistory
         .filter(o => !o.cancelledAt || o.cancelledDuringDelivery)
-        .reduce((s,o) => s+(o.deliveryPrice||0), 0);
+        .reduce((s,o) => s+_courierEarns(o), 0);
       html += `<div class="section-title" style="padding:4px 4px 4px;margin-top:8px">
         История (${recentHistory.length}) · <span class="text-primary font-bold">${fmtPrice(dayEarnings)}</span>
       </div>`;
@@ -914,7 +918,7 @@ function renderMyOrders() {
               <div class="font-bold" style="font-size:13px">${escHtml(o.venueName||'Заведение')}</div>
               <div class="text-xs text-dim">${fmtDate(o.cancelledAt||o.deliveredAt||o.createdAt)} · #${(o.id||'').slice(-6)}${cancelBadge}</div>
             </div>
-            <div style="color:${priceColor};font-weight:700">${fmtPrice(o.deliveryPrice||0)}</div>
+            <div style="color:${priceColor};font-weight:700">${fmtPrice(_courierEarns(o))}</div>
           </div>
           <div class="delivery-card-body text-sm text-dim">
             ${o.address?`📍 ${escHtml(o.address.street)} ${escHtml(o.address.house)}`:'🏪 Самовывоз'}
@@ -956,7 +960,8 @@ async function openMyOrder(orderId) {
       <div class="flex justify-between"><span class="text-dim">Телефон</span><span>${escHtml(order.clientPhone || '—')}</span></div>
       <div class="flex justify-between"><span class="text-dim">Адрес</span><span style="text-align:right;max-width:60%">${addr ? `${escHtml(addr.street)} ${escHtml(addr.house)}${addr.apt ? ', кв.' + escHtml(addr.apt) : ''}${addr.hasIntercom ? ' · домофон: ' + escHtml(addr.intercomCode || 'есть') : ''}` : 'Самовывоз'}</span></div>
       <div class="flex justify-between"><span class="text-dim">Оплата</span><span>${paymentLabel(order.payment)}</span></div>
-      <div class="flex justify-between"><span class="text-dim">Итого</span><span class="font-bold text-primary">${fmtPrice((order.total || 0) + (order.deliveryPrice || 0))}</span></div>
+      <div class="flex justify-between"><span class="text-dim">Итого с клиента</span><span class="font-bold text-primary">${fmtPrice((order.total || 0) + (order.deliveryPrice || 0))}</span></div>
+      ${order.courierDeliveryPrice ? `<div class="flex justify-between"><span class="text-dim">🎁 Вознаграждение за доставку</span><span class="font-bold" style="color:var(--success)">${fmtPrice(order.courierDeliveryPrice)}</span></div>` : ''}
       ${order.comment ? `<div class="flex justify-between"><span class="text-dim">Комментарий</span><span style="text-align:right;max-width:60%">${escHtml(order.comment)}</span></div>` : ''}
     </div>
     <div class="card card-body" style="margin-bottom:12px;gap:5px;display:flex;flex-direction:column">
