@@ -722,8 +722,7 @@ function renderCartOverview() {
           <span class="font-bold text-primary">${fmtPrice(totPrc, _selectedCurrency)}</span>
         </div>
         <div class="btn-row">
-          <button class="btn btn-ghost btn-sm" style="color:var(--danger)" onclick="clearVenueCart('${venueId}')">🗑️ Удалить</button>
-          <button class="btn btn-secondary btn-sm" onclick="openVenueFromCart('${venueId}')">➕ Добавить</button>
+          <button class="btn btn-secondary btn-sm" style="color:var(--danger)" onclick="clearVenueCart('${venueId}')">🗑️ Удалить</button>
           <button class="btn btn-primary btn-sm" onclick="openCartFromOverview('${venueId}')">Оформить →</button>
         </div>
       </div>`;
