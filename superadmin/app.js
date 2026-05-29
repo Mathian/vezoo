@@ -8,7 +8,7 @@ let ALL_CATS = [];
 let _pinBuffer   = '';
 let _saStatsPeriod = 7; // days; 0 = all time; -1 = custom range
 let _saEditVenueId    = null;
-let _saVenPayMethods  = { cash: true, kaspi_qr: false, kaspi_remote: false };
+let _saVenPayMethods  = { cash: true, kaspi_qr: false, kaspi_remote: false, halyk_qr: false, halyk_remote: false };
 let _saVenCoverDataUrl = null;
 let _saVenuesCache    = null;   // H-3: session-level cache; cleared on venue save/block
 let _saClientCount    = null;   // H-3: session-level count; set once per session
@@ -327,6 +327,8 @@ function _renderSaVenueSheetHtml(venue) {
     cash:         venue?.paymentMethods?.cash         !== false,
     kaspi_qr:     venue?.paymentMethods?.kaspi_qr     === true,
     kaspi_remote: venue?.paymentMethods?.kaspi_remote === true,
+    halyk_qr:     venue?.paymentMethods?.halyk_qr     === true,
+    halyk_remote: venue?.paymentMethods?.halyk_remote === true,
   };
   const onlineChecked = venue?.onlineOrdersEnabled !== false ? 'checked' : '';
   const venId = venue?.id || '';
@@ -371,6 +373,8 @@ function _renderSaVenueSheetHtml(venue) {
         <button class="pay-tag${_saVenPayMethods.cash?' active-cash':''}" id="sa-ven-pay-cash" onclick="toggleSaVenPayTag('cash')">💵 Наличные</button>
         <button class="pay-tag${_saVenPayMethods.kaspi_qr?' active-kaspi':''}" id="sa-ven-pay-kaspi_qr" onclick="toggleSaVenPayTag('kaspi_qr')">📱 Kaspi QR</button>
         <button class="pay-tag${_saVenPayMethods.kaspi_remote?' active-kaspi':''}" id="sa-ven-pay-kaspi_remote" onclick="toggleSaVenPayTag('kaspi_remote')">📲 Kaspi Remote</button>
+        <button class="pay-tag${_saVenPayMethods.halyk_qr?' active-halyk':''}" id="sa-ven-pay-halyk_qr" onclick="toggleSaVenPayTag('halyk_qr')">🟠 Halyk QR</button>
+        <button class="pay-tag${_saVenPayMethods.halyk_remote?' active-halyk':''}" id="sa-ven-pay-halyk_remote" onclick="toggleSaVenPayTag('halyk_remote')">📳 Halyk Remote</button>
       </div>
 
       <div class="toggle-row" style="margin-top:8px">
@@ -427,7 +431,7 @@ function _renderSaVenueSheetHtml(venue) {
 
 async function openSaCreateVenue() {
   _saEditVenueId = null; _saVenCoverDataUrl = null;
-  _saVenPayMethods = { cash: true, kaspi_qr: false, kaspi_remote: false };
+  _saVenPayMethods = { cash: true, kaspi_qr: false, kaspi_remote: false, halyk_qr: false, halyk_remote: false };
   await _ensureSaVenueData();
   document.getElementById('sa-venue-detail').innerHTML = _renderSaVenueSheetHtml(null);
   document.getElementById('venue-overlay').classList.add('open');
@@ -441,6 +445,8 @@ async function openSaVenueEdit(venueId) {
     cash:         venue.paymentMethods?.cash         !== false,
     kaspi_qr:     venue.paymentMethods?.kaspi_qr     === true,
     kaspi_remote: venue.paymentMethods?.kaspi_remote === true,
+    halyk_qr:     venue.paymentMethods?.halyk_qr     === true,
+    halyk_remote: venue.paymentMethods?.halyk_remote === true,
   };
   await _ensureSaVenueData();
   document.getElementById('sa-venue-detail').innerHTML = _renderSaVenueSheetHtml(venue);
@@ -495,7 +501,8 @@ function toggleSaVenPayTag(method) {
   _saVenPayMethods[method] = !_saVenPayMethods[method];
   const btn = document.getElementById('sa-ven-pay-' + method);
   if (!btn) return;
-  const activeClass = method === 'cash' ? 'active-cash' : 'active-kaspi';
+  const activeClass = method === 'cash' ? 'active-cash'
+    : (method.startsWith('halyk_') ? 'active-halyk' : 'active-kaspi');
   btn.className = _saVenPayMethods[method] ? 'pay-tag ' + activeClass : 'pay-tag';
 }
 

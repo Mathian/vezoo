@@ -985,6 +985,7 @@ select.inp option { background:var(--card-2);color:var(--text); }
 .pay-tag.active-cash  { border-color:var(--success);background:var(--success-soft);color:var(--success); }
 .pay-tag.active-card  { border-color:var(--info);background:var(--info-soft);color:var(--info); }
 .pay-tag.active-kaspi { border-color:var(--primary);background:var(--primary-soft);color:var(--primary); }
+.pay-tag.active-halyk { border-color:#e65100;background:rgba(230,81,0,.12);color:#e65100; }
 
 /* ═══════════════════════════════════════════
    SUPERADMIN — COUNTRY / CITY MANAGEMENT

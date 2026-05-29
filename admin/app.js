@@ -747,6 +747,7 @@ async function openOrderDetail(orderId) {
       ${callCourierBtn?`<div>${callCourierBtn}</div>`:''}
       <div class="flex justify-between"><span class="text-dim">Оплата</span><span>${paymentLabel(order.payment)}</span></div>
       ${order.payment==='kaspi_remote'&&order.kaspiPhone?`<div class="flex justify-between"><span class="text-dim">Kaspi номер</span><span style="font-family:monospace;color:var(--primary)">${escHtml(order.kaspiPhone)}</span></div>`:''}
+      ${order.payment==='halyk_remote'&&order.halykPhone?`<div class="flex justify-between"><span class="text-dim">Halyk номер</span><span style="font-family:monospace;color:#e65100">${escHtml(order.halykPhone)}</span></div>`:''}
       <div class="flex justify-between"><span class="text-dim">Адрес</span><span style="text-align:right;max-width:60%">${escHtml(addrStr)}</span></div>
       ${order.comment?`<div class="flex justify-between"><span class="text-dim">Комментарий</span><span style="text-align:right;max-width:60%">${escHtml(order.comment)}</span></div>`:''}
     </div>
@@ -774,7 +775,7 @@ async function openOrderDetail(orderId) {
 
 function renderAdminOrderActions(order) {
   const cancelBtn=`<button class="btn btn-danger btn-sm" onclick="adminCancelOrder('${order.id}')">❌ Отменить</button>`;
-  const isKaspiRemote = order.payment === 'kaspi_remote';
+  const isKaspiRemote = order.payment === 'kaspi_remote' || order.payment === 'halyk_remote';
   const isPickup = order.deliveryType === 'pickup';
   if (isPickup) {
     if (order.status==='pending') {
@@ -1030,9 +1031,10 @@ async function openManualOrder() {
 }
 
 function moPaymentChanged() {
-  const pay = document.getElementById('mo-payment').value;
-  const infoEl = document.getElementById('mo-kaspi-info');
-  if (infoEl) infoEl.style.display = pay === 'kaspi_remote' ? '' : 'none';
+  const pay    = document.getElementById('mo-payment').value;
+  const infoEl = document.getElementById('mo-remote-info');
+  const isRemote = pay === 'kaspi_remote' || pay === 'halyk_remote';
+  if (infoEl) infoEl.style.display = isRemote ? '' : 'none';
 }
 
 // Search clients from localStorage cache — no full-collection Firestore read
@@ -1108,8 +1110,8 @@ async function submitManualOrder() {
   const ordId=genOrderId();
   const _manDate=new Date().toISOString().slice(0,10);
   const now=new Date().toISOString();
-  // kaspi_remote: admin confirmed payment → order goes straight to cooking
-  const initStatus = payment === 'kaspi_remote' ? 'cooking' : 'accepted';
+  // kaspi_remote / halyk_remote: admin confirmed remote payment → straight to cooking
+  const initStatus = (payment === 'kaspi_remote' || payment === 'halyk_remote') ? 'cooking' : 'accepted';
   const orderData={
     id:ordId, venueId:VENUE.id, venueName:VENUE.name,
     clientPhone:phone, clientName, clientUid:null,
@@ -1119,7 +1121,7 @@ async function submitManualOrder() {
     status:initStatus, isManual:true,
     active:true, venueDateKey:VENUE.id+'_'+_manDate,
     createdAt:now, acceptedAt:now,
-    ...(payment==='kaspi_remote'?{paidAt:now}:{}),
+    ...((payment==='kaspi_remote'||payment==='halyk_remote')?{paidAt:now}:{}),
     clientNotification:{type:'accepted',seen:false},
     adminBotNotified:true, courierBotNotified:false, cancelledBotNotified:false
   };

@@ -457,6 +457,8 @@ function paymentLabel(p) {
   if (p === 'cash')         return '💵 Наличные';
   if (p === 'kaspi_qr')     return '📱 Kaspi QR';
   if (p === 'kaspi_remote') return '📲 Kaspi Remote';
+  if (p === 'halyk_qr')     return '🟠 Halyk QR';
+  if (p === 'halyk_remote') return '📳 Halyk Remote';
   if (p === 'card')         return '💳 Карта'; // legacy
   return p || '—';
 }

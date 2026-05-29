@@ -770,26 +770,36 @@ function openCart() {
 function _renderPaymentOpts(venue) {
   const row = document.getElementById('payment-opts-row');
   const pm  = venue?.paymentMethods || {};
-  // cash is default-on unless explicitly disabled; kaspi_* are opt-in
-  const hasCash        = pm.cash        !== false;
-  const hasKaspiQr     = pm.kaspi_qr    === true;
-  const hasKaspiRemote = pm.kaspi_remote === true;
-  // legacy card support
-  const hasCard        = pm.card        === true;
-
+  // cash is default-on unless explicitly disabled; others are opt-in
   const opts = [];
-  if (hasCash)        opts.push('cash');
-  if (hasKaspiQr)     opts.push('kaspi_qr');
-  if (hasKaspiRemote) opts.push('kaspi_remote');
-  if (hasCard)        opts.push('card');
-  if (!opts.length)   opts.push('cash'); // fallback
+  if (pm.cash        !== false) opts.push('cash');
+  if (pm.kaspi_qr    === true)  opts.push('kaspi_qr');
+  if (pm.kaspi_remote=== true)  opts.push('kaspi_remote');
+  if (pm.halyk_qr    === true)  opts.push('halyk_qr');
+  if (pm.halyk_remote=== true)  opts.push('halyk_remote');
+  if (pm.card        === true)  opts.push('card'); // legacy
+  if (!opts.length)             opts.push('cash'); // fallback
 
   // If current selection not available → pick first
   if (!opts.includes(_paymentMethod)) _paymentMethod = opts[0];
 
-  const labels = { cash:'💵 Наличные', kaspi_qr:'📱 Kaspi QR', kaspi_remote:'📲 Kaspi Remote', card:'💳 Карта' };
+  const labels = {
+    cash:         '💵 Наличные',
+    kaspi_qr:     '📱 Kaspi QR',
+    kaspi_remote: '📲 Kaspi Remote',
+    halyk_qr:     '🟠 Halyk QR',
+    halyk_remote: '📳 Halyk Remote',
+    card:         '💳 Карта',
+  };
+
+  // Max 3 buttons per row — if more, wrap with equal-width cells
+  const wrap = opts.length > 3;
+  row.style.flexWrap = wrap ? 'wrap' : '';
+  const btnStyle = wrap ? 'flex:1 0 calc(33% - 7px);min-width:calc(33% - 7px)' : '';
   row.innerHTML = opts.map(v =>
-    `<button class="btn ${_paymentMethod === v ? 'btn-primary' : 'btn-secondary'} payment-opt" data-val="${v}" onclick="selectPayment(this)">${labels[v]}</button>`
+    `<button class="btn ${_paymentMethod === v ? 'btn-primary' : 'btn-secondary'} payment-opt"
+      data-val="${v}" onclick="selectPayment(this)"
+      style="${btnStyle}">${labels[v]}</button>`
   ).join('');
 
   _toggleKaspiPhoneField();
@@ -897,12 +907,22 @@ function selectPayment(el) {
 function _toggleKaspiPhoneField() {
   const sec = document.getElementById('kaspi-phone-section');
   if (!sec) return;
-  const show = _paymentMethod === 'kaspi_remote';
-  sec.classList.toggle('hidden', !show);
-  if (show) {
+  const isRemote = _paymentMethod === 'kaspi_remote' || _paymentMethod === 'halyk_remote';
+  sec.classList.toggle('hidden', !isRemote);
+  if (isRemote) {
     // Auto-fill with user phone if available
     const ph = document.getElementById('kaspi-phone-inp');
     if (ph && !ph.value && STATE.user?.phone) ph.value = STATE.user.phone;
+    // Update hint text and label based on chosen remote-pay system
+    const hintEl  = document.getElementById('remote-pay-hint');
+    const labelEl = document.getElementById('remote-pay-label');
+    if (_paymentMethod === 'kaspi_remote') {
+      if (hintEl)  hintEl.textContent  = '📲 Администратор выставит счёт на ваш Kaspi. Убедитесь, что номер верный.';
+      if (labelEl) labelEl.textContent = 'Номер телефона для Kaspi';
+    } else {
+      if (hintEl)  hintEl.textContent  = '📳 Администратор выставит счёт на ваш Halyk. Убедитесь, что номер верный.';
+      if (labelEl) labelEl.textContent = 'Номер телефона для Halyk';
+    }
   }
   // Плашка "Сдача" — только при наличных
   const hint = document.getElementById('cash-change-hint');
@@ -928,11 +948,15 @@ async function submitOrder() {
   const apt      = document.getElementById('addr-apt').value.trim();
   const comment  = document.getElementById('order-comment').value.trim();
   if (!isPickup && (!street || !house)) { showToast('Укажите улицу и дом', 'warning'); return; }
-  // kaspi_remote: phone required
-  const kaspiPhone = _paymentMethod === 'kaspi_remote'
+  // kaspi_remote / halyk_remote: phone required
+  const _isRemotePay   = _paymentMethod === 'kaspi_remote' || _paymentMethod === 'halyk_remote';
+  const _remotePayPhone = _isRemotePay
     ? (document.getElementById('kaspi-phone-inp')?.value.trim() || STATE.user?.phone || '')
     : null;
+  const kaspiPhone = _paymentMethod === 'kaspi_remote' ? _remotePayPhone : null;
+  const halykPhone = _paymentMethod === 'halyk_remote' ? _remotePayPhone : null;
   if (_paymentMethod === 'kaspi_remote' && !kaspiPhone) { showToast('Введите номер телефона для Kaspi', 'warning'); return; }
+  if (_paymentMethod === 'halyk_remote' && !halykPhone) { showToast('Введите номер телефона для Halyk', 'warning'); return; }
 
   const blEntry = await dbGet('venue_blacklist', venueId + '_' + STATE.uid);
   if (blEntry) { showToast('Вы не можете оформить заказ в этом заведении', 'error'); return; }
@@ -976,6 +1000,7 @@ async function submitOrder() {
     address: isPickup ? null : { street, house, apt, hasIntercom: _intercomChecked },
     payment: _paymentMethod, deliveryType: _deliveryType, comment,
     ...(kaspiPhone ? { kaspiPhone } : {}),
+    ...(halykPhone ? { halykPhone } : {}),
     status: 'pending', createdAt: new Date().toISOString(),
     // Дыры №5, №9, №10: index fields
     active: true,                               // false when delivered/cancelled/issued
