@@ -835,6 +835,16 @@ function renderCartScreen() {
     </div>`).join('');
   wrap.innerHTML = `<div class="card card-body" style="display:flex;flex-direction:column">${itemsHtml}</div>`;
 
+  // Pickup availability — default true unless explicitly disabled by superadmin
+  const pickupAllowed = CURRENT_VENUE?.pickupEnabled !== false;
+  if (!pickupAllowed && _deliveryType === 'pickup') _deliveryType = 'delivery';
+  const delivTypeSec = document.getElementById('delivery-type-section');
+  if (delivTypeSec) delivTypeSec.style.display = pickupAllowed ? '' : 'none';
+  if (!pickupAllowed) {
+    document.getElementById('address-section')?.classList.remove('hidden');
+    document.getElementById('pickup-info')?.classList.add('hidden');
+  }
+
   const itemsTotal     = venueCartTotal(venueId);
   const rawDelivery    = CURRENT_VENUE?.deliveryPrice || 0;
   const isPickupNow    = _deliveryType === 'pickup';

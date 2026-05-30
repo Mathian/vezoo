@@ -384,6 +384,13 @@ function _renderSaVenueSheetHtml(venue) {
         </div>
         <label class="toggle"><input type="checkbox" id="sa-ven-online" ${onlineChecked}><span class="toggle-sl"></span></label>
       </div>
+      <div class="toggle-row" style="margin-top:8px">
+        <div>
+          <div style="font-weight:600;font-size:14px">Самовывоз</div>
+          <div style="font-size:12px;color:var(--text-dim);margin-top:2px">Клиент может выбрать самовывоз вместо доставки</div>
+        </div>
+        <label class="toggle"><input type="checkbox" id="sa-ven-pickup" ${venue?.pickupEnabled !== false ? 'checked' : ''}><span class="toggle-sl"></span></label>
+      </div>
 
       <div class="section-title">Обложка</div>
       <div class="field"><label>Ссылка на фото</label><input class="inp" id="sa-ven-cover-url" placeholder="https://..." type="url" value="${venue?.coverUrl||''}"></div>
@@ -536,6 +543,7 @@ async function saveSaVenue(venueId) {
   const freeDelEnabled = document.getElementById('sa-ven-freedel-enabled')?.checked || false;
   const freeDelFrom    = parseInt(document.getElementById('sa-ven-freedel-from')?.value) || 0;
   const onlineEnabled  = document.getElementById('sa-ven-online').checked;
+  const pickupEnabled  = document.getElementById('sa-ven-pickup')?.checked ?? true;
   const coverUrl = document.getElementById('sa-ven-cover-url').value.trim() || _saVenCoverDataUrl || '';
 
   if (!name)   { showToast('Введите название', 'warning'); return; }
@@ -555,7 +563,7 @@ async function saveSaVenue(venueId) {
     freeDeliveryEnabled: freeDelEnabled,
     freeDeliveryFrom: freeDelEnabled ? freeDelFrom : 0,
     paymentMethods: _saVenPayMethods,
-    coverUrl, onlineOrdersEnabled: onlineEnabled,
+    coverUrl, onlineOrdersEnabled: onlineEnabled, pickupEnabled,
     status: 'approved', blocked: false,
     ...(isNew ? { createdAt: new Date().toISOString() } : {})
   };
